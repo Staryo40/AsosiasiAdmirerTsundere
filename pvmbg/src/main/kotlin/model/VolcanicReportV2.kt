@@ -12,4 +12,13 @@ data class VolcanicReportV2(
     val ash_column_height_m : Float,
     val reported_at : String,
     val confidence_level : Float
-)
+) {
+    fun toV1() = VolcanicReportV1(
+        report_id = report_id,
+        volcano_id = volcano_id,
+        alert_level = alert_level,
+        eruption_count_24h = eruption_count_24h,
+        ash_column_height_m = ash_column_height_m,
+        reported_at = reported_at,
+    )
+}
