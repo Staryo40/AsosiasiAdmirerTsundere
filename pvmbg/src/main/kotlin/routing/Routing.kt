@@ -1,14 +1,13 @@
 package com.staryo
 
+import com.staryo.config.AppConfig
 import io.ktor.server.application.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
 
-fun Application.configureRouting() {
+fun Application.configureRouting(config: AppConfig) {
     monitor.subscribe(ApplicationStarted) {
-        val port = environment.config.property("ktor.deployment.port").getString()
-        val host = environment.config.propertyOrNull("ktor.deployment.host")?.getString() ?: "localhost"
-        println("PVMBG is running on http://$host:$port")
+        println("PVMBG is running on ${config.url}")
     }
     routing {
         get("/") {
@@ -20,7 +19,9 @@ fun Application.configureRouting() {
         }
         
         get("/volcanic-reports") {
-            
+            // since is a timestamp
+            val sinceQuery = call.request.queryParameters["since"]
+
         }
         
         route("/admin") {
