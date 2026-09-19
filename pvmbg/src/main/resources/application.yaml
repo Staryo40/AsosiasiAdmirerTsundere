@@ -4,3 +4,7 @@ ktor:
   application:
     modules:
       - com.staryo.MainKt.module
+
+pvmbg:
+  generator:
+    interval-seconds: 10
