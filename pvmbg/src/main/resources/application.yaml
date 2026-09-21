@@ -13,6 +13,9 @@ pvmbg:
   delay:
     min-ms: $PVMBG_RESPONSE_DELAY_MIN_MS:500
     max-ms: $PVMBG_RESPONSE_DELAY_MAX_MS:3000
+  logging:
+    level: $PVMBG_LOG_LEVEL:INFO
+    format: $PVMBG_LOG_FORMAT:json
   auth:
     jwt-secret: $PVMBG_JWT_SECRET
     reader-client-id: $PVMBG_READER_CLIENT_ID

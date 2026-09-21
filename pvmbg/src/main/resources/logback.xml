@@ -1,11 +1,37 @@
 <configuration>
-    <appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
-        <encoder>
-            <pattern>%d{YYYY-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n</pattern>
+    <!-- PVMBG_LOG_FORMAT (json or text) picks which of the two console appenders below receives the logs. -->
+    <appender name="CONSOLE_json" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder class="net.logstash.logback.encoder.LogstashEncoder">
+            <customFields>{"service":"pvmbg"}</customFields>
+            <fieldNames>
+                <version>[ignore]</version>
+                <levelValue>[ignore]</levelValue>
+                <logger>logger</logger>
+                <thread>thread</thread>
+            </fieldNames>
         </encoder>
     </appender>
-    <root level="INFO">
-        <appender-ref ref="STDOUT"/>
+
+    <!-- Line breaks in a message become spaces, so one event always stays on one line. -->
+    <appender name="CONSOLE_text" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level [%X{correlation_id:-no-id}] %logger{36} - %replace(%msg){'[\r\n]', ' '}%n</pattern>
+        </encoder>
+    </appender>
+
+    <!-- Writes on a separate thread so logging never slows a request. discardingThreshold 0 means no event is ever dropped. -->
+    <appender name="ASYNC" class="ch.qos.logback.classic.AsyncAppender">
+        <queueSize>8192</queueSize>
+        <discardingThreshold>0</discardingThreshold>
+        <neverBlock>false</neverBlock>
+        <appender-ref ref="CONSOLE_${PVMBG_LOG_FORMAT:-json}"/>
+    </appender>
+
+    <!-- Flushes queued lines when the JVM stops, so the last lines before a shutdown are not lost. -->
+    <shutdownHook class="ch.qos.logback.core.hook.DefaultShutdownHook"/>
+
+    <root level="${PVMBG_LOG_LEVEL:-INFO}">
+        <appender-ref ref="ASYNC"/>
     </root>
     <logger name="org.eclipse.jetty" level="INFO"/>
     <logger name="io.netty" level="INFO"/>

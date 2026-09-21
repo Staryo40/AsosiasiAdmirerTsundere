@@ -52,6 +52,7 @@ dependencies {
     implementation(libs.ktor.server.status.pages)
     implementation(libs.kotlinx.coroutines.core)
     implementation(libs.logback.classic)
+    implementation(libs.logstash.logback.encoder)
 
     testImplementation(kotlin("test"))
     testImplementation(ktorLibs.server.testHost)

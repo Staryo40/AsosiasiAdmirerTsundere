@@ -16,16 +16,14 @@ class ResponseDelayConfig {
     var random: Random = Random.Default
 }
 
-// Simulates PVMBG's slow infrastructure. Runs before authentication, so even a rejected token is answered slowly.
 val ResponseDelay = createApplicationPlugin("ResponseDelay", ::ResponseDelayConfig) {
     val state = pluginConfig.state
     val random = pluginConfig.random
 
     onCall { call ->
-        // A dead server does not answer slowly, it does not answer at all: the outage guards reply immediately.
+        // A dead server responds immediately
         if (state.outage || isAdminPath(call.request.path())) return@onCall
 
-        // Read the counter before the range: a change after this point releases the wait, one before it is already in the range.
         val seen = state.changes.value
         val delayMs = pickDelayMs(state.responseDelay, random)
         if (delayMs == 0L) return@onCall
