@@ -174,6 +174,50 @@ class ServerTest {
         assertEquals("300", body["expires_in"]!!.jsonPrimitive.content)
     }
 
+    // The limit is 5 per minute in tests (the default). Wrong secrets count just like right ones.
+    @Test
+    fun `sixth login attempt in a minute is 429 with a retry-after header`() = testApplication {
+        configure()
+        repeat(5) { assertEquals(HttpStatusCode.Unauthorized, login("test-reader", "wrong").status) }
+
+        val blocked = login("test-reader", "wrong")
+        assertEquals(HttpStatusCode.TooManyRequests, blocked.status)
+        assertNotNull(blocked.headers[HttpHeaders.RetryAfter]?.toLongOrNull())
+    }
+
+    @Test
+    fun `a blocked client cannot log in even with the right secret`() = testApplication {
+        configure()
+        repeat(5) { login("test-reader", "wrong") }
+
+        assertEquals(HttpStatusCode.TooManyRequests, login("test-reader", "test-reader-secret").status)
+    }
+
+    @Test
+    fun `flooding the reader does not block the admin`() = testApplication {
+        configure()
+        repeat(6) { login("test-reader", "wrong") }
+
+        assertEquals(HttpStatusCode.OK, login("test-admin", "test-admin-secret").status)
+    }
+
+    @Test
+    fun `flooding with invented ids is limited too`() = testApplication {
+        configure()
+        repeat(5) { assertEquals(HttpStatusCode.Unauthorized, login("fake-$it", "wrong").status) }
+
+        assertEquals(HttpStatusCode.TooManyRequests, login("fake-again", "wrong").status)
+    }
+
+    @Test
+    fun `existing tokens keep working while the login is rate limited`() = testApplication {
+        configure()
+        val token = readerToken()
+        repeat(6) { login("test-reader", "wrong") }
+
+        assertEquals(HttpStatusCode.OK, client.get("/volcanic-reports") { bearerAuth(token) }.status)
+    }
+
     @Test
     fun `login with a malformed body is 400`() = testApplication {
         configure()

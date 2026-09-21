@@ -6,10 +6,12 @@ import com.staryo.model.*
 import com.staryo.plugins.authorized
 import com.staryo.plugins.outageGuarded
 import com.staryo.service.AuthService
+import com.staryo.service.LoginRateLimiter
 import com.staryo.service.VolcanicReportService
 import com.staryo.state.AppState
 import io.ktor.http.*
 import io.ktor.server.application.*
+import io.ktor.server.plugins.*
 import io.ktor.server.request.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
@@ -19,6 +21,7 @@ fun Application.configureRouting(
     state: AppState,
     service: VolcanicReportService,
     authService: AuthService,
+    loginRateLimiter: LoginRateLimiter,
 ) {
     monitor.subscribe(ApplicationStarted) {
         println("PVMBG is running on ${config.url}")
@@ -34,6 +37,7 @@ fun Application.configureRouting(
 
         post("/auth/login") {
             val request = call.receive<LoginRequest>()
+            loginRateLimiter.check(request.client_id, call.request.origin.remoteAddress)
             call.respond(authService.login(request.client_id, request.client_secret))
         }
 

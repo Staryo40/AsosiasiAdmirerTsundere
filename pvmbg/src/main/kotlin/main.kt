@@ -9,6 +9,7 @@ import com.staryo.seed.LiveReportGenerator
 import com.staryo.seed.ReportGenerator
 import com.staryo.seed.ReportSeeder
 import com.staryo.service.AuthService
+import com.staryo.service.LoginRateLimiter
 import com.staryo.service.VolcanicReportService
 import com.staryo.state.AppState
 import io.ktor.server.application.*
@@ -46,5 +47,5 @@ fun Application.module() {
     configureSerialization()
     configureStatusPages()
     configureAuthentication(config.auth)
-    configureRouting(config, state, service, AuthService(config.auth, state))
+    configureRouting(config, state, service, AuthService(config.auth, state), LoginRateLimiter(config.auth))
 }

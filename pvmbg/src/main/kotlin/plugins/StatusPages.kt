@@ -2,6 +2,7 @@ package com.staryo.plugins
 
 import com.staryo.service.InvalidRequestException
 import com.staryo.service.ServiceUnavailableException
+import com.staryo.service.TooManyRequestsException
 import com.staryo.service.UnauthorizedException
 import io.ktor.http.*
 import io.ktor.serialization.kotlinx.json.*
@@ -25,6 +26,10 @@ fun Application.configureStatusPages() {
         }
         exception<UnauthorizedException> { call, e ->
             call.respond(HttpStatusCode.Unauthorized, ErrorResponse(e.message ?: "unauthorized"))
+        }
+        exception<TooManyRequestsException> { call, e ->
+            call.response.header(HttpHeaders.RetryAfter, e.retryAfterSeconds.toString())
+            call.respond(HttpStatusCode.TooManyRequests, ErrorResponse(e.message ?: "too many requests"))
         }
         exception<ServiceUnavailableException> { call, e ->
             call.respond(HttpStatusCode.ServiceUnavailable, ErrorResponse(e.message ?: "unavailable"))
