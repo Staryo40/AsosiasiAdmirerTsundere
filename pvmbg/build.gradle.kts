@@ -15,6 +15,28 @@ application {
 kotlin {
     jvmToolchain(21)
 }
+
+// `./gradlew run` reads the git-ignored .env so secrets never live in the repo; real env vars win over it.
+val dotEnv: Map<String, String> = file(".env").takeIf { it.exists() }
+    ?.readLines()
+    ?.map { it.trim() }
+    ?.filter { it.isNotEmpty() && !it.startsWith("#") && "=" in it }
+    ?.associate { it.substringBefore("=").trim() to it.substringAfter("=").trim() }
+    ?: emptyMap()
+
+tasks.named<JavaExec>("run") {
+    dotEnv.forEach { (key, value) -> if (System.getenv(key) == null) environment(key, value) }
+}
+
+// Throwaway values
+tasks.test {
+    environment("PVMBG_JWT_SECRET", "test-only-signing-key-test-only-signing-key")
+    environment("PVMBG_READER_CLIENT_ID", "test-reader")
+    environment("PVMBG_READER_CLIENT_SECRET", "test-reader-secret")
+    environment("PVMBG_ADMIN_CLIENT_ID", "test-admin")
+    environment("PVMBG_ADMIN_CLIENT_SECRET", "test-admin-secret")
+}
+
 dependencies {
     implementation(ktorLibs.server.config.yaml)
     implementation(ktorLibs.server.core)

@@ -8,3 +8,15 @@ ktor:
 pvmbg:
   generator:
     interval-seconds: 10
+  # Values with a $ come from environment variables; see .env.example for what each one is for.
+  # Variables without a default are required: startup fails if they are missing.
+  auth:
+    jwt-secret: $PVMBG_JWT_SECRET
+    reader-client-id: $PVMBG_READER_CLIENT_ID
+    reader-client-secret: $PVMBG_READER_CLIENT_SECRET
+    admin-client-id: $PVMBG_ADMIN_CLIENT_ID
+    admin-client-secret: $PVMBG_ADMIN_CLIENT_SECRET
+    issuer: pvmbg
+    audience: pvmbg-api
+    token-ttl-seconds: $PVMBG_TOKEN_TTL_SECONDS:300
+    login-rate-limit-per-minute: $PVMBG_LOGIN_RATE_LIMIT:5
