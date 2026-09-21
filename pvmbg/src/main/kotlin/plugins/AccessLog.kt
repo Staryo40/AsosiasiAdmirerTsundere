@@ -53,11 +53,14 @@ val AccessLog = createApplicationPlugin("AccessLog") {
             principal.scope()?.let { fields["scope"] = it.claim }
         }
 
-        log.atLevel(accessLevel(path, status))
-            .setMessage("{}")
-            .addArgument("$method $path $status ${durationMs}ms")
-            .addArgument(entries(fields))
-            .log()
+        // A response written by an error handler is sent outside the request's logging context.
+        call.withCorrelationId {
+            log.atLevel(accessLevel(path, status))
+                .setMessage("{}")
+                .addArgument("$method $path $status ${durationMs}ms")
+                .addArgument(entries(fields))
+                .log()
+        }
     }
 }
 

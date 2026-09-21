@@ -1,6 +1,7 @@
 package com.staryo
 
 import com.staryo.config.AppConfig
+import com.staryo.logging.Events
 import com.staryo.plugins.configureAccessLog
 import com.staryo.plugins.configureAuthentication
 import com.staryo.plugins.configureCorrelationId
@@ -45,6 +46,20 @@ fun Application.module() {
     val seeder = ReportSeeder(repository, generator)
     config.initialSeedCount?.let(seeder::run) ?: seeder.runDefault()
     LiveReportGenerator(repository, generator, config.generatorInterval).start(this)
+
+    Events.info(
+        "startup",
+        "host" to config.host,
+        "port" to config.port,
+        "seed_records" to repository.findSince(null).size,
+        "generator_interval_ms" to config.generatorInterval.toMillis(),
+        "delay_min_ms" to config.initialDelay.minMs,
+        "delay_max_ms" to config.initialDelay.maxMs,
+        "token_ttl_seconds" to config.auth.tokenTtl.seconds,
+        "login_rate_limit_per_minute" to config.auth.loginRateLimitPerMinute,
+        "log_level" to config.logging.level,
+        "log_format" to config.logging.format,
+    )
 
     val service = VolcanicReportService(repository, state)
 

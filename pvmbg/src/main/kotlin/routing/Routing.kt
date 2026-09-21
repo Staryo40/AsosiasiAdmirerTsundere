@@ -2,8 +2,10 @@ package com.staryo
 
 import com.staryo.config.AppConfig
 import com.staryo.enums.Scope
+import com.staryo.logging.Events
 import com.staryo.model.*
 import com.staryo.plugins.authorized
+import com.staryo.plugins.clientId
 import com.staryo.plugins.outageGuarded
 import com.staryo.service.AuthService
 import com.staryo.service.LoginRateLimiter
@@ -55,18 +57,21 @@ fun Application.configureRouting(
                 post("/schema-version") {
                     val version = call.receive<SchemaVersionRequest>().version
                     service.setSchemaVersion(version)
+                    Events.info("schema_version_changed", "version" to version, "client_id" to call.clientId())
                     call.respond(HttpStatusCode.NoContent)
                 }
 
                 post("/outage") {
                     val enabled = call.receive<OutageRequest>().enabled
                     service.setOutage(enabled)
+                    Events.info("outage_changed", "enabled" to enabled, "client_id" to call.clientId())
                     call.respond(HttpStatusCode.NoContent)
                 }
 
                 post("/response-delay") {
                     val request = call.receive<DelayRequest>()
                     service.setResponseDelay(request.min_ms, request.max_ms)
+                    Events.info("response_delay_changed", "min_ms" to request.min_ms, "max_ms" to request.max_ms, "client_id" to call.clientId())
                     call.respond(HttpStatusCode.NoContent)
                 }
             }

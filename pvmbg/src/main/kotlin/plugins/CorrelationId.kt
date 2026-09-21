@@ -4,6 +4,7 @@ import io.ktor.server.application.*
 import io.ktor.server.plugins.callid.*
 import kotlinx.coroutines.slf4j.MDCContext
 import kotlinx.coroutines.withContext
+import org.slf4j.MDC
 import java.util.UUID
 
 const val CORRELATION_ID_HEADER = "X-Correlation-ID"
@@ -23,6 +24,20 @@ fun Application.configureCorrelationId() {
 
     // Puts the id in the logging context for the whole request; MDCContext keeps it right across thread switches.
     intercept(ApplicationCallPipeline.Plugins) {
-        withContext(MDCContext(mapOf("correlation_id" to call.callId.orEmpty()))) { proceed() }
+        withContext(MDCContext(mapOf(CORRELATION_ID_MDC_KEY to call.callId.orEmpty()))) { proceed() }
+    }
+}
+
+internal const val CORRELATION_ID_MDC_KEY = "correlation_id"
+
+// The error handlers run outside the context above (Ktor attaches them before the request's own phases), so
+// code there that logs must put the id back for the moment it writes. The previous value is restored afterwards.
+internal inline fun <T> ApplicationCall.withCorrelationId(block: () -> T): T {
+    val previous = MDC.get(CORRELATION_ID_MDC_KEY)
+    MDC.put(CORRELATION_ID_MDC_KEY, callId.orEmpty())
+    try {
+        return block()
+    } finally {
+        if (previous == null) MDC.remove(CORRELATION_ID_MDC_KEY) else MDC.put(CORRELATION_ID_MDC_KEY, previous)
     }
 }

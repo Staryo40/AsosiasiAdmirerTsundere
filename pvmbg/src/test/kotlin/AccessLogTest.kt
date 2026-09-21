@@ -1,10 +1,6 @@
 package com.staryo
 
 import ch.qos.logback.classic.Level
-import ch.qos.logback.classic.Logger
-import ch.qos.logback.classic.LoggerContext
-import ch.qos.logback.classic.spi.ILoggingEvent
-import ch.qos.logback.core.OutputStreamAppender
 import com.staryo.config.AuthConfig
 import com.staryo.config.ClientCredentials
 import com.staryo.enums.Scope
@@ -24,13 +20,6 @@ import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
-import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.jsonPrimitive
-import net.logstash.logback.encoder.LogstashEncoder
-import org.slf4j.LoggerFactory
-import java.io.ByteArrayOutputStream
 import java.time.Duration
 import kotlin.test.*
 
@@ -46,53 +35,6 @@ class AccessLogTest {
     )
     private val state = AppState()
     private val auth = AuthService(authConfig, state)
-
-    // Renders the access logger's events with the same JSON encoder production uses, so the test sees the real fields.
-    private class JsonCapture(level: Level? = null) : AutoCloseable {
-        private val logger = LoggerFactory.getLogger("access") as Logger
-        private val output = ByteArrayOutputStream()
-        private val appender: OutputStreamAppender<ILoggingEvent>
-        private val previousLevel = logger.level
-        private val previousAdditive = logger.isAdditive
-
-        init {
-            val context = LoggerFactory.getILoggerFactory() as LoggerContext
-            val encoder = LogstashEncoder().apply { this.context = context; start() }
-            appender = OutputStreamAppender<ILoggingEvent>().apply {
-                this.context = context
-                this.encoder = encoder
-                outputStream = output
-                start()
-            }
-            logger.addAppender(appender)
-            logger.isAdditive = false
-            if (level != null) logger.level = level
-        }
-
-        fun raw(): String = output.toString(Charsets.UTF_8)
-
-        fun lines(): List<JsonObject> =
-            raw().lines().filter { it.isNotBlank() }.map { Json.parseToJsonElement(it).jsonObject }
-
-        // The line is written just after the response is sent, so the client can be a moment ahead of it.
-        suspend fun awaitLines(count: Int): List<JsonObject> {
-            repeat(100) {
-                if (lines().size >= count) return lines()
-                withContext(Dispatchers.Default) { delay(20) }
-            }
-            return lines()
-        }
-
-        override fun close() {
-            logger.detachAppender(appender)
-            appender.stop()
-            logger.level = previousLevel
-            logger.isAdditive = previousAdditive
-        }
-    }
-
-    private fun JsonObject.text(field: String) = this[field]?.jsonPrimitive?.content
-    private fun JsonObject.number(field: String) = this[field]?.jsonPrimitive?.content?.toLong()
 
     private fun ApplicationTestBuilder.app() {
         application {
@@ -121,7 +63,7 @@ class AccessLogTest {
     fun `one line per request with the fixed fields`() = testApplication {
         app()
         warmUp()
-        JsonCapture().use { capture ->
+        JsonCapture("access").use { capture ->
             val response = client.get("/fast") { header(CORRELATION_ID_HEADER, "trace-1") }
             val line = capture.awaitLines(1).single()
 
@@ -144,7 +86,7 @@ class AccessLogTest {
         app()
         warmUp()
         val reader = auth.login("reader", "reader-secret").access_token
-        JsonCapture(Level.DEBUG).use { capture ->
+        JsonCapture("access", Level.DEBUG).use { capture ->
             client.get("/fast")
             client.get("/no-such-route")
             client.get("/protected")
@@ -170,7 +112,7 @@ class AccessLogTest {
     fun `a healthy health check is only logged at debug`() = testApplication {
         app()
         warmUp()
-        JsonCapture().use { capture ->
+        JsonCapture("access").use { capture ->
             client.get("/health")
             client.get("/fast")
             val lines = capture.awaitLines(1)
@@ -179,7 +121,7 @@ class AccessLogTest {
             assertEquals(listOf("/fast"), capture.lines().map { it.text("path") })
             assertEquals(1, lines.size)
         }
-        JsonCapture(Level.DEBUG).use { capture ->
+        JsonCapture("access", Level.DEBUG).use { capture ->
             client.get("/health")
             val health = capture.awaitLines(2).filter { it.text("event") == "http_request" }.single()
 
@@ -193,7 +135,7 @@ class AccessLogTest {
     fun `at debug a line is written when the request arrives and again when it ends`() = testApplication {
         app()
         warmUp()
-        JsonCapture(Level.DEBUG).use { capture ->
+        JsonCapture("access", Level.DEBUG).use { capture ->
             client.get("/fast") { header(CORRELATION_ID_HEADER, "trace-2") }
             val lines = capture.awaitLines(2)
 
@@ -206,7 +148,7 @@ class AccessLogTest {
     fun `at info only the end of the request is written`() = testApplication {
         app()
         warmUp()
-        JsonCapture().use { capture ->
+        JsonCapture("access").use { capture ->
             client.get("/fast")
             capture.awaitLines(1)
             delayReal(200)
@@ -220,7 +162,7 @@ class AccessLogTest {
         app()
         warmUp()
         state.updateResponseDelay(DelayRange(5000, 5000))
-        JsonCapture(Level.DEBUG).use { capture ->
+        JsonCapture("access", Level.DEBUG).use { capture ->
             coroutineScope {
                 val pending = async { client.get("/fast") }
                 val seenWhileWaiting = capture.awaitLines(1)
@@ -237,7 +179,7 @@ class AccessLogTest {
         app()
         warmUp()
         state.updateResponseDelay(DelayRange(400, 400))
-        JsonCapture().use { capture ->
+        JsonCapture("access").use { capture ->
             client.get("/fast")
             val line = capture.awaitLines(1).single()
 
@@ -251,7 +193,7 @@ class AccessLogTest {
         app()
         warmUp()
         state.updateResponseDelay(DelayRange(5000, 5000))
-        JsonCapture().use { capture ->
+        JsonCapture("access").use { capture ->
             coroutineScope {
                 val pending = async { client.get("/fast") }
                 delayReal(300)
@@ -269,7 +211,7 @@ class AccessLogTest {
         app()
         warmUp()
         state.updateResponseDelay(DelayRange(300, 300))
-        JsonCapture().use { capture ->
+        JsonCapture("access").use { capture ->
             client.get("/protected") { bearerAuth("garbage") }
             val line = capture.awaitLines(1).single()
 
@@ -284,7 +226,7 @@ class AccessLogTest {
         warmUp()
         val reader = auth.login("reader", "reader-secret").access_token
         val admin = auth.login("admin", "admin-secret").access_token
-        JsonCapture().use { capture ->
+        JsonCapture("access").use { capture ->
             client.get("/protected") { bearerAuth(reader) }
             client.get("/admin-only") { bearerAuth(admin) }
             client.get("/protected")
@@ -306,7 +248,7 @@ class AccessLogTest {
         app()
         warmUp()
         val reader = auth.login("reader", "reader-secret").access_token
-        JsonCapture(Level.DEBUG).use { capture ->
+        JsonCapture("access", Level.DEBUG).use { capture ->
             client.get("/protected") { bearerAuth(reader) }
             client.get("/protected?client_secret=reader-secret&token=$reader") { header("Authorization", "Bearer $reader") }
             capture.awaitLines(4)
@@ -324,7 +266,7 @@ class AccessLogTest {
     fun `a hostile or very long path cannot break or forge a line`() = testApplication {
         app()
         warmUp()
-        JsonCapture().use { capture ->
+        JsonCapture("access").use { capture ->
             client.get("/x%0A{\"level\":\"FAKE\"}%22")
             client.get("/" + "a".repeat(5000))
             val lines = capture.awaitLines(2)
@@ -339,7 +281,7 @@ class AccessLogTest {
     fun `parallel requests each get their own line with their own id and path`() = testApplication {
         app()
         warmUp()
-        JsonCapture().use { capture ->
+        JsonCapture("access").use { capture ->
             coroutineScope {
                 (1..30).map { n -> async { client.get("/fast") { header(CORRELATION_ID_HEADER, "req-$n") } } }.awaitAll()
             }
@@ -353,7 +295,7 @@ class AccessLogTest {
     @Test
     fun `the full app logs a 429 as a warning and a normal read as info`() = testApplication {
         configure()
-        JsonCapture().use { capture ->
+        JsonCapture("access").use { capture ->
             repeat(6) {
                 client.post("/auth/login") {
                     contentType(ContentType.Application.Json)
