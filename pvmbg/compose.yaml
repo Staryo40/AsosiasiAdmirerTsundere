@@ -1,0 +1,9 @@
+# Runs PVMBG on its own: `docker compose up -d --build` from this folder. A compose file at the repository
+# root can pull it in with `include:` so the whole system starts with one command.
+services:
+  pvmbg:
+    build: .
+    image: pvmbg
+    env_file: .env
+    ports:
+      - "8082:8082"
