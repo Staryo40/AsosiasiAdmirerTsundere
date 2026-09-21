@@ -1,5 +1,4 @@
-# Runs PVMBG on its own: `docker compose up -d --build` from this folder. A compose file at the repository
-# root can pull it in with `include:` so the whole system starts with one command.
+# Runs PVMBG on its own: `docker compose up -d --build` from this folder. Root compose can pull with `include:`
 services:
   pvmbg:
     build: .

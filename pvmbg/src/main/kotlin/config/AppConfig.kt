@@ -16,8 +16,7 @@ data class AuthConfig(
     val loginRateLimitPerMinute: Int,
 )
 
-// Logback reads these two settings itself, before the app starts. It would silently treat a bad level as DEBUG
-// and lose every line on a bad format, so they are checked again here to fail startup on a typo instead.
+// Logback reads these two settings itself, before the app starts. It would silently treat a bad level as DEBUG and lose every line on a bad format, so they are checked again to fail startup on a typo.
 data class LoggingConfig(val level: String, val format: String) {
     init {
         require(level.uppercase() in LEVELS) { "Invalid log level PVMBG_LOG_LEVEL=$level. Use one of: ${LEVELS.joinToString()}" }

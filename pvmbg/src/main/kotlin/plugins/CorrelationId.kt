@@ -9,8 +9,7 @@ import java.util.UUID
 
 const val CORRELATION_ID_HEADER = "X-Correlation-ID"
 
-// An id from a caller is only trusted if it is short and plain. Anything else is replaced, never logged,
-// so a hostile header cannot flood the logs or smuggle odd characters into them.
+// An id from a caller is only trusted if it is short and plain.
 private val VALID_CORRELATION_ID = Regex("[A-Za-z0-9._-]{1,64}")
 
 fun Application.configureCorrelationId() {
@@ -30,8 +29,6 @@ fun Application.configureCorrelationId() {
 
 internal const val CORRELATION_ID_MDC_KEY = "correlation_id"
 
-// The error handlers run outside the context above (Ktor attaches them before the request's own phases), so
-// code there that logs must put the id back for the moment it writes. The previous value is restored afterwards.
 internal inline fun <T> ApplicationCall.withCorrelationId(block: () -> T): T {
     val previous = MDC.get(CORRELATION_ID_MDC_KEY)
     MDC.put(CORRELATION_ID_MDC_KEY, callId.orEmpty())

@@ -18,11 +18,9 @@ const val PVMBG_JWT = "pvmbg-jwt"
 
 fun JWTPrincipal.scope(): Scope? = Scope.fromClaim(payload.getClaim("scope").asString())
 
-// The id of the client whose token was accepted for this request, or null if there was none.
 fun ApplicationCall.clientId(): String? = principal<JWTPrincipal>()?.payload?.subject
 
-// Only for the log: the token is decoded without being verified, so an attacker could make a forged token look
-// "expired" here. The request is rejected either way; this just says why.
+// Only for the log: the token is decoded without being verified, so an attacker could make a forged token look "expired" here. The request is rejected either way; this just says why.
 internal fun rejectionReason(authorization: String?, now: Instant = Instant.now()): String {
     if (authorization.isNullOrBlank()) return "missing_token"
     val parts = authorization.trim().split(Regex("\\s+"), limit = 2)
@@ -75,7 +73,6 @@ class ScopeGuardConfig {
 val ScopeGuard = createRouteScopedPlugin("ScopeGuard", ::ScopeGuardConfig) {
     val required = pluginConfig.required
     on(AuthenticationChecked) { call ->
-        // No principal means authentication already failed and the challenge answered with 401.
         val principal = call.principal<JWTPrincipal>() ?: return@on
         val granted = principal.scope()
         if (granted == null || !granted.includes(required)) {
@@ -85,7 +82,6 @@ val ScopeGuard = createRouteScopedPlugin("ScopeGuard", ::ScopeGuardConfig) {
     }
 }
 
-// Requires a valid token (401 otherwise) whose scope includes `required` (403 otherwise).
 fun Route.authorized(required: Scope, build: Route.() -> Unit): Route =
     authenticate(PVMBG_JWT) {
         install(ScopeGuard) { this.required = required }

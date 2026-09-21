@@ -14,8 +14,6 @@ import org.slf4j.event.Level
 private val STARTED_AT = AttributeKey<Long>("accessLogStartedAt")
 private const val MAX_LOGGED_PATH = 256
 
-// Writes one line per request when its response has been sent, plus a DEBUG line when the request arrives
-// (so a request stuck in its delay is visible while it waits). Never logs headers, bodies or query strings.
 val AccessLog = createApplicationPlugin("AccessLog") {
     val log = LoggerFactory.getLogger("access")
 
@@ -53,7 +51,6 @@ val AccessLog = createApplicationPlugin("AccessLog") {
             principal.scope()?.let { fields["scope"] = it.claim }
         }
 
-        // A response written by an error handler is sent outside the request's logging context.
         call.withCorrelationId {
             log.atLevel(accessLevel(path, status))
                 .setMessage("{}")
@@ -68,8 +65,6 @@ fun Application.configureAccessLog() {
     install(AccessLog)
 }
 
-// A healthy health check is polled all the time, so it is DEBUG. A 503 is the deliberate simulated outage,
-// which is a warning; only other 5xx responses are real failures.
 internal fun accessLevel(path: String, status: Int): Level = when {
     path == "/health" && status < 400 -> Level.DEBUG
     status == 503 -> Level.WARN

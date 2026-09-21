@@ -25,8 +25,6 @@ class AuthService(
         val attempt = authenticate(clientId, clientSecret)
         val scope = attempt.scope
         if (scope == null) {
-            // The caller only ever sees a generic 401; the log says which part was wrong.
-            // The id is logged as sent (capped in Events), so a mistyped secret in the id field would show up here.
             Events.warn("login_failed", "client_id" to clientId, "reason" to if (attempt.knownId) "wrong_secret" else "unknown_client")
             throw UnauthorizedException("invalid client credentials")
         }
@@ -40,7 +38,6 @@ class AuthService(
 
     private class Attempt(val scope: Scope?, val knownId: Boolean)
 
-    // Every comparison is always made, so timing does not reveal which id exists.
     private fun authenticate(clientId: String, clientSecret: String): Attempt {
         val adminId = constantTimeEquals(clientId, config.admin.id)
         val adminSecret = constantTimeEquals(clientSecret, config.admin.secret)
