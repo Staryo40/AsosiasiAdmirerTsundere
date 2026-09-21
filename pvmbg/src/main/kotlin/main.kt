@@ -2,6 +2,7 @@ package com.staryo
 
 import com.staryo.config.AppConfig
 import com.staryo.plugins.configureAuthentication
+import com.staryo.plugins.configureCorrelationId
 import com.staryo.plugins.configureResponseDelay
 import com.staryo.plugins.configureSerialization
 import com.staryo.plugins.configureStatusPages
@@ -34,6 +35,7 @@ private fun withSeedOverride(args: Array<String>): Array<String> {
 }
 
 fun Application.module() {
+    configureCorrelationId()
     val config = AppConfig.from(this)
     val state = AppState(config.initialDelay)
     val repository = InMemoryVolcanicReportRepository()

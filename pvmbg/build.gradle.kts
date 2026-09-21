@@ -50,7 +50,9 @@ dependencies {
     implementation(libs.ktor.server.auth)
     implementation(ktorLibs.server.auth.jwt)
     implementation(libs.ktor.server.status.pages)
+    implementation(ktorLibs.server.callId)
     implementation(libs.kotlinx.coroutines.core)
+    implementation(libs.kotlinx.coroutines.slf4j)
     implementation(libs.logback.classic)
     implementation(libs.logstash.logback.encoder)
 
