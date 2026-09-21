@@ -23,6 +23,7 @@ dependencies {
     implementation(libs.ktor.serialization.kotlinx.json)
     implementation(libs.ktor.server.call.logging)
     implementation(libs.ktor.server.auth)
+    implementation(ktorLibs.server.auth.jwt)
     implementation(libs.ktor.server.status.pages)
     implementation(libs.kotlinx.coroutines.core)
     implementation(libs.logback.classic)
