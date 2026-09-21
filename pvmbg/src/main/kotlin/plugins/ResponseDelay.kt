@@ -6,10 +6,14 @@ import io.ktor.http.*
 import io.ktor.server.application.*
 import io.ktor.server.request.*
 import io.ktor.server.response.*
+import io.ktor.util.AttributeKey
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.random.Random
 import kotlin.random.nextLong
+
+// Read by the access log
+internal val DELAY_MS = AttributeKey<Long>("responseDelayMs")
 
 class ResponseDelayConfig {
     lateinit var state: AppState
@@ -29,7 +33,11 @@ val ResponseDelay = createApplicationPlugin("ResponseDelay", ::ResponseDelayConf
         if (delayMs == 0L) return@onCall
 
         // Waits for the timer or for a change signal; the coroutine `delay` keeps no thread blocked while waiting.
+        val waitStarted = System.nanoTime()
         val released = withTimeoutOrNull(delayMs) { state.changes.first { it != seen } } != null
+        
+        // Delay time the same time it waited, sometimes not equal to wait time because early release
+        call.attributes.put(DELAY_MS, (System.nanoTime() - waitStarted) / 1_000_000)
         if (released && state.outage) {
             call.respond(HttpStatusCode.ServiceUnavailable, ErrorResponse("service is in outage"))
         }

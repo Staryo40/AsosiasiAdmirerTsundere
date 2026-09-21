@@ -1,6 +1,7 @@
 package com.staryo
 
 import com.staryo.config.AppConfig
+import com.staryo.plugins.configureAccessLog
 import com.staryo.plugins.configureAuthentication
 import com.staryo.plugins.configureCorrelationId
 import com.staryo.plugins.configureResponseDelay
@@ -49,6 +50,7 @@ fun Application.module() {
 
     configureSerialization()
     configureStatusPages()
+    configureAccessLog()
     configureResponseDelay(state)
     configureAuthentication(config.auth)
     configureRouting(config, state, service, AuthService(config.auth, state), LoginRateLimiter(config.auth))
