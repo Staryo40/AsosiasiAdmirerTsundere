@@ -2,6 +2,7 @@ package com.staryo
 
 import com.staryo.config.AppConfig
 import com.staryo.plugins.configureAuthentication
+import com.staryo.plugins.configureResponseDelay
 import com.staryo.plugins.configureSerialization
 import com.staryo.plugins.configureStatusPages
 import com.staryo.repository.InMemoryVolcanicReportRepository
@@ -46,6 +47,7 @@ fun Application.module() {
 
     configureSerialization()
     configureStatusPages()
+    configureResponseDelay(state)
     configureAuthentication(config.auth)
     configureRouting(config, state, service, AuthService(config.auth, state), LoginRateLimiter(config.auth))
 }
