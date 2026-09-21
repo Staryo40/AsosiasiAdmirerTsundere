@@ -34,7 +34,7 @@ private fun withSeedOverride(args: Array<String>): Array<String> {
 
 fun Application.module() {
     val config = AppConfig.from(this)
-    val state = AppState()
+    val state = AppState(config.initialDelay)
     val repository = InMemoryVolcanicReportRepository()
     val generator = ReportGenerator()
 

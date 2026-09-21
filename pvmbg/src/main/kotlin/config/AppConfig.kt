@@ -1,5 +1,6 @@
 package com.staryo.config
 
+import com.staryo.state.DelayRange
 import io.ktor.server.application.*
 import java.time.Duration
 
@@ -20,6 +21,7 @@ data class AppConfig(
     val port: Int,
     val initialSeedCount: Int?,
     val generatorInterval: Duration,
+    val initialDelay: DelayRange,
     val auth: AuthConfig,
 ) {
     val url: String get() = "http://$host:$port"
@@ -34,6 +36,7 @@ data class AppConfig(
                 port = str("ktor.deployment.port").toInt(),
                 initialSeedCount = config.propertyOrNull("pvmbg.seed.initial")?.getString()?.toInt(),
                 generatorInterval = Duration.ofMillis((str("pvmbg.generator.interval-seconds").toDouble() * 1000).toLong()),
+                initialDelay = delayRange(str("pvmbg.delay.min-ms"), str("pvmbg.delay.max-ms")),
                 auth = AuthConfig(
                     jwtSecret = str("pvmbg.auth.jwt-secret"),
                     reader = ClientCredentials(str("pvmbg.auth.reader-client-id"), str("pvmbg.auth.reader-client-secret")),
@@ -45,5 +48,14 @@ data class AppConfig(
                 ),
             )
         }
+
+        private fun delayRange(min: String, max: String): DelayRange =
+            try {
+                DelayRange(min.toLong(), max.toLong())
+            } catch (e: IllegalArgumentException) {
+                throw IllegalArgumentException(
+                    "Invalid response delay: PVMBG_RESPONSE_DELAY_MIN_MS=$min, PVMBG_RESPONSE_DELAY_MAX_MS=$max. ${e.message}", e
+                )
+            }
     }
 }

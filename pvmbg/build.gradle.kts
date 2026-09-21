@@ -35,6 +35,9 @@ tasks.test {
     environment("PVMBG_READER_CLIENT_SECRET", "test-reader-secret")
     environment("PVMBG_ADMIN_CLIENT_ID", "test-admin")
     environment("PVMBG_ADMIN_CLIENT_SECRET", "test-admin-secret")
+    // No artificial delay, so tests stay fast.
+    environment("PVMBG_RESPONSE_DELAY_MIN_MS", "0")
+    environment("PVMBG_RESPONSE_DELAY_MAX_MS", "0")
 }
 
 dependencies {
