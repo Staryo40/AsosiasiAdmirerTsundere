@@ -7,7 +7,7 @@ ktor:
 
 pvmbg:
   generator:
-    interval-seconds: 10
+    interval-seconds: $PVMBG_GENERATOR_INTERVAL_SECONDS:10
   # Values with a $ come from environment variables; see .env.example for what each one is for.
   # Variables without a default are required: startup fails if they are missing.
   delay:

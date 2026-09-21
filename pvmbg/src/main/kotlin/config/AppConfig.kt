@@ -50,7 +50,7 @@ data class AppConfig(
                 host = config.propertyOrNull("ktor.deployment.host")?.getString() ?: "localhost",
                 port = str("ktor.deployment.port").toInt(),
                 initialSeedCount = config.propertyOrNull("pvmbg.seed.initial")?.getString()?.toInt(),
-                generatorInterval = Duration.ofMillis((str("pvmbg.generator.interval-seconds").toDouble() * 1000).toLong()),
+                generatorInterval = generatorInterval(str("pvmbg.generator.interval-seconds")),
                 initialDelay = delayRange(str("pvmbg.delay.min-ms"), str("pvmbg.delay.max-ms")),
                 logging = LoggingConfig(str("pvmbg.logging.level"), str("pvmbg.logging.format")),
                 auth = AuthConfig(
@@ -63,6 +63,15 @@ data class AppConfig(
                     loginRateLimitPerMinute = str("pvmbg.auth.login-rate-limit-per-minute").toInt(),
                 ),
             )
+        }
+
+        // At least one millisecond: anything smaller rounds to zero and the generator would loop flat out.
+        private fun generatorInterval(raw: String): Duration {
+            val seconds = raw.toDoubleOrNull()
+            require(seconds != null && seconds.isFinite() && seconds >= 0.001) {
+                "Invalid generator interval: PVMBG_GENERATOR_INTERVAL_SECONDS=$raw. It must be a number of seconds, at least 0.001."
+            }
+            return Duration.ofMillis((seconds * 1000).toLong())
         }
 
         private fun delayRange(min: String, max: String): DelayRange =
