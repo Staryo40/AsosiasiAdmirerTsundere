@@ -11,7 +11,7 @@ RUN ./gradlew --no-daemon dependencies > /dev/null
 COPY src src
 RUN ./gradlew --no-daemon shadowJar
 
-# Runtime stage: only a JRE and the jar. No configuration or secrets are baked in;
+# Runtime stage: only a JRE and the jar. No configuration or secrets are baked in.
 FROM eclipse-temurin:21-jre-alpine
 RUN addgroup -S pvmbg && adduser -S -G pvmbg pvmbg
 WORKDIR /app

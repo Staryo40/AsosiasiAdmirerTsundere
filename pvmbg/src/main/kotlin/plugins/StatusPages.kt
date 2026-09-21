@@ -42,7 +42,7 @@ fun Application.configureStatusPages() {
         exception<Throwable> { call, cause ->
             if (cause is CancellationException && cause !is TimeoutCancellationException) throw cause
 
-            // Keeps Ktor's own mapping (bad body 400, unsupported media type 415, timeout 504, ...);
+            // Keeps Ktor's own mapping (bad body 400, unsupported media type 415, timeout 504, ...).
             val status = defaultExceptionStatusCode(cause) ?: HttpStatusCode.InternalServerError
             if (status.value >= 500) {
                 call.withCorrelationId {

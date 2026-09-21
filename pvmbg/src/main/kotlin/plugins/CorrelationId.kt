@@ -29,6 +29,7 @@ fun Application.configureCorrelationId() {
 
 internal const val CORRELATION_ID_MDC_KEY = "correlation_id"
 
+// Ktor attaches the error handlers before the request's logging context exists, so code there must restore the id while it logs.
 internal inline fun <T> ApplicationCall.withCorrelationId(block: () -> T): T {
     val previous = MDC.get(CORRELATION_ID_MDC_KEY)
     MDC.put(CORRELATION_ID_MDC_KEY, callId.orEmpty())
