@@ -1,6 +1,7 @@
 package com.staryo
 
 import com.staryo.config.AppConfig
+import com.staryo.plugins.configureAuthentication
 import com.staryo.plugins.configureSerialization
 import com.staryo.plugins.configureStatusPages
 import com.staryo.repository.InMemoryVolcanicReportRepository
@@ -43,5 +44,6 @@ fun Application.module() {
 
     configureSerialization()
     configureStatusPages()
+    configureAuthentication(config.auth)
     configureRouting(config, service)
 }

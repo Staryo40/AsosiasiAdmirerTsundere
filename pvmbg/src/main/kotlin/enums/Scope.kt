@@ -5,4 +5,8 @@ enum class Scope(val claim: String) {
     ADMIN("admin");
 
     fun includes(required: Scope) = this == ADMIN || this == required
+
+    companion object {
+        fun fromClaim(claim: String?) = entries.firstOrNull { it.claim == claim }
+    }
 }
