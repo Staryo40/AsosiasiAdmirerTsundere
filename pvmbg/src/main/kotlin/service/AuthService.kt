@@ -6,6 +6,7 @@ import com.staryo.config.AuthConfig
 import com.staryo.config.ClientCredentials
 import com.staryo.enums.Scope
 import com.staryo.model.TokenResponse
+import com.staryo.state.AppState
 import java.security.MessageDigest
 import java.time.Clock
 import java.time.Instant
@@ -15,6 +16,7 @@ class UnauthorizedException(message: String) : RuntimeException(message)
 
 class AuthService(
     private val config: AuthConfig,
+    private val state: AppState,
     private val clock: Clock = Clock.systemUTC(),
 ) {
     private val algorithm = Algorithm.HMAC256(config.jwtSecret)
@@ -22,6 +24,8 @@ class AuthService(
     fun login(clientId: String, clientSecret: String): TokenResponse {
         val scope = authenticate(clientId, clientSecret)
             ?: throw UnauthorizedException("invalid client credentials")
+        // Only the admin can still log in during an outage, otherwise nobody could switch it off again.
+        if (state.outage && scope != Scope.ADMIN) throw ServiceUnavailableException("service is in outage")
         return issueToken(clientId, scope)
     }
 

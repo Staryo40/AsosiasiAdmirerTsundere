@@ -8,7 +8,9 @@ import com.staryo.config.AuthConfig
 import com.staryo.config.ClientCredentials
 import com.staryo.enums.Scope
 import com.staryo.service.AuthService
+import com.staryo.service.ServiceUnavailableException
 import com.staryo.service.UnauthorizedException
+import com.staryo.state.AppState
 import java.time.Clock
 import java.time.Duration
 import java.time.Instant
@@ -27,7 +29,8 @@ class AuthServiceTest {
         loginRateLimitPerMinute = 5,
     )
     private val clock = Clock.fixed(now, ZoneOffset.UTC)
-    private val service = AuthService(config, clock)
+    private val state = AppState()
+    private val service = AuthService(config, state, clock)
 
     // Same fixed clock as the service, otherwise the token would be judged against the real time.
     private fun verifier(secret: String = config.jwtSecret): JWTVerifier =
@@ -91,6 +94,31 @@ class AuthServiceTest {
         val token = service.login("reader", "reader-secret").access_token
 
         assertFailsWith<SignatureVerificationException> { verifier("some-other-key-some-other-key-1234").verify(token) }
+    }
+
+    @Test
+    fun `during an outage the reader cannot log in but the admin can`() {
+        state.outage = true
+
+        assertFailsWith<ServiceUnavailableException> { service.login("reader", "reader-secret") }
+        assertEquals("admin", verifier().verify(service.login("admin", "admin-secret").access_token).subject)
+    }
+
+    @Test
+    fun `during an outage wrong credentials are still 401 not 503`() {
+        state.outage = true
+
+        assertFailsWith<UnauthorizedException> { service.login("reader", "nope") }
+        assertFailsWith<UnauthorizedException> { service.login("nobody", "nope") }
+    }
+
+    @Test
+    fun `reader can log in again once the outage is over`() {
+        state.outage = true
+        assertFailsWith<ServiceUnavailableException> { service.login("reader", "reader-secret") }
+
+        state.outage = false
+        assertEquals("reader", verifier().verify(service.login("reader", "reader-secret").access_token).subject)
     }
 
     @Test

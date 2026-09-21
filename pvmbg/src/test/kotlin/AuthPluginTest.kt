@@ -9,6 +9,7 @@ import com.staryo.plugins.authorized
 import com.staryo.plugins.configureAuthentication
 import com.staryo.plugins.configureSerialization
 import com.staryo.service.AuthService
+import com.staryo.state.AppState
 import io.ktor.client.request.*
 import io.ktor.http.*
 import io.ktor.server.response.*
@@ -29,7 +30,7 @@ class AuthPluginTest {
         tokenTtl = Duration.ofMinutes(5),
         loginRateLimitPerMinute = 5,
     )
-    private val service = AuthService(config)
+    private val service = AuthService(config, AppState())
 
     private fun readerToken() = service.login("reader", "reader-secret").access_token
     private fun adminToken() = service.login("admin", "admin-secret").access_token
@@ -146,7 +147,7 @@ class AuthPluginTest {
     fun `token that expired is rejected even though the service issued it`() = testApplication {
         protectedRoutes()
         val past = Clock.fixed(Instant.now().minus(Duration.ofMinutes(10)), java.time.ZoneOffset.UTC)
-        val oldToken = AuthService(config, past).login("reader", "reader-secret").access_token
+        val oldToken = AuthService(config, AppState(), past).login("reader", "reader-secret").access_token
         assertEquals(HttpStatusCode.Unauthorized, client.get("/read") { bearerAuth(oldToken) }.status)
     }
 

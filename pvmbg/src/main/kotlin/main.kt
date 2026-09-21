@@ -46,5 +46,5 @@ fun Application.module() {
     configureSerialization()
     configureStatusPages()
     configureAuthentication(config.auth)
-    configureRouting(config, service, AuthService(config.auth))
+    configureRouting(config, state, service, AuthService(config.auth, state))
 }

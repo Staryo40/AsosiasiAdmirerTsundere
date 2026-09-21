@@ -19,7 +19,6 @@ class VolcanicReportService(
     private val json = Json
 
     fun getReports(sinceRaw: String?): JsonElement {
-        ensureAvailable()
         val reports = repository.findSince(sinceRaw?.let(::parseInstant))
         return when (state.schemaVersion) {
             1 -> json.encodeToJsonElement(reports.map { it.toV1() })
@@ -34,10 +33,6 @@ class VolcanicReportService(
 
     fun setOutage(enabled: Boolean) {
         state.outage = enabled
-    }
-
-    fun ensureAvailable() {
-        if (state.outage) throw ServiceUnavailableException("service is in outage")
     }
 
     private fun parseInstant(raw: String): Instant =

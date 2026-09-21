@@ -85,6 +85,75 @@ class ServerTest {
         assertTrue("confidence_level" in after)
     }
 
+    private suspend fun ApplicationTestBuilder.setOutage(enabled: Boolean, adminToken: String) =
+        postJson("/admin/outage", """{"enabled":$enabled}""", adminToken)
+
+    @Test
+    fun `outage takes down health and reports whatever the token`() = testApplication {
+        configure()
+        val reader = readerToken()
+        val admin = adminToken()
+        assertEquals(HttpStatusCode.NoContent, setOutage(true, admin).status)
+
+        assertEquals(HttpStatusCode.ServiceUnavailable, client.get("/health").status)
+        assertEquals(HttpStatusCode.ServiceUnavailable, client.get("/volcanic-reports").status)
+        assertEquals(HttpStatusCode.ServiceUnavailable, client.get("/volcanic-reports") { bearerAuth(reader) }.status)
+        assertEquals(HttpStatusCode.ServiceUnavailable, client.get("/volcanic-reports") { bearerAuth(admin) }.status)
+        assertEquals(HttpStatusCode.ServiceUnavailable, client.get("/volcanic-reports") { bearerAuth("garbage") }.status)
+    }
+
+    @Test
+    fun `root stays up during an outage`() = testApplication {
+        configure()
+        setOutage(true, adminToken())
+        assertEquals(HttpStatusCode.OK, client.get("/").status)
+    }
+
+    @Test
+    fun `during an outage reader login is 503 but admin login works`() = testApplication {
+        configure()
+        val admin = adminToken()
+        setOutage(true, admin)
+
+        assertEquals(HttpStatusCode.ServiceUnavailable, login("test-reader", "test-reader-secret").status)
+        assertEquals(HttpStatusCode.OK, login("test-admin", "test-admin-secret").status)
+        assertEquals(HttpStatusCode.Unauthorized, login("test-reader", "wrong").status)
+    }
+
+    @Test
+    fun `admin routes still validate the token during an outage`() = testApplication {
+        configure()
+        val reader = readerToken()
+        val admin = adminToken()
+        setOutage(true, admin)
+
+        assertEquals(HttpStatusCode.Unauthorized, postJson("/admin/outage", """{"enabled":false}""").status)
+        assertEquals(HttpStatusCode.Unauthorized, postJson("/admin/outage", """{"enabled":false}""", "garbage").status)
+        assertEquals(HttpStatusCode.Forbidden, postJson("/admin/outage", """{"enabled":false}""", reader).status)
+        assertEquals(HttpStatusCode.NoContent, postJson("/admin/outage", """{"enabled":false}""", admin).status)
+    }
+
+    @Test
+    fun `everything recovers without a restart when the outage is switched off`() = testApplication {
+        configure()
+        val admin = adminToken()
+        setOutage(true, admin)
+        setOutage(false, admin)
+
+        assertEquals(HttpStatusCode.OK, client.get("/health").status)
+        assertEquals(HttpStatusCode.OK, client.get("/volcanic-reports") { bearerAuth(readerToken()) }.status)
+    }
+
+    @Test
+    fun `a refused admin request does not change the outage state`() = testApplication {
+        configure()
+        val reader = readerToken()
+        assertEquals(HttpStatusCode.Forbidden, setOutage(true, reader).status)
+        assertEquals(HttpStatusCode.Unauthorized, postJson("/admin/outage", """{"enabled":true}""").status)
+
+        assertEquals(HttpStatusCode.OK, client.get("/health").status)
+    }
+
     @Test
     fun `login with wrong secret or unknown id gives the same 401`() = testApplication {
         configure()
