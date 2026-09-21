@@ -63,6 +63,12 @@ fun Application.configureRouting(
                     service.setOutage(enabled)
                     call.respond(HttpStatusCode.NoContent)
                 }
+
+                post("/response-delay") {
+                    val request = call.receive<DelayRequest>()
+                    service.setResponseDelay(request.min_ms, request.max_ms)
+                    call.respond(HttpStatusCode.NoContent)
+                }
             }
         }
     }

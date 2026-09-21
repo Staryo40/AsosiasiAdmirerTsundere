@@ -3,6 +3,7 @@ package com.staryo.service
 import com.staryo.model.*
 import com.staryo.repository.VolcanicReportRepository
 import com.staryo.state.AppState
+import com.staryo.state.DelayRange
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.encodeToJsonElement
@@ -33,6 +34,16 @@ class VolcanicReportService(
 
     fun setOutage(enabled: Boolean) {
         state.outage = enabled
+    }
+
+    // Also releases every request that is currently waiting out its delay, even if the range is unchanged.
+    fun setResponseDelay(minMs: Long, maxMs: Long) {
+        val range = try {
+            DelayRange(minMs, maxMs)
+        } catch (e: IllegalArgumentException) {
+            throw InvalidRequestException(e.message ?: "invalid delay range")
+        }
+        state.updateResponseDelay(range)
     }
 
     private fun parseInstant(raw: String): Instant =

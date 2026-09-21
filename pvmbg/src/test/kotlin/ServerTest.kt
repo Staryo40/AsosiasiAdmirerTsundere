@@ -4,6 +4,11 @@ import io.ktor.client.request.*
 import io.ktor.client.statement.*
 import io.ktor.http.*
 import io.ktor.server.testing.*
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -216,6 +221,125 @@ class ServerTest {
         repeat(6) { login("test-reader", "wrong") }
 
         assertEquals(HttpStatusCode.OK, client.get("/volcanic-reports") { bearerAuth(token) }.status)
+    }
+
+    private suspend fun ApplicationTestBuilder.setDelay(min: Long, max: Long, token: String) =
+        postJson("/admin/response-delay", """{"min_ms":$min,"max_ms":$max}""", token)
+
+    private suspend fun ApplicationTestBuilder.elapsedMs(path: String): Long {
+        val start = System.nanoTime()
+        client.get(path)
+        return (System.nanoTime() - start) / 1_000_000
+    }
+
+    private suspend fun realSleep(ms: Long) = withContext(Dispatchers.Default) { delay(ms) }
+
+    @Test
+    fun `response delay route needs an admin token`() = testApplication {
+        configure()
+        val reader = readerToken()
+
+        assertEquals(HttpStatusCode.Unauthorized, postJson("/admin/response-delay", """{"min_ms":1,"max_ms":2}""").status)
+        assertEquals(HttpStatusCode.Forbidden, setDelay(1, 2, reader).status)
+        assertEquals(HttpStatusCode.NoContent, setDelay(1, 2, adminToken()).status)
+    }
+
+    @Test
+    fun `an invalid delay range is 400 and leaves the current delay untouched`() = testApplication {
+        configure()
+        val admin = adminToken()
+        client.get("/health")
+
+        assertEquals(HttpStatusCode.BadRequest, setDelay(3000, 500, admin).status)
+        assertEquals(HttpStatusCode.BadRequest, setDelay(-1, 500, admin).status)
+        assertEquals(HttpStatusCode.BadRequest, postJson("/admin/response-delay", """{"min_ms":100}""", admin).status)
+        assertEquals(HttpStatusCode.BadRequest, postJson("/admin/response-delay", "not json", admin).status)
+
+        assertTrue(elapsedMs("/health") < 300)
+    }
+
+    @Test
+    fun `the delay set through the admin route takes effect and can be removed again`() = testApplication {
+        configure()
+        val admin = adminToken()
+        client.get("/health")
+
+        assertEquals(HttpStatusCode.NoContent, setDelay(400, 400, admin).status)
+        val slow = elapsedMs("/health")
+        assertTrue(slow >= 350, "took only $slow ms")
+
+        assertEquals(HttpStatusCode.NoContent, setDelay(0, 0, admin).status)
+        assertTrue(elapsedMs("/health") < 300)
+    }
+
+    @Test
+    fun `the admin route is not slowed down by the delay it configures`() = testApplication {
+        configure()
+        val admin = adminToken()
+        setDelay(3000, 3000, admin)
+
+        val start = System.nanoTime()
+        assertEquals(HttpStatusCode.NoContent, setDelay(0, 0, admin).status)
+        val elapsed = (System.nanoTime() - start) / 1_000_000
+
+        assertTrue(elapsed < 1000, "took $elapsed ms")
+    }
+
+    @Test
+    fun `changing the delay releases requests that are already waiting`() = testApplication {
+        configure()
+        val admin = adminToken()
+        client.get("/health")
+        setDelay(5000, 5000, admin)
+
+        val start = System.nanoTime()
+        coroutineScope {
+            val pending = async { client.get("/health") }
+            realSleep(300)
+            setDelay(0, 0, admin)
+
+            assertEquals(HttpStatusCode.OK, pending.await().status)
+            val elapsed = (System.nanoTime() - start) / 1_000_000
+            assertTrue(elapsed < 3000, "was not released, took $elapsed ms")
+        }
+    }
+
+    @Test
+    fun `sending the same range again also releases waiting requests`() = testApplication {
+        configure()
+        val admin = adminToken()
+        client.get("/health")
+        setDelay(5000, 5000, admin)
+
+        val start = System.nanoTime()
+        coroutineScope {
+            val pending = async { client.get("/health") }
+            realSleep(300)
+            setDelay(5000, 5000, admin)
+
+            assertEquals(HttpStatusCode.OK, pending.await().status)
+            val elapsed = (System.nanoTime() - start) / 1_000_000
+            assertTrue(elapsed < 3000, "was not released, took $elapsed ms")
+        }
+    }
+
+    @Test
+    fun `switching the outage on through the admin route releases waiting requests with 503`() = testApplication {
+        configure()
+        val admin = adminToken()
+        client.get("/health")
+        setDelay(5000, 5000, admin)
+
+        val start = System.nanoTime()
+        coroutineScope {
+            val pending = async { client.get("/health") }
+            realSleep(300)
+            setOutage(true, admin)
+
+            assertEquals(HttpStatusCode.ServiceUnavailable, pending.await().status)
+            val elapsed = (System.nanoTime() - start) / 1_000_000
+            assertTrue(elapsed < 3000, "was not released, took $elapsed ms")
+        }
     }
 
     @Test
