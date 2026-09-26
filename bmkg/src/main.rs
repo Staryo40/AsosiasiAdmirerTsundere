@@ -1,11 +1,16 @@
+mod access_log;
 mod auth;
 mod config;
+mod correlation;
 mod delay;
 mod errors;
+mod logging;
 mod models;
 mod routes;
 mod seed;
 mod state;
+#[cfg(test)]
+mod test_support;
 
 use config::AppConfig;
 use delay::DelayRange;
@@ -21,6 +26,8 @@ async fn main() {
             std::process::exit(1);
         }
     };
+
+    logging::init(&config.log_level, &config.log_format);
 
     let seed_count = match parse_seed_count_arg() {
         Ok(count) => count,
@@ -52,10 +59,20 @@ async fn main() {
         }
     };
 
-    // Temporary: replaced by a structured startup log line once logging is wired up.
-    println!("BMKG is running on http://{addr} ({seeded} seismic events seeded)");
+    tracing::info!(
+        event = "startup",
+        host = %addr,
+        seed_records = seeded,
+        generator_interval_ms = config.generator_interval_ms,
+        delay_min_ms = config.response_delay_min_ms,
+        delay_max_ms = config.response_delay_max_ms,
+        log_level = %config.log_level,
+        log_format = %config.log_format,
+        "BMKG is running on http://{addr} ({seeded} seismic events seeded)"
+    );
 
-    if let Err(err) = axum::serve(listener, app).await {
+    let make_service = app.into_make_service_with_connect_info::<std::net::SocketAddr>();
+    if let Err(err) = axum::serve(listener, make_service).await {
         eprintln!("Server error: {err}");
         std::process::exit(1);
     }

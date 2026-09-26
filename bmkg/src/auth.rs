@@ -1,11 +1,12 @@
 use std::sync::Arc;
 
-use axum::extract::{Request, State};
+use axum::extract::{Extension, Request, State};
 use axum::http::HeaderMap;
 use axum::middleware::Next;
 use axum::response::Response;
 use subtle::ConstantTimeEq;
 
+use crate::correlation::CorrelationId;
 use crate::errors::ApiError;
 
 pub const API_KEY_HEADER: &str = "X-BMKG-Key";
@@ -14,23 +15,30 @@ pub const API_KEY_HEADER: &str = "X-BMKG-Key";
 /// gateway), so unlike PVMBG there is no login step and no per-client scope: the header either
 /// matches or it does not. A PVMBG-style Bearer token sent here is just a string that will never
 /// match, so it is rejected the same way as any other wrong value.
+///
+/// Relies on `correlation::propagate_correlation_id` having already run and inserted a
+/// `CorrelationId` into the request's extensions; the router in routes.rs guarantees that ordering.
 pub async fn require_api_key(
     State(expected_key): State<Arc<str>>,
     headers: HeaderMap,
+    Extension(CorrelationId(correlation_id)): Extension<CorrelationId>,
     request: Request,
     next: Next,
 ) -> Result<Response, ApiError> {
     let provided = headers.get(API_KEY_HEADER).and_then(|value| value.to_str().ok());
 
-    let is_valid = match provided {
-        Some(key) => key_matches(key, &expected_key),
-        None => false,
+    let reason = match provided {
+        Some(key) if key_matches(key, &expected_key) => None,
+        Some(_) => Some("invalid_key"),
+        None => Some("missing_key"),
     };
 
-    if is_valid {
-        Ok(next.run(request).await)
-    } else {
-        Err(ApiError::Unauthorized("missing or invalid API key".to_string()))
+    match reason {
+        None => Ok(next.run(request).await),
+        Some(reason) => {
+            tracing::warn!(event = "auth_rejected", reason, correlation_id = %correlation_id, "auth_rejected reason={reason}");
+            Err(ApiError::Unauthorized("missing or invalid API key".to_string()))
+        }
     }
 }
 

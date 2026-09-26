@@ -8,7 +8,9 @@ use axum::{Json, Router};
 use chrono::{DateTime, Utc};
 use serde::Deserialize;
 
+use crate::access_log::log_access;
 use crate::auth::require_api_key;
+use crate::correlation::propagate_correlation_id;
 use crate::delay::{add_response_delay, DelayRange};
 use crate::errors::ApiError;
 use crate::state::AppState;
@@ -17,6 +19,11 @@ use crate::state::AppState;
 /// credential, so a demo or a Docker health check can probe liveness without a key. The delay
 /// layer, in contrast, wraps everything (including `/health` and rejected requests), since a low
 /// and consistent response time is BMKG's defining trait for every call, not just the data routes.
+///
+/// Layer order (outermost first): access log, correlation id, delay, then auth (innermost, applied
+/// to the protected group only). Correlation id and delay must both sit above auth so a request
+/// carries its id and has already been delayed before the auth check ever runs; access log must be
+/// the outermost of the three so it can read what the other two tagged onto the response.
 pub fn build_router(state: AppState, api_key: Arc<str>, delay: DelayRange) -> Router {
     let protected = Router::new()
         .route("/seismic-events", get(seismic_events))
@@ -28,6 +35,8 @@ pub fn build_router(state: AppState, api_key: Arc<str>, delay: DelayRange) -> Ro
         .merge(protected)
         .with_state(state)
         .layer(middleware::from_fn_with_state(delay, add_response_delay))
+        .layer(middleware::from_fn(propagate_correlation_id))
+        .layer(middleware::from_fn(log_access))
 }
 
 async fn health() -> impl IntoResponse {
@@ -66,7 +75,9 @@ async fn tsunami_warnings(State(state): State<AppState>, Query(query): Query<Sin
 mod tests {
     use super::*;
     use crate::auth::API_KEY_HEADER;
+    use crate::correlation::CORRELATION_ID_HEADER;
     use crate::models::{SeismicEvent, ThreatLevel, TsunamiWarning};
+    use crate::test_support::LogCapture;
     use chrono::TimeZone;
     use serde_json::Value;
     use tokio::net::TcpListener;
@@ -81,7 +92,7 @@ mod tests {
         let addr = listener.local_addr().unwrap();
         let app = build_router(state, Arc::from(TEST_KEY), DelayRange { min_ms: 0, max_ms: 0 });
         tokio::spawn(async move {
-            axum::serve(listener, app).await.unwrap();
+            axum::serve(listener, app.into_make_service_with_connect_info::<std::net::SocketAddr>()).await.unwrap();
         });
         format!("http://{addr}")
     }
@@ -98,7 +109,7 @@ mod tests {
         let addr = listener.local_addr().unwrap();
         let app = build_router(state, Arc::from(TEST_KEY), delay);
         tokio::spawn(async move {
-            axum::serve(listener, app).await.unwrap();
+            axum::serve(listener, app.into_make_service_with_connect_info::<std::net::SocketAddr>()).await.unwrap();
         });
         format!("http://{addr}")
     }
@@ -335,5 +346,145 @@ mod tests {
 
         assert_eq!(response.status(), 200);
         assert!(start.elapsed().as_millis() >= 90);
+    }
+
+    // --- correlation id ---------------------------------------------------
+
+    #[tokio::test]
+    async fn a_valid_correlation_id_is_echoed_back() {
+        let base = spawn(AppState::new()).await;
+        let response =
+            reqwest::Client::new().get(format!("{base}/health")).header(CORRELATION_ID_HEADER, "poll-cycle-7f3c").send().await.unwrap();
+
+        assert_eq!(response.headers()[CORRELATION_ID_HEADER], "poll-cycle-7f3c");
+    }
+
+    #[tokio::test]
+    async fn a_correlation_id_is_generated_when_none_is_sent() {
+        let base = spawn(AppState::new()).await;
+        let uuid = regex_like_uuid();
+
+        let first = reqwest::get(format!("{base}/health")).await.unwrap();
+        let second = reqwest::get(format!("{base}/health")).await.unwrap();
+        let first_id = first.headers()[CORRELATION_ID_HEADER].to_str().unwrap().to_string();
+        let second_id = second.headers()[CORRELATION_ID_HEADER].to_str().unwrap().to_string();
+
+        assert!(uuid(&first_id), "'{first_id}' does not look like a UUID");
+        assert!(uuid(&second_id));
+        assert_ne!(first_id, second_id, "every request should get its own generated id");
+    }
+
+    #[tokio::test]
+    async fn an_invalid_correlation_id_is_replaced_with_a_generated_one() {
+        let base = spawn(AppState::new()).await;
+        let uuid = regex_like_uuid();
+
+        for bad in ["has space", "slash/id", "{\"level\":\"FAKE\"}", &"a".repeat(65)] {
+            let response = reqwest::Client::new().get(format!("{base}/health")).header(CORRELATION_ID_HEADER, bad).send().await.unwrap();
+            let echoed = response.headers()[CORRELATION_ID_HEADER].to_str().unwrap();
+            assert!(uuid(echoed), "'{bad}' was not replaced, got '{echoed}'");
+        }
+    }
+
+    fn regex_like_uuid() -> impl Fn(&str) -> bool {
+        |s: &str| {
+            let bytes = s.as_bytes();
+            s.len() == 36
+                && bytes[8] == b'-'
+                && bytes[13] == b'-'
+                && bytes[18] == b'-'
+                && bytes[23] == b'-'
+                && bytes.iter().enumerate().all(|(i, b)| matches!(i, 8 | 13 | 18 | 23) || b.is_ascii_hexdigit())
+        }
+    }
+
+    // --- access log ---------------------------------------------------------
+
+    #[tokio::test]
+    async fn the_access_log_line_has_the_expected_fields() {
+        let capture = LogCapture::new();
+        let base = spawn(AppState::new()).await;
+
+        let response =
+            reqwest::Client::new().get(format!("{base}/seismic-events")).header(API_KEY_HEADER, TEST_KEY).header(CORRELATION_ID_HEADER, "trace-1").send().await.unwrap();
+        assert_eq!(response.status(), 200);
+
+        let line = capture.events_named("http_request").into_iter().find(|l| l["path"] == "/seismic-events").unwrap();
+        assert_eq!(line["method"], "GET");
+        assert_eq!(line["status"], 200);
+        assert_eq!(line["level"], "INFO");
+        assert_eq!(line["correlation_id"], "trace-1");
+        assert!(line["duration_ms"].as_u64().is_some());
+        assert_eq!(line["delay_ms"], 0);
+        assert!(!line["client_ip"].as_str().unwrap().is_empty());
+        assert!(line["message"].as_str().unwrap().starts_with("GET /seismic-events 200"), "{line}");
+    }
+
+    #[tokio::test]
+    async fn a_healthy_health_check_is_logged_at_debug_only() {
+        let capture = LogCapture::new();
+        let base = spawn(AppState::new()).await;
+
+        reqwest::get(format!("{base}/health")).await.unwrap();
+
+        let line = capture.events_named("http_request").into_iter().find(|l| l["path"] == "/health").unwrap();
+        assert_eq!(line["level"], "DEBUG");
+    }
+
+    #[tokio::test]
+    async fn a_rejected_request_is_logged_at_warn_with_the_reason() {
+        let capture = LogCapture::new();
+        let base = spawn(AppState::new()).await;
+
+        reqwest::Client::new().get(format!("{base}/seismic-events")).header(CORRELATION_ID_HEADER, "trace-missing").send().await.unwrap();
+        reqwest::Client::new()
+            .get(format!("{base}/tsunami-warnings"))
+            .header(API_KEY_HEADER, "wrong")
+            .header(CORRELATION_ID_HEADER, "trace-wrong")
+            .send()
+            .await
+            .unwrap();
+
+        let access = capture.events_named("http_request");
+        assert!(access.iter().all(|l| l["path"] != "/seismic-events" || l["level"] == "WARN"));
+
+        let rejections = capture.events_named("auth_rejected");
+        assert_eq!(rejections.len(), 2);
+        assert_eq!(rejections[0]["reason"], "missing_key");
+        assert_eq!(rejections[0]["correlation_id"], "trace-missing");
+        assert_eq!(rejections[0]["level"], "WARN");
+        assert_eq!(rejections[1]["reason"], "invalid_key");
+        assert_eq!(rejections[1]["correlation_id"], "trace-wrong");
+    }
+
+    #[tokio::test]
+    async fn the_configured_key_is_never_written_to_the_log() {
+        let capture = LogCapture::new();
+        let base = spawn(AppState::new()).await;
+
+        authorized_get(&base, "/seismic-events").await;
+        reqwest::Client::new().get(format!("{base}/seismic-events")).header(API_KEY_HEADER, "guessed-wrong-key").send().await.unwrap();
+
+        let raw = format!("{:?}", capture.lines());
+        assert!(!raw.contains(TEST_KEY), "the real API key appeared in the logs");
+        assert!(!raw.contains("guessed-wrong-key"), "a guessed key appeared in the logs");
+    }
+
+    #[tokio::test]
+    async fn a_hostile_correlation_id_cannot_forge_or_break_a_log_line() {
+        let capture = LogCapture::new();
+        let base = spawn(AppState::new()).await;
+        // No raw newline: HTTP header values cannot contain one, so a well-behaved client (like the
+        // one used here) refuses to send it at all -- that is a real, useful defense already
+        // provided by the HTTP stack, not something this test needs to separately exercise.
+        let hostile = "x\"y\" {\"level\":\"FAKE\",\"event\":\"http_request\"}";
+
+        reqwest::Client::new().get(format!("{base}/health")).header(CORRELATION_ID_HEADER, hostile).send().await.unwrap();
+
+        // `lines()` already asserts every captured line parses as one JSON object; getting here at
+        // all means the hostile value did not split or corrupt the output into extra/broken lines.
+        let line = capture.events_named("http_request").into_iter().find(|l| l["path"] == "/health").unwrap();
+        assert_ne!(line["correlation_id"], hostile, "the hostile id should have been replaced");
+        assert_eq!(line["level"], "DEBUG");
     }
 }

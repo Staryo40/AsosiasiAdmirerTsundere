@@ -13,12 +13,19 @@ pub struct DelayRange {
     pub max_ms: u64,
 }
 
+/// Tagged onto the response so the (outer) access log middleware can report how much of the total
+/// duration was this deliberate delay versus BMKG's own processing time.
+#[derive(Debug, Clone, Copy)]
+pub struct DelayMs(pub u64);
+
 pub async fn add_response_delay(State(range): State<DelayRange>, request: Request, next: Next) -> Response {
     let delay_ms = pick_delay_ms(range, &mut rand::rng());
     if delay_ms > 0 {
         tokio::time::sleep(Duration::from_millis(delay_ms)).await;
     }
-    next.run(request).await
+    let mut response = next.run(request).await;
+    response.extensions_mut().insert(DelayMs(delay_ms));
+    response
 }
 
 /// Takes the RNG as a parameter so the distribution can be tested deterministically without
