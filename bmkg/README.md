@@ -4,7 +4,8 @@ A simulation of the seismic/tsunami monitoring agency's service (BMKG), built fo
 project, in Rust with [axum](https://github.com/tokio-rs/axum). It is a **passive** service: it only
 answers requests, and the BNPB gateway polls it. It listens on **port 8081**.
 
-- Serves `SeismicEvent`s and (for the ones that warrant one) `TsunamiWarning`s, seeded once at start-up.
+- Serves `SeismicEvent`s and (for the ones that warrant one) `TsunamiWarning`s. Seeded at start-up, then
+  keeps adding new ones on its own while it runs, at a configurable rate.
 - Access is a single shared secret in the `X-BMKG-Key` header. Unlike PVMBG, there is no login step: the
   key is the credential itself, and there is only one caller (the BNPB gateway), so there is nothing to
   scope by client.
@@ -88,7 +89,7 @@ start** with a clear message if a required variable is missing or a value is inv
 | `BMKG_PORT` | `8081` | TCP port the HTTP server binds to (the port the spec assigns to BMKG). |
 | `BMKG_RESPONSE_DELAY_MIN_MS` | `50` | Lower bound of the random delay added to every response. Must not exceed the maximum. |
 | `BMKG_RESPONSE_DELAY_MAX_MS` | `150` | Upper bound of that delay. Set both to the same value for an exact fixed delay. |
-| `BMKG_GENERATOR_INTERVAL_SECONDS` | `10` | Reserved for the live event generator described in [Notes and limits](#notes-and-limits); validated at start-up and reported in the `startup` log line, but nothing consumes it yet. |
+| `BMKG_GENERATOR_INTERVAL_SECONDS` | `10` | Seconds between two newly generated events while the service keeps running (see [Data](#data)). Decimals are allowed, at least `0.001`. |
 | `BMKG_LOG_LEVEL` | `INFO` | `TRACE`, `DEBUG`, `INFO`, `WARN`, `ERROR` or `OFF`. |
 | `BMKG_LOG_FORMAT` | `json` | `json` (one JSON object per line) or `text` (readable lines). Lowercase only. |
 
@@ -103,6 +104,10 @@ Unlike PVMBG, none of BMKG's settings can be changed at runtime: it has no admin
   asks for at least 20; a fresh run typically seeds a couple of thousand). `cargo run -- N` seeds exactly
   `N` events instead, ending at the latest 3-hour slot. The seed is deterministic (fixed RNG seed), so the
   same run always produces the same history.
+- **While running:** one new event every `BMKG_GENERATOR_INTERVAL_SECONDS` (default 10, the spec's minimum
+  rate; use a smaller value such as 2 or 0.5 to speed up demos), for a random region, timestamped at the
+  real moment it is generated — not aligned to a 3-hour slot the way the seed is. It continues the exact
+  same generator (RNG and id sequence) the seed used, so a live event's id never collides with a seeded one.
 - **`potential_tsunami`** is set when an event is both strong and shallow (`magnitude >= 6.5` and
   `depth_km <= 60.0`), a loose approximation of BMKG's real criterion. Only those events get a matching
   `TsunamiWarning`, with `related_event_id` pointing back at it.
@@ -210,7 +215,18 @@ curl -s "$BASE/seismic-events?since=$LATEST" -H "X-BMKG-Key: $BMKG_API_KEY"; ech
 curl -s "$BASE/seismic-events?since=2026-05-15T09:00:00Z" -H "X-BMKG-Key: $BMKG_API_KEY" | python3 -c "import sys,json;print(len(json.load(sys.stdin)), 'events after that time')"
 ```
 
-### 3. Authentication failures
+### 3. New data appears over time
+
+```bash
+LAST=$(curl -s $BASE/seismic-events -H "X-BMKG-Key: $BMKG_API_KEY" | python3 -c "import sys,json;print(json.load(sys.stdin)[-1]['occurred_at'])")
+echo "latest so far: $LAST"; sleep 11
+curl -s "$BASE/seismic-events?since=$LAST" -H "X-BMKG-Key: $BMKG_API_KEY"; echo
+```
+
+Expect one or more events newer than `LAST` (one per `BMKG_GENERATOR_INTERVAL_SECONDS`). For a faster demo,
+start the service with `BMKG_GENERATOR_INTERVAL_SECONDS=1`.
+
+### 4. Authentication failures
 
 ```bash
 timed $BASE/seismic-events                                              # 401, no key
@@ -219,13 +235,13 @@ timed $BASE/seismic-events -H "X-BMKG-Key: eyJhbGciOiJIUzI1NiJ9.forged" # 401, a
 timed $BASE/seismic-events -H "X-BMKG-Key: $BMKG_API_KEY"               # 200, the real key
 ```
 
-### 4. A malformed `since`
+### 5. A malformed `since`
 
 ```bash
 curl -s "$BASE/seismic-events?since=not-a-timestamp" -H "X-BMKG-Key: $BMKG_API_KEY"; echo   # 400
 ```
 
-### 5. The response delay (50-150 ms, consistent, never released early)
+### 6. The response delay (50-150 ms, consistent, never released early)
 
 ```bash
 timed $BASE/health                                                    # ~50-150 ms, no key needed
@@ -243,7 +259,7 @@ Expect roughly one delay's worth of total time, not 30 of them added up. Unlike 
 be changed by editing `.env` and restarting; there is no admin route and nothing ever interrupts a delay
 already in progress.
 
-### 6. Correlation id
+### 7. Correlation id
 
 ```bash
 curl -s -D - -o /dev/null $BASE/health -H "X-Correlation-ID: demo-123" | grep -i correlation   # echoed back
@@ -253,7 +269,7 @@ curl -s -D - -o /dev/null $BASE/health -H "X-Correlation-ID: not valid!" | grep 
 
 Then find every log line of that request with `grep demo-123` (see [Logging](#logging)).
 
-### 7. Stop, rebuild and restart the container on its own
+### 8. Stop, rebuild and restart the container on its own
 
 ```bash
 docker compose stop bmkg             # the service is gone; other services in a bigger compose file are untouched
@@ -322,11 +338,6 @@ One line per request, once the response is ready (`event` = `http_request`):
 
 ## Notes and limits
 
-- **No live/background event generation yet.** BMKG seeds its history once at start-up and does **not**
-  add further events while it keeps running, unlike PVMBG's continuously-growing feed. The spec asks for
-  at least one new event every 10 seconds per instance; `BMKG_GENERATOR_INTERVAL_SECONDS` exists and is
-  validated for this, but nothing currently consumes it. This is a known gap, planned as a follow-up step,
-  not an oversight in this README.
 - **In memory only, per process.** All seeded data lives inside one process and is lost on restart.
   Running several copies gives each its own independent data.
 - **One credential, no scopes.** BMKG has exactly one caller (the BNPB gateway) and one shared secret; there

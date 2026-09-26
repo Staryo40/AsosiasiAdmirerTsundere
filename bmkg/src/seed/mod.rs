@@ -126,6 +126,20 @@ pub async fn seed_count(state: &AppState, generator: &mut EventGenerator, count:
     }
 }
 
+/// Runs forever, adding one new event (and, when it warrants one, a tsunami warning) every
+/// `interval`, timestamped at the moment it is generated. This is what keeps BMKG's feed growing
+/// while it runs, matching the spec's "at least one new event every 10 seconds" requirement, the
+/// same role PVMBG's `LiveReportGenerator` plays there. Takes `generator` and `state` by value: the
+/// caller spawns this as its own task after seeding finishes, since `generator`'s RNG and id
+/// counters continue the exact sequence the seed left off (no separate seed for live data).
+pub async fn run_live_generator(state: AppState, mut generator: EventGenerator, interval: std::time::Duration) {
+    loop {
+        tokio::time::sleep(interval).await;
+        let (event, warning) = generator.next(Utc::now());
+        store(&state, event, warning).await;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -270,6 +284,34 @@ mod tests {
         assert!(events.last().unwrap().occurred_at <= until);
         for pair in events.windows(2) {
             assert_eq!((pair[1].occurred_at - pair[0].occurred_at).num_hours(), SEED_PERIOD_HOURS, "slots must be evenly spaced");
+        }
+    }
+
+    #[tokio::test]
+    async fn run_live_generator_keeps_adding_events_while_it_runs() {
+        let state = AppState::new();
+        let generator = EventGenerator::new(1);
+        tokio::spawn(run_live_generator(state.clone(), generator, std::time::Duration::from_millis(5)));
+
+        tokio::time::sleep(std::time::Duration::from_millis(60)).await;
+
+        assert!(state.seismic_event_count().await >= 5, "expected several events after 60ms with a 5ms interval");
+    }
+
+    #[tokio::test]
+    async fn run_live_generator_timestamps_events_at_generation_time_not_a_fixed_slot() {
+        let state = AppState::new();
+        let before = Utc::now();
+        let generator = EventGenerator::new(2);
+        tokio::spawn(run_live_generator(state.clone(), generator, std::time::Duration::from_millis(5)));
+
+        tokio::time::sleep(std::time::Duration::from_millis(30)).await;
+        let after = Utc::now();
+
+        let events = state.seismic_events_since(None).await;
+        assert!(!events.is_empty());
+        for event in &events {
+            assert!(event.occurred_at >= before && event.occurred_at <= after, "{} is outside [{before}, {after}]", event.occurred_at);
         }
     }
 }

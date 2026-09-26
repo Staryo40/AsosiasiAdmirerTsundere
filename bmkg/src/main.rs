@@ -42,6 +42,13 @@ async fn main() {
     }
 
     let seeded = state.seismic_event_count().await;
+
+    // Continues the same generator (same RNG, same id sequence) the seed left off, so live events
+    // and seeded ones never collide on an id. Spawned after `seeded` is read, so the startup log
+    // below always reports exactly what the seed produced, not a count racing the live generator.
+    let generator_interval = std::time::Duration::from_millis(config.generator_interval_ms);
+    tokio::spawn(seed::run_live_generator(state.clone(), generator, generator_interval));
+
     let api_key: std::sync::Arc<str> = config.api_key.as_str().into();
     let delay = DelayRange { min_ms: config.response_delay_min_ms, max_ms: config.response_delay_max_ms };
     let app = routing::build_router(state, api_key, delay);
