@@ -1,0 +1,9 @@
+# Runs BMKG on its own: `docker compose up -d --build` from this folder. A compose file at the
+# repository root can pull it in with `include:` so the whole system starts with one command.
+services:
+  bmkg:
+    build: .
+    image: bmkg
+    env_file: .env
+    ports:
+      - "8081:8081"

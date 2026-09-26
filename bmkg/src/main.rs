@@ -72,10 +72,27 @@ async fn main() {
     );
 
     let make_service = app.into_make_service_with_connect_info::<std::net::SocketAddr>();
-    if let Err(err) = axum::serve(listener, make_service).await {
+    if let Err(err) = axum::serve(listener, make_service).with_graceful_shutdown(shutdown_signal()).await {
         eprintln!("Server error: {err}");
         std::process::exit(1);
     }
+}
+
+// Running as PID 1 in a container matters here: unlike any other process, PID 1 does not get the
+// kernel's default "terminate" action for a signal it has not explicitly handled, so an unhandled
+// SIGTERM from `docker stop` is silently ignored until Docker's grace period expires and force-kills
+// the process with SIGKILL instead. Rust installs no signal handlers on its own (unlike the JVM,
+// which PVMBG relies on for exactly this), so this has to be done explicitly.
+async fn shutdown_signal() {
+    let mut terminate = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+        .expect("failed to install a SIGTERM handler");
+    let ctrl_c = async { tokio::signal::ctrl_c().await.expect("failed to install a SIGINT (Ctrl+C) handler") };
+
+    tokio::select! {
+        _ = terminate.recv() => {}
+        _ = ctrl_c => {}
+    }
+    tracing::info!(event = "shutdown", "received shutdown signal, stopping gracefully");
 }
 
 /// A bare number (`cargo run -- 10`) seeds exactly that many records instead of the full default history.
