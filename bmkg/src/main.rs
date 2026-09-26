@@ -1,3 +1,4 @@
+mod auth;
 mod config;
 mod errors;
 mod models;
@@ -36,7 +37,8 @@ async fn main() {
     }
 
     let seeded = state.seismic_event_count().await;
-    let app = routes::build_router(state);
+    let api_key: std::sync::Arc<str> = config.api_key.as_str().into();
+    let app = routes::build_router(state, api_key);
 
     let addr = format!("0.0.0.0:{}", config.port);
     let listener = match tokio::net::TcpListener::bind(&addr).await {

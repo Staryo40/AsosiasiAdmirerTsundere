@@ -1,19 +1,26 @@
+use std::sync::Arc;
+
 use axum::extract::{Query, State};
+use axum::middleware;
 use axum::response::IntoResponse;
 use axum::routing::get;
 use axum::{Json, Router};
 use chrono::{DateTime, Utc};
 use serde::Deserialize;
 
+use crate::auth::require_api_key;
 use crate::errors::ApiError;
 use crate::state::AppState;
 
-pub fn build_router(state: AppState) -> Router {
-    Router::new()
-        .route("/health", get(health))
+/// `/health` is deliberately outside the protected group: like PVMBG's, it must answer with no
+/// credential, so a demo or a Docker health check can probe liveness without a key.
+pub fn build_router(state: AppState, api_key: Arc<str>) -> Router {
+    let protected = Router::new()
         .route("/seismic-events", get(seismic_events))
         .route("/tsunami-warnings", get(tsunami_warnings))
-        .with_state(state)
+        .route_layer(middleware::from_fn_with_state(api_key, require_api_key));
+
+    Router::new().route("/health", get(health)).merge(protected).with_state(state)
 }
 
 async fn health() -> impl IntoResponse {
@@ -51,21 +58,29 @@ async fn tsunami_warnings(State(state): State<AppState>, Query(query): Query<Sin
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::auth::API_KEY_HEADER;
     use crate::models::{SeismicEvent, ThreatLevel, TsunamiWarning};
     use chrono::TimeZone;
     use serde_json::Value;
     use tokio::net::TcpListener;
+
+    const TEST_KEY: &str = "test-key-for-routes";
 
     /// Starts a real server on an OS-assigned port and returns its base URL, mirroring how
     /// PVMBG's tests run the whole app rather than poking at handlers directly.
     async fn spawn(state: AppState) -> String {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
-        let app = build_router(state);
+        let app = build_router(state, Arc::from(TEST_KEY));
         tokio::spawn(async move {
             axum::serve(listener, app).await.unwrap();
         });
         format!("http://{addr}")
+    }
+
+    /// A request to a protected endpoint carrying the correct `X-BMKG-Key`.
+    async fn authorized_get(base: &str, path: &str) -> reqwest::Response {
+        reqwest::Client::new().get(format!("{base}{path}")).header(API_KEY_HEADER, TEST_KEY).send().await.unwrap()
     }
 
     fn event(id: &str, occurred_at: DateTime<Utc>) -> SeismicEvent {
@@ -112,7 +127,7 @@ mod tests {
         state.add_seismic_event(event("b", at(1))).await;
         let base = spawn(state).await;
 
-        let response = reqwest::get(format!("{base}/seismic-events")).await.unwrap();
+        let response = authorized_get(&base, "/seismic-events").await;
         assert_eq!(response.status(), 200);
         let body: Value = response.json().await.unwrap();
         assert_eq!(body.as_array().unwrap().len(), 2);
@@ -125,7 +140,7 @@ mod tests {
         state.add_seismic_event(event("new", at(10))).await;
         let base = spawn(state).await;
 
-        let response = reqwest::get(format!("{base}/seismic-events?since=2026-01-01T00:00:00Z")).await.unwrap();
+        let response = authorized_get(&base, "/seismic-events?since=2026-01-01T00:00:00Z").await;
         let body: Value = response.json().await.unwrap();
         let ids: Vec<&str> = body.as_array().unwrap().iter().map(|e| e["event_id"].as_str().unwrap()).collect();
         assert_eq!(ids, vec!["new"]);
@@ -134,7 +149,7 @@ mod tests {
     #[tokio::test]
     async fn a_malformed_since_is_400_with_a_json_error() {
         let base = spawn(AppState::new()).await;
-        let response = reqwest::get(format!("{base}/seismic-events?since=not-a-timestamp")).await.unwrap();
+        let response = authorized_get(&base, "/seismic-events?since=not-a-timestamp").await;
 
         assert_eq!(response.status(), 400);
         let body: Value = response.json().await.unwrap();
@@ -144,7 +159,7 @@ mod tests {
     #[tokio::test]
     async fn a_date_only_since_without_a_time_is_400() {
         let base = spawn(AppState::new()).await;
-        let response = reqwest::get(format!("{base}/seismic-events?since=2026-01-01")).await.unwrap();
+        let response = authorized_get(&base, "/seismic-events?since=2026-01-01").await;
 
         assert_eq!(response.status(), 400);
     }
@@ -155,7 +170,7 @@ mod tests {
         state.add_seismic_event(event("evt-000001", at(0))).await;
         let base = spawn(state).await;
 
-        let response = reqwest::get(format!("{base}/seismic-events")).await.unwrap();
+        let response = authorized_get(&base, "/seismic-events").await;
         let body: Value = response.json().await.unwrap();
         let first = &body.as_array().unwrap()[0];
         assert_eq!(first["event_id"], "evt-000001");
@@ -170,7 +185,7 @@ mod tests {
         state.add_tsunami_warning(warning("tsw-000001", at(0))).await;
         let base = spawn(state).await;
 
-        let response = reqwest::get(format!("{base}/tsunami-warnings")).await.unwrap();
+        let response = authorized_get(&base, "/tsunami-warnings").await;
         assert_eq!(response.status(), 200);
         let body: Value = response.json().await.unwrap();
         assert_eq!(body.as_array().unwrap().len(), 1);
@@ -185,7 +200,7 @@ mod tests {
         state.add_tsunami_warning(warning("new", at(10))).await;
         let base = spawn(state).await;
 
-        let response = reqwest::get(format!("{base}/tsunami-warnings?since=2026-01-01T00:05:00Z")).await.unwrap();
+        let response = authorized_get(&base, "/tsunami-warnings?since=2026-01-01T00:05:00Z").await;
         let body: Value = response.json().await.unwrap();
         let ids: Vec<&str> = body.as_array().unwrap().iter().map(|w| w["warning_id"].as_str().unwrap()).collect();
         assert_eq!(ids, vec!["new"]);
@@ -197,8 +212,86 @@ mod tests {
         state.add_seismic_event(event("evt-1", at(0))).await;
         let base = spawn(state).await;
 
-        let warnings = reqwest::get(format!("{base}/tsunami-warnings")).await.unwrap();
+        let warnings = authorized_get(&base, "/tsunami-warnings").await;
         let body: Value = warnings.json().await.unwrap();
         assert_eq!(body.as_array().unwrap().len(), 0, "a seismic event alone must not appear as a tsunami warning");
+    }
+
+    #[tokio::test]
+    async fn health_needs_no_key_at_all() {
+        let base = spawn(AppState::new()).await;
+        // Deliberately uses the bare client, no X-BMKG-Key header, unlike authorized_get.
+        let response = reqwest::get(format!("{base}/health")).await.unwrap();
+
+        assert_eq!(response.status(), 200);
+    }
+
+    #[tokio::test]
+    async fn seismic_events_without_a_key_is_401_with_a_json_error() {
+        let base = spawn(AppState::new()).await;
+        let response = reqwest::get(format!("{base}/seismic-events")).await.unwrap();
+
+        assert_eq!(response.status(), 401);
+        let body: Value = response.json().await.unwrap();
+        assert!(body["error"].as_str().is_some(), "{body}");
+    }
+
+    #[tokio::test]
+    async fn seismic_events_with_the_wrong_key_is_401() {
+        let base = spawn(AppState::new()).await;
+        let response =
+            reqwest::Client::new().get(format!("{base}/seismic-events")).header(API_KEY_HEADER, "wrong-key").send().await.unwrap();
+
+        assert_eq!(response.status(), 401);
+    }
+
+    #[tokio::test]
+    async fn tsunami_warnings_also_requires_the_key() {
+        let base = spawn(AppState::new()).await;
+        let response = reqwest::get(format!("{base}/tsunami-warnings")).await.unwrap();
+
+        assert_eq!(response.status(), 401);
+    }
+
+    #[tokio::test]
+    async fn an_empty_key_header_is_rejected() {
+        let base = spawn(AppState::new()).await;
+        let response = reqwest::Client::new().get(format!("{base}/seismic-events")).header(API_KEY_HEADER, "").send().await.unwrap();
+
+        assert_eq!(response.status(), 401);
+    }
+
+    #[tokio::test]
+    async fn a_pvmbg_style_bearer_token_sent_as_the_bmkg_key_is_rejected() {
+        let base = spawn(AppState::new()).await;
+        let response = reqwest::Client::new()
+            .get(format!("{base}/seismic-events"))
+            .header(API_KEY_HEADER, "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJyZWFkZXIifQ.forged-signature")
+            .send()
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), 401);
+    }
+
+    #[tokio::test]
+    async fn a_key_that_only_differs_by_case_is_rejected() {
+        let base = spawn(AppState::new()).await;
+        let response = reqwest::Client::new()
+            .get(format!("{base}/seismic-events"))
+            .header(API_KEY_HEADER, TEST_KEY.to_uppercase())
+            .send()
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), 401);
+    }
+
+    #[tokio::test]
+    async fn the_correct_key_grants_access_to_both_protected_routes() {
+        let base = spawn(AppState::new()).await;
+
+        assert_eq!(authorized_get(&base, "/seismic-events").await.status(), 200);
+        assert_eq!(authorized_get(&base, "/tsunami-warnings").await.status(), 200);
     }
 }
