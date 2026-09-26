@@ -9,18 +9,25 @@ use chrono::{DateTime, Utc};
 use serde::Deserialize;
 
 use crate::auth::require_api_key;
+use crate::delay::{add_response_delay, DelayRange};
 use crate::errors::ApiError;
 use crate::state::AppState;
 
 /// `/health` is deliberately outside the protected group: like PVMBG's, it must answer with no
-/// credential, so a demo or a Docker health check can probe liveness without a key.
-pub fn build_router(state: AppState, api_key: Arc<str>) -> Router {
+/// credential, so a demo or a Docker health check can probe liveness without a key. The delay
+/// layer, in contrast, wraps everything (including `/health` and rejected requests), since a low
+/// and consistent response time is BMKG's defining trait for every call, not just the data routes.
+pub fn build_router(state: AppState, api_key: Arc<str>, delay: DelayRange) -> Router {
     let protected = Router::new()
         .route("/seismic-events", get(seismic_events))
         .route("/tsunami-warnings", get(tsunami_warnings))
         .route_layer(middleware::from_fn_with_state(api_key, require_api_key));
 
-    Router::new().route("/health", get(health)).merge(protected).with_state(state)
+    Router::new()
+        .route("/health", get(health))
+        .merge(protected)
+        .with_state(state)
+        .layer(middleware::from_fn_with_state(delay, add_response_delay))
 }
 
 async fn health() -> impl IntoResponse {
@@ -67,11 +74,12 @@ mod tests {
     const TEST_KEY: &str = "test-key-for-routes";
 
     /// Starts a real server on an OS-assigned port and returns its base URL, mirroring how
-    /// PVMBG's tests run the whole app rather than poking at handlers directly.
+    /// PVMBG's tests run the whole app rather than poking at handlers directly. No delay, so these
+    /// tests (which are about routing and auth, not timing) stay fast; delay.rs tests timing.
     async fn spawn(state: AppState) -> String {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
-        let app = build_router(state, Arc::from(TEST_KEY));
+        let app = build_router(state, Arc::from(TEST_KEY), DelayRange { min_ms: 0, max_ms: 0 });
         tokio::spawn(async move {
             axum::serve(listener, app).await.unwrap();
         });
@@ -81,6 +89,18 @@ mod tests {
     /// A request to a protected endpoint carrying the correct `X-BMKG-Key`.
     async fn authorized_get(base: &str, path: &str) -> reqwest::Response {
         reqwest::Client::new().get(format!("{base}{path}")).header(API_KEY_HEADER, TEST_KEY).send().await.unwrap()
+    }
+
+    /// Like `spawn`, but with a real delay, for the handful of tests that check delay is applied
+    /// to the composed app (auth + routing + delay together), not just to `delay.rs`'s own toy router.
+    async fn spawn_with_delay(state: AppState, delay: DelayRange) -> String {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let app = build_router(state, Arc::from(TEST_KEY), delay);
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        format!("http://{addr}")
     }
 
     fn event(id: &str, occurred_at: DateTime<Utc>) -> SeismicEvent {
@@ -293,5 +313,27 @@ mod tests {
 
         assert_eq!(authorized_get(&base, "/seismic-events").await.status(), 200);
         assert_eq!(authorized_get(&base, "/tsunami-warnings").await.status(), 200);
+    }
+
+    #[tokio::test]
+    async fn a_request_rejected_for_a_missing_key_is_still_delayed_like_a_real_one() {
+        let base = spawn_with_delay(AppState::new(), DelayRange { min_ms: 100, max_ms: 100 }).await;
+
+        let start = std::time::Instant::now();
+        let response = reqwest::get(format!("{base}/seismic-events")).await.unwrap();
+
+        assert_eq!(response.status(), 401);
+        assert!(start.elapsed().as_millis() >= 90, "a rejected request was not delayed");
+    }
+
+    #[tokio::test]
+    async fn health_is_delayed_too_in_the_full_composed_app() {
+        let base = spawn_with_delay(AppState::new(), DelayRange { min_ms: 100, max_ms: 100 }).await;
+
+        let start = std::time::Instant::now();
+        let response = reqwest::get(format!("{base}/health")).await.unwrap();
+
+        assert_eq!(response.status(), 200);
+        assert!(start.elapsed().as_millis() >= 90);
     }
 }

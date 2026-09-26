@@ -1,5 +1,6 @@
 mod auth;
 mod config;
+mod delay;
 mod errors;
 mod models;
 mod routes;
@@ -7,6 +8,7 @@ mod seed;
 mod state;
 
 use config::AppConfig;
+use delay::DelayRange;
 use seed::EventGenerator;
 use state::AppState;
 
@@ -38,7 +40,8 @@ async fn main() {
 
     let seeded = state.seismic_event_count().await;
     let api_key: std::sync::Arc<str> = config.api_key.as_str().into();
-    let app = routes::build_router(state, api_key);
+    let delay = DelayRange { min_ms: config.response_delay_min_ms, max_ms: config.response_delay_max_ms };
+    let app = routes::build_router(state, api_key, delay);
 
     let addr = format!("0.0.0.0:{}", config.port);
     let listener = match tokio::net::TcpListener::bind(&addr).await {
