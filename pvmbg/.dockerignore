@@ -1,0 +1,13 @@
+# Secrets must never enter the build context, and so never the image.
+.env
+.env.*
+
+# Build output and tooling that the image build recreates or does not need.
+build
+.gradle
+.kotlin
+.idea
+out
+*.iml
+src/test
+*.md
