@@ -114,7 +114,10 @@ pub async fn seed_default(state: &AppState, generator: &mut EventGenerator, unti
 pub async fn seed_count(state: &AppState, generator: &mut EventGenerator, count: usize, until: DateTime<Utc>) {
     let period = Duration::hours(SEED_PERIOD_HOURS);
     let period_secs = period.num_seconds();
-    let last_slot = until - Duration::seconds(until.timestamp().rem_euclid(period_secs));
+    // Truncate to whole seconds first: `until` is usually `Utc::now()`, which carries sub-second
+    // precision that would otherwise survive into every generated timestamp as a stray fraction.
+    let now_whole_seconds = DateTime::from_timestamp(until.timestamp(), 0).expect("a valid DateTime always has a representable Unix timestamp");
+    let last_slot = now_whole_seconds - Duration::seconds(now_whole_seconds.timestamp().rem_euclid(period_secs));
 
     for i in 0..count {
         let slots_back = (count - 1 - i) as i32;
@@ -231,6 +234,19 @@ mod tests {
         seed_count(&state, &mut generator, 7, Utc::now()).await;
 
         assert_eq!(state.seismic_event_count().await, 7);
+    }
+
+    #[tokio::test]
+    async fn seed_count_produces_whole_second_timestamps_even_from_a_sub_second_instant() {
+        let state = AppState::new();
+        let mut generator = EventGenerator::new(42);
+        // `Utc::now()` always carries sub-second precision; a real run hits this every time.
+        seed_count(&state, &mut generator, 3, Utc::now()).await;
+
+        let events = state.seismic_events_since(None).await;
+        for event in &events {
+            assert_eq!(event.occurred_at.timestamp_subsec_nanos(), 0, "{} has a stray sub-second fraction: {}", event.event_id, event.occurred_at);
+        }
     }
 
     #[tokio::test]

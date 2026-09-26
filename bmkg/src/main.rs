@@ -1,5 +1,7 @@
 mod config;
+mod errors;
 mod models;
+mod routes;
 mod seed;
 mod state;
 
@@ -33,8 +35,25 @@ async fn main() {
         None => seed::seed_default(&state, &mut generator, now).await,
     }
 
-    // Temporary: no server yet. This is replaced by the real startup log line once logging is wired up.
-    println!("BMKG configuration loaded: {config:?}; seeded {} seismic events", state.seismic_event_count().await);
+    let seeded = state.seismic_event_count().await;
+    let app = routes::build_router(state);
+
+    let addr = format!("0.0.0.0:{}", config.port);
+    let listener = match tokio::net::TcpListener::bind(&addr).await {
+        Ok(listener) => listener,
+        Err(err) => {
+            eprintln!("Failed to bind to {addr}: {err}");
+            std::process::exit(1);
+        }
+    };
+
+    // Temporary: replaced by a structured startup log line once logging is wired up.
+    println!("BMKG is running on http://{addr} ({seeded} seismic events seeded)");
+
+    if let Err(err) = axum::serve(listener, app).await {
+        eprintln!("Server error: {err}");
+        std::process::exit(1);
+    }
 }
 
 /// A bare number (`cargo run -- 10`) seeds exactly that many records instead of the full default history.
