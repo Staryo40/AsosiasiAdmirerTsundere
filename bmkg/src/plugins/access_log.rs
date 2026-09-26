@@ -5,8 +5,8 @@ use std::net::SocketAddr;
 use std::time::Instant;
 use tracing::Level;
 
-use crate::correlation::CORRELATION_ID_HEADER;
-use crate::delay::DelayMs;
+use crate::plugins::correlation::CORRELATION_ID_HEADER;
+use crate::plugins::delay::DelayMs;
 
 const MAX_LOGGED_PATH: usize = 256;
 

@@ -8,11 +8,11 @@ use axum::{Json, Router};
 use chrono::{DateTime, Utc};
 use serde::Deserialize;
 
-use crate::access_log::log_access;
-use crate::auth::require_api_key;
-use crate::correlation::propagate_correlation_id;
-use crate::delay::{add_response_delay, DelayRange};
-use crate::errors::ApiError;
+use crate::plugins::access_log::log_access;
+use crate::plugins::auth::require_api_key;
+use crate::plugins::correlation::propagate_correlation_id;
+use crate::plugins::delay::{add_response_delay, DelayRange};
+use crate::plugins::errors::ApiError;
 use crate::state::AppState;
 
 /// `/health` is deliberately outside the protected group: like PVMBG's, it must answer with no
@@ -74,8 +74,8 @@ async fn tsunami_warnings(State(state): State<AppState>, Query(query): Query<Sin
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::auth::API_KEY_HEADER;
-    use crate::correlation::CORRELATION_ID_HEADER;
+    use crate::plugins::auth::API_KEY_HEADER;
+    use crate::plugins::correlation::CORRELATION_ID_HEADER;
     use crate::models::{SeismicEvent, ThreatLevel, TsunamiWarning};
     use crate::test_support::LogCapture;
     use chrono::TimeZone;

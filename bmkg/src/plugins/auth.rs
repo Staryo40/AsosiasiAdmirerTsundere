@@ -6,8 +6,8 @@ use axum::middleware::Next;
 use axum::response::Response;
 use subtle::ConstantTimeEq;
 
-use crate::correlation::CorrelationId;
-use crate::errors::ApiError;
+use crate::plugins::correlation::CorrelationId;
+use crate::plugins::errors::ApiError;
 
 pub const API_KEY_HEADER: &str = "X-BMKG-Key";
 
