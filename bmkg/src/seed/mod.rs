@@ -9,7 +9,6 @@ const REGIONS: [&str; 10] = [
     "Aceh", "Nias", "Mentawai", "Bengkulu", "Selat Sunda", "Yogyakarta", "Palu", "Ambon", "Maluku Utara", "Papua Barat",
 ];
 
-// Indonesia's very rough bounding box: enough to keep mock coordinates plausible, not survey-grade.
 const LAT_RANGE: Range<f64> = -11.0..6.0;
 const LON_RANGE: Range<f64> = 95.0..141.0;
 
@@ -19,8 +18,7 @@ fn seed_start() -> DateTime<Utc> {
     Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap()
 }
 
-/// Creates seismic events (and, for the ones that warrant it, a matching tsunami warning) from a
-/// deterministic RNG, so the same seed value always produces the same history and the same ids.
+/// Creates seismic events from a deterministic RNG, so the same seed always produces the same history.
 pub struct EventGenerator {
     rng: StdRng,
     next_event_id: u64,
@@ -32,9 +30,7 @@ impl EventGenerator {
         Self { rng: StdRng::seed_from_u64(seed), next_event_id: 1, next_warning_id: 1 }
     }
 
-    /// Generates one event timestamped `occurred_at`, and a tsunami warning when the event
-    /// warrants one (loosely mirroring BMKG's real criterion: shallow and strong enough to
-    /// displace water).
+    /// Generates one event, and a tsunami warning when it warrants one (shallow and strong enough).
     pub fn next(&mut self, occurred_at: DateTime<Utc>) -> (SeismicEvent, Option<TsunamiWarning>) {
         let region = REGIONS[self.rng.random_range(0..REGIONS.len())];
         let magnitude = (self.rng.random_range(25..76) as f64) / 10.0; // 2.5 - 7.5
@@ -109,13 +105,11 @@ pub async fn seed_default(state: &AppState, generator: &mut EventGenerator, unti
     }
 }
 
-/// Seeds exactly `count` events, spaced `SEED_PERIOD_HOURS` apart, ending at the most recent slot
-/// at or before `until`. Used for `cargo run -- N`, e.g. for fast local runs and tests.
+/// Seeds exactly `count` events, spaced `SEED_PERIOD_HOURS` apart, ending at or before `until`.
 pub async fn seed_count(state: &AppState, generator: &mut EventGenerator, count: usize, until: DateTime<Utc>) {
     let period = Duration::hours(SEED_PERIOD_HOURS);
     let period_secs = period.num_seconds();
-    // Truncate to whole seconds first: `until` is usually `Utc::now()`, which carries sub-second
-    // precision that would otherwise survive into every generated timestamp as a stray fraction.
+    // Truncated to whole seconds first, since `until` (usually `Utc::now()`) carries sub-second precision.
     let now_whole_seconds = DateTime::from_timestamp(until.timestamp(), 0).expect("a valid DateTime always has a representable Unix timestamp");
     let last_slot = now_whole_seconds - Duration::seconds(now_whole_seconds.timestamp().rem_euclid(period_secs));
 
@@ -126,12 +120,7 @@ pub async fn seed_count(state: &AppState, generator: &mut EventGenerator, count:
     }
 }
 
-/// Runs forever, adding one new event (and, when it warrants one, a tsunami warning) every
-/// `interval`, timestamped at the moment it is generated. This is what keeps BMKG's feed growing
-/// while it runs, matching the spec's "at least one new event every 10 seconds" requirement, the
-/// same role PVMBG's `LiveReportGenerator` plays there. Takes `generator` and `state` by value: the
-/// caller spawns this as its own task after seeding finishes, since `generator`'s RNG and id
-/// counters continue the exact sequence the seed left off (no separate seed for live data).
+/// Runs forever, adding one new event every `interval`, continuing the seed's generator sequence.
 pub async fn run_live_generator(state: AppState, mut generator: EventGenerator, interval: std::time::Duration) {
     loop {
         tokio::time::sleep(interval).await;
@@ -254,7 +243,6 @@ mod tests {
     async fn seed_count_produces_whole_second_timestamps_even_from_a_sub_second_instant() {
         let state = AppState::new();
         let mut generator = EventGenerator::new(42);
-        // `Utc::now()` always carries sub-second precision; a real run hits this every time.
         seed_count(&state, &mut generator, 3, Utc::now()).await;
 
         let events = state.seismic_events_since(None).await;

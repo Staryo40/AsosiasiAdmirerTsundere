@@ -15,15 +15,7 @@ use crate::plugins::delay::{add_response_delay, DelayRange};
 use crate::plugins::errors::ApiError;
 use crate::state::AppState;
 
-/// `/health` is deliberately outside the protected group: like PVMBG's, it must answer with no
-/// credential, so a demo or a Docker health check can probe liveness without a key. The delay
-/// layer, in contrast, wraps everything (including `/health` and rejected requests), since a low
-/// and consistent response time is BMKG's defining trait for every call, not just the data routes.
-///
-/// Layer order (outermost first): access log, correlation id, delay, then auth (innermost, applied
-/// to the protected group only). Correlation id and delay must both sit above auth so a request
-/// carries its id and has already been delayed before the auth check ever runs; access log must be
-/// the outermost of the three so it can read what the other two tagged onto the response.
+// Layer order matters: access log (outermost), correlation id, delay, then auth (innermost).
 pub fn build_router(state: AppState, api_key: Arc<str>, delay: DelayRange) -> Router {
     let protected = Router::new()
         .route("/seismic-events", get(seismic_events))
@@ -48,8 +40,7 @@ pub struct SinceQuery {
     since: Option<String>,
 }
 
-/// Parsed by hand (not by axum's query deserializer) so a bad value gets our own `{"error": ...}`
-/// body and message, matching PVMBG's `since` handling, instead of axum's default rejection text.
+// `since` is parsed by hand so a bad value gets our own JSON error, not axum's default rejection text.
 fn parse_since(raw: Option<String>) -> Result<Option<DateTime<Utc>>, ApiError> {
     match raw {
         None => Ok(None),
@@ -84,9 +75,7 @@ mod tests {
 
     const TEST_KEY: &str = "test-key-for-routes";
 
-    /// Starts a real server on an OS-assigned port and returns its base URL, mirroring how
-    /// PVMBG's tests run the whole app rather than poking at handlers directly. No delay, so these
-    /// tests (which are about routing and auth, not timing) stay fast; delay.rs tests timing.
+    // Starts a real server on an OS-assigned port; no delay, since these tests are not about timing.
     async fn spawn(state: AppState) -> String {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
@@ -102,8 +91,7 @@ mod tests {
         reqwest::Client::new().get(format!("{base}{path}")).header(API_KEY_HEADER, TEST_KEY).send().await.unwrap()
     }
 
-    /// Like `spawn`, but with a real delay, for the handful of tests that check delay is applied
-    /// to the composed app (auth + routing + delay together), not just to `delay.rs`'s own toy router.
+    // Like `spawn`, but with a real delay, for tests that check delay in the fully composed app.
     async fn spawn_with_delay(state: AppState, delay: DelayRange) -> String {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
@@ -251,7 +239,6 @@ mod tests {
     #[tokio::test]
     async fn health_needs_no_key_at_all() {
         let base = spawn(AppState::new()).await;
-        // Deliberately uses the bare client, no X-BMKG-Key header, unlike authorized_get.
         let response = reqwest::get(format!("{base}/health")).await.unwrap();
 
         assert_eq!(response.status(), 200);
@@ -474,15 +461,12 @@ mod tests {
     async fn a_hostile_correlation_id_cannot_forge_or_break_a_log_line() {
         let capture = LogCapture::new();
         let base = spawn(AppState::new()).await;
-        // No raw newline: HTTP header values cannot contain one, so a well-behaved client (like the
-        // one used here) refuses to send it at all -- that is a real, useful defense already
-        // provided by the HTTP stack, not something this test needs to separately exercise.
+        // No raw newline: reqwest's own HeaderValue builder refuses to send one.
         let hostile = "x\"y\" {\"level\":\"FAKE\",\"event\":\"http_request\"}";
 
         reqwest::Client::new().get(format!("{base}/health")).header(CORRELATION_ID_HEADER, hostile).send().await.unwrap();
 
-        // `lines()` already asserts every captured line parses as one JSON object; getting here at
-        // all means the hostile value did not split or corrupt the output into extra/broken lines.
+        // `lines()` already asserts every line parses as JSON; getting here proves nothing was corrupted.
         let line = capture.events_named("http_request").into_iter().find(|l| l["path"] == "/health").unwrap();
         assert_ne!(line["correlation_id"], hostile, "the hostile id should have been replaced");
         assert_eq!(line["level"], "DEBUG");

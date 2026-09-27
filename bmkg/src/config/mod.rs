@@ -15,7 +15,6 @@ pub struct AppConfig {
     pub log_format: String,
 }
 
-// Never derived: a derived Debug would print `api_key` in plain text in any startup log or panic message.
 impl fmt::Debug for AppConfig {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("AppConfig")
@@ -48,8 +47,7 @@ impl AppConfig {
         Self::from_env(|key| std::env::var(key).ok())
     }
 
-    /// Pure version of `load`, driven by any key lookup function. Kept separate so tests can supply
-    /// an in-memory map instead of mutating real process environment variables (which cargo test runs in parallel).
+    /// Pure version of `load`, driven by any key lookup function.
     pub fn from_env(get: impl Fn(&str) -> Option<String>) -> Result<Self, ConfigError> {
         let api_key = require(&get, "BMKG_API_KEY")?;
         let port = parse_or_default(&get, "BMKG_PORT", 8081u16)?;

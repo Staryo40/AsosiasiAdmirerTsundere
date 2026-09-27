@@ -23,10 +23,7 @@ impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for SharedBuffer {
     }
 }
 
-/// Installs a JSON subscriber as the *thread-local* default for as long as the returned guard is
-/// alive. Relies on `#[tokio::test]`'s default single-threaded runtime: a spawned server task
-/// (`tokio::spawn`) is cooperatively scheduled on the same OS thread as the test body, so it is
-/// covered by this scope too, exactly as real BMKG output would render for its own configured level.
+/// Installs a JSON subscriber as the thread-local default for as long as the guard is alive.
 pub struct LogCapture {
     buffer: SharedBuffer,
     _guard: DefaultGuard,

@@ -8,8 +8,7 @@ struct ErrorBody {
     error: String,
 }
 
-/// Every error a handler can return. Each variant maps to one status code and a `{"error": "..."}`
-/// JSON body, so failures always look the same shape as PVMBG's, whatever went wrong.
+/// Every error a handler can return. Each variant maps to one status code and a `{"error": "..."}` body.
 #[derive(Debug)]
 pub enum ApiError {
     BadRequest(String),

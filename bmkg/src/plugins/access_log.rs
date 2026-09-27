@@ -10,10 +10,7 @@ use crate::plugins::delay::DelayMs;
 
 const MAX_LOGGED_PATH: usize = 256;
 
-/// One line per request, once the response is ready. Wraps the whole router (via `.layer` in
-/// routes.rs, applied outermost of the three cross-cutting layers), so it also sees 404s, 401s and
-/// anything the delay/correlation-id layers tagged onto the response. Never logs headers, bodies,
-/// or query strings.
+/// One line per request, once the response is ready. Never logs headers, bodies, or query strings.
 pub async fn log_access(ConnectInfo(client_addr): ConnectInfo<SocketAddr>, request: Request, next: Next) -> Response {
     let method = request.method().clone();
     let path: String = request.uri().path().chars().take(MAX_LOGGED_PATH).collect();
@@ -22,9 +19,7 @@ pub async fn log_access(ConnectInfo(client_addr): ConnectInfo<SocketAddr>, reque
     let response = next.run(request).await;
 
     let status = response.status().as_u16();
-    // `tracing-serde`'s JSON visitor has no `record_u128` override, so a `u128` field falls back
-    // to `record_debug` and gets serialized as a *string*, not a number; a request never legitimately
-    // takes anywhere near u64::MAX milliseconds, so this cast is exact in every real case.
+    // Cast to u64: tracing-serde has no record_u128 override, so a u128 field logs as a string.
     let duration_ms = started.elapsed().as_millis() as u64;
     let delay_ms = response.extensions().get::<DelayMs>().map_or(0, |d| d.0);
     let correlation_id = response
@@ -51,8 +46,7 @@ pub async fn log_access(ConnectInfo(client_addr): ConnectInfo<SocketAddr>, reque
         };
     }
 
-    // Runtime level dispatch is not something the `tracing` macros support directly (the level is
-    // baked into each callsite's static metadata), hence the small match instead of one dynamic call.
+    // tracing macros need a compile-time level, hence the match instead of one dynamic call.
     match access_level(&path, status) {
         Level::DEBUG => log_at!(debug),
         Level::WARN => log_at!(warn),
@@ -63,10 +57,7 @@ pub async fn log_access(ConnectInfo(client_addr): ConnectInfo<SocketAddr>, reque
     response
 }
 
-/// A healthy health check is expected to be polled constantly, so it is DEBUG. Everything else BMKG
-/// can return is either a normal read (INFO) or a rejected/bad request (WARN); BMKG has no outage
-/// mode and no server-side failure mode of its own, so there is no real 5xx case to reserve ERROR for
-/// short of a genuine bug, which is exactly what ERROR should be reserved for.
+/// A healthy `/health` is DEBUG (polled constantly); rejections are WARN; ERROR is for a genuine bug.
 fn access_level(path: &str, status: u16) -> Level {
     match () {
         _ if path == "/health" && status < 400 => Level::DEBUG,

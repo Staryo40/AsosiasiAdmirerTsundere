@@ -6,13 +6,11 @@ use uuid::Uuid;
 
 pub const CORRELATION_ID_HEADER: &str = "X-Correlation-ID";
 
-/// Carried on the request so anything deeper in the middleware stack (namely the auth check) can
-/// log with the same id, and echoed onto the response so the access log and the caller both see it.
+/// Carried on the request for deeper middleware to log with, and echoed onto the response.
 #[derive(Debug, Clone)]
 pub struct CorrelationId(pub String);
 
-/// Same rule as PVMBG's: short and plain, so a hostile header cannot flood the logs or smuggle odd
-/// characters into them. Anything else is replaced by a generated id, never logged.
+/// Same validation rule as PVMBG's: short and plain, so a hostile header cannot smuggle odd characters in.
 fn is_valid(id: &str) -> bool {
     !id.is_empty() && id.len() <= 64 && id.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'))
 }
@@ -28,7 +26,6 @@ pub async fn propagate_correlation_id(headers: HeaderMap, mut request: Request, 
     request.extensions_mut().insert(CorrelationId(id.clone()));
 
     let mut response = next.run(request).await;
-    // `id` is always alphanumeric/._- or a UUID, so this never fails; skip rather than panic if it somehow did.
     if let Ok(value) = HeaderValue::from_str(&id) {
         response.headers_mut().insert(CORRELATION_ID_HEADER, value);
     }

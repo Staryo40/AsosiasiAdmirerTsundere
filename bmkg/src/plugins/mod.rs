@@ -1,5 +1,4 @@
-//! Cross-cutting axum middleware and the shared error-response type, mirroring PVMBG's
-//! `plugins/` package (Auth, CorrelationId, ResponseDelay, AccessLog, StatusPages).
+//! Cross-cutting axum middleware and the shared error-response type.
 pub mod access_log;
 pub mod auth;
 pub mod correlation;

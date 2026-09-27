@@ -1,10 +1,7 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-/// Field names, types and casing are fixed by the spec and must not change.
-/// `issued_at` is an addition beyond the spec: the spec allows additions as long as nothing
-/// already specified changes, and `since` filtering needs a timestamp that TsunamiWarning does not
-/// otherwise have (`estimated_arrival` is a future prediction, not when the warning was created).
+/// Field names, types and casing are fixed by the spec; `issued_at` is an addition beyond it.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SeismicEvent {
     pub event_id: String,

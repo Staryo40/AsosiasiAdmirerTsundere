@@ -4,17 +4,14 @@ use axum::response::Response;
 use rand::RngExt;
 use std::time::Duration;
 
-/// BMKG's defining trait, unlike PVMBG's: a low and *consistent* delay, with no outage mode and
-/// no admin route to change it at runtime. It applies to every response, including `/health` and
-/// unauthorized ones, so a caller cannot tell a wrong key from a right one by timing alone.
+/// BMKG's defining trait: a low and *consistent* delay, applied to every response including rejected ones.
 #[derive(Debug, Clone, Copy)]
 pub struct DelayRange {
     pub min_ms: u64,
     pub max_ms: u64,
 }
 
-/// Tagged onto the response so the (outer) access log middleware can report how much of the total
-/// duration was this deliberate delay versus BMKG's own processing time.
+/// Tagged onto the response so the access log can report how much of the duration was this delay.
 #[derive(Debug, Clone, Copy)]
 pub struct DelayMs(pub u64);
 
@@ -28,8 +25,7 @@ pub async fn add_response_delay(State(range): State<DelayRange>, request: Reques
     response
 }
 
-/// Takes the RNG as a parameter so the distribution can be tested deterministically without
-/// touching the ambient thread-local generator the middleware itself uses.
+/// Takes the RNG as a parameter so the distribution can be tested deterministically.
 fn pick_delay_ms(range: DelayRange, rng: &mut impl RngExt) -> u64 {
     rng.random_range(range.min_ms..=range.max_ms)
 }
@@ -109,9 +105,7 @@ mod tests {
         assert!(elapsed_ms(&format!("{base}/no-such-route")).await >= 90);
     }
 
-    // `#[tokio::test]` defaults to a single-threaded runtime; production runs under `#[tokio::main]`'s
-    // multi-threaded one. Matching that here, plus reusing one `Client` instead of building 30 (each
-    // of which does its own non-trivial setup), isolates the middleware's own behaviour from that overhead.
+    // multi_thread flavor + one shared Client: matches production's runtime and isolates real timing.
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn many_delayed_requests_wait_in_parallel_without_blocking_each_other() {
         let base = spawn(DelayRange { min_ms: 200, max_ms: 200 }).await;

@@ -43,9 +43,6 @@ async fn main() {
 
     let seeded = state.seismic_event_count().await;
 
-    // Continues the same generator (same RNG, same id sequence) the seed left off, so live events
-    // and seeded ones never collide on an id. Spawned after `seeded` is read, so the startup log
-    // below always reports exactly what the seed produced, not a count racing the live generator.
     let generator_interval = std::time::Duration::from_millis(config.generator_interval_ms);
     tokio::spawn(seed::run_live_generator(state.clone(), generator, generator_interval));
 
@@ -81,11 +78,6 @@ async fn main() {
     }
 }
 
-// Running as PID 1 in a container matters here: unlike any other process, PID 1 does not get the
-// kernel's default "terminate" action for a signal it has not explicitly handled, so an unhandled
-// SIGTERM from `docker stop` is silently ignored until Docker's grace period expires and force-kills
-// the process with SIGKILL instead. Rust installs no signal handlers on its own (unlike the JVM,
-// which PVMBG relies on for exactly this), so this has to be done explicitly.
 async fn shutdown_signal() {
     let mut terminate = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
         .expect("failed to install a SIGTERM handler");

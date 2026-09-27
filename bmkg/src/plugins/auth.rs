@@ -11,13 +11,7 @@ use crate::plugins::errors::ApiError;
 
 pub const API_KEY_HEADER: &str = "X-BMKG-Key";
 
-/// Checks `X-BMKG-Key` against the one configured key. BMKG has a single caller (the BNPB
-/// gateway), so unlike PVMBG there is no login step and no per-client scope: the header either
-/// matches or it does not. A PVMBG-style Bearer token sent here is just a string that will never
-/// match, so it is rejected the same way as any other wrong value.
-///
-/// Relies on `correlation::propagate_correlation_id` having already run and inserted a
-/// `CorrelationId` into the request's extensions; the router in routes.rs guarantees that ordering.
+/// Checks `X-BMKG-Key` against the one configured key. Relies on the correlation-id layer having run first.
 pub async fn require_api_key(
     State(expected_key): State<Arc<str>>,
     headers: HeaderMap,
@@ -42,9 +36,7 @@ pub async fn require_api_key(
     }
 }
 
-/// Constant-time comparison, so a caller probing many wrong keys cannot learn anything from how
-/// long the check takes. Lengths are compared first only to size the byte comparison; `ct_eq`
-/// itself still runs over the full (equal) length either way.
+/// Constant-time comparison, so probing wrong keys learns nothing from timing.
 fn key_matches(provided: &str, expected: &str) -> bool {
     provided.len() == expected.len() && provided.as_bytes().ct_eq(expected.as_bytes()).into()
 }

@@ -9,9 +9,7 @@ struct Store {
     tsunami_warnings: Vec<TsunamiWarning>,
 }
 
-/// In-memory storage shared between the HTTP handlers and the background generator task.
-/// `tokio::sync::RwLock` is used (not `std::sync::RwLock`) because it can be held across an
-/// `.await` point without blocking an executor thread.
+/// In-memory storage shared between HTTP handlers and the background generator task.
 #[derive(Clone, Default)]
 pub struct AppState {
     store: Arc<RwLock<Store>>,
@@ -30,9 +28,7 @@ impl AppState {
         self.store.write().await.tsunami_warnings.push(warning);
     }
 
-    /// Events strictly after `since` (or all of them if `since` is `None`), oldest first.
-    /// Sorted on every read rather than relying on insertion order, so correctness never depends
-    /// on the caller having inserted events in timestamp order.
+    /// Events strictly after `since` (or all of them if `since` is `None`), oldest first, re-sorted on every read.
     pub async fn seismic_events_since(&self, since: Option<DateTime<Utc>>) -> Vec<SeismicEvent> {
         let store = self.store.read().await;
         let mut events: Vec<SeismicEvent> = store
@@ -128,7 +124,6 @@ mod tests {
     #[tokio::test]
     async fn tsunami_warnings_are_filtered_by_issued_at_not_estimated_arrival() {
         let state = AppState::new();
-        // issued early, but predicts a late arrival: `since` must key off `issued_at`.
         let mut w = warning("a", at(0));
         w.estimated_arrival = at(100);
         state.add_tsunami_warning(w).await;
