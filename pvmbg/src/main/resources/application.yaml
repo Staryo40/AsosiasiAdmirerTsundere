@@ -1,0 +1,27 @@
+ktor:
+  deployment:
+    port: 8082
+  application:
+    modules:
+      - com.staryo.MainKt.module
+
+pvmbg:
+  generator:
+    interval-seconds: $PVMBG_GENERATOR_INTERVAL_SECONDS:10
+
+  delay:
+    min-ms: $PVMBG_RESPONSE_DELAY_MIN_MS:500
+    max-ms: $PVMBG_RESPONSE_DELAY_MAX_MS:3000
+  logging:
+    level: $PVMBG_LOG_LEVEL:INFO
+    format: $PVMBG_LOG_FORMAT:json
+  auth:
+    jwt-secret: $PVMBG_JWT_SECRET
+    reader-client-id: $PVMBG_READER_CLIENT_ID
+    reader-client-secret: $PVMBG_READER_CLIENT_SECRET
+    admin-client-id: $PVMBG_ADMIN_CLIENT_ID
+    admin-client-secret: $PVMBG_ADMIN_CLIENT_SECRET
+    issuer: pvmbg
+    audience: pvmbg-api
+    token-ttl-seconds: $PVMBG_TOKEN_TTL_SECONDS:300
+    login-rate-limit-per-minute: $PVMBG_LOGIN_RATE_LIMIT:5
