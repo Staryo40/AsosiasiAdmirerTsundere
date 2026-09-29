@@ -18,3 +18,5 @@ build/
 bin/
 .gradle/
 .kotlin/
+
+*.local.*
