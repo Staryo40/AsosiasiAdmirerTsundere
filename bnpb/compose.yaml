@@ -1,5 +1,14 @@
-# Currently infrastructure only. Waiting for the app container to be implemented and added.
 name: bnpb
+
+x-bnpb-environment: &bnpb-environment
+  BNPB_LOG_LEVEL: ${BNPB_LOG_LEVEL:-INFO}
+  BNPB_MAX_IN_FLIGHT: ${BNPB_MAX_IN_FLIGHT:-64}
+  BNPB_OUTBOUND_HTTP_TIMEOUT: ${BNPB_OUTBOUND_HTTP_TIMEOUT:-5s}
+  BNPB_READ_HEADER_TIMEOUT: ${BNPB_READ_HEADER_TIMEOUT:-5s}
+  BNPB_READ_TIMEOUT: ${BNPB_READ_TIMEOUT:-10s}
+  BNPB_WRITE_TIMEOUT: ${BNPB_WRITE_TIMEOUT:-10s}
+  BNPB_IDLE_TIMEOUT: ${BNPB_IDLE_TIMEOUT:-60s}
+  BNPB_SHUTDOWN_TIMEOUT: ${BNPB_SHUTDOWN_TIMEOUT:-5s}
 
 services:
   postgres:
@@ -34,7 +43,117 @@ services:
       timeout: 5s
       retries: 10
 
+  api:
+    build:
+      context: .
+      dockerfile: cmd/api/Dockerfile
+    environment:
+      <<: *bnpb-environment
+      BNPB_API_HTTP_ADDR: ${BNPB_API_HTTP_ADDR:-:8080}
+    ports:
+      - "8080:8080"
+    networks:
+      - backend
+    healthcheck:
+      test: [CMD, /bnpb-api, -healthcheck]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  aggregator:
+    build:
+      context: .
+      dockerfile: cmd/aggregator/Dockerfile
+    environment:
+      <<: *bnpb-environment
+      BNPB_AGGREGATOR_HTTP_ADDR: ${BNPB_AGGREGATOR_HTTP_ADDR:-:8083}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - backend
+      - canonical-store
+      - events
+    healthcheck:
+      test: [CMD, /bnpb-aggregator, -healthcheck]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  auth:
+    build:
+      context: .
+      dockerfile: cmd/auth/Dockerfile
+    environment:
+      <<: *bnpb-environment
+      BNPB_AUTH_HTTP_ADDR: ${BNPB_AUTH_HTTP_ADDR:-:8084}
+    networks:
+      - backend
+    healthcheck:
+      test: [CMD, /bnpb-auth, -healthcheck]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  consumer-1:
+    build:
+      context: .
+      dockerfile: cmd/consumer-1/Dockerfile
+    environment:
+      <<: *bnpb-environment
+      BNPB_CONSUMER_1_HTTP_ADDR: ${BNPB_CONSUMER_1_HTTP_ADDR:-:8085}
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - events
+    healthcheck:
+      test: [CMD, /bnpb-consumer-1, -healthcheck]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  consumer-2:
+    build:
+      context: .
+      dockerfile: cmd/consumer-2/Dockerfile
+    environment:
+      <<: *bnpb-environment
+      BNPB_CONSUMER_2_HTTP_ADDR: ${BNPB_CONSUMER_2_HTTP_ADDR:-:8086}
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - events
+    healthcheck:
+      test: [CMD, /bnpb-consumer-2, -healthcheck]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  consumer-3:
+    profiles: [demo]
+    build:
+      context: .
+      dockerfile: cmd/consumer-3/Dockerfile
+    environment:
+      <<: *bnpb-environment
+      BNPB_CONSUMER_3_HTTP_ADDR: ${BNPB_CONSUMER_3_HTTP_ADDR:-:8087}
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - events
+    healthcheck:
+      test: [CMD, /bnpb-consumer-3, -healthcheck]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
 networks:
+  backend:
   canonical-store:
     internal: true
   events:
