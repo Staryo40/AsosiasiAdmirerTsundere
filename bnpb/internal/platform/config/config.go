@@ -1,4 +1,5 @@
-package platform
+// Package config loads and validates shared BNPB service settings.
+package config
 
 import (
 	"fmt"
@@ -34,8 +35,8 @@ type Config struct {
 	ShutdownTimeout     time.Duration
 }
 
-// Reads and validates the shared settings plus one service address.
-func LoadConfig(httpAddrVar, defaultAddr string) (Config, error) {
+// Load reads and validates the shared settings plus one service address.
+func Load(httpAddrVar, defaultAddr string) (Config, error) {
 	addr, err := envAddress(httpAddrVar, defaultAddr)
 	if err != nil {
 		return Config{}, err

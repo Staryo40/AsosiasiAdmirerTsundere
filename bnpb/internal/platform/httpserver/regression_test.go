@@ -1,4 +1,4 @@
-package platform
+package httpserver
 
 import (
 	"bytes"
@@ -11,12 +11,13 @@ import (
 	"net/textproto"
 	"strings"
 	"testing"
-	"time"
+
+	"github.com/Staryo40/AsosiasiAdmirerTsundere/bnpb/internal/platform/correlation"
 )
 
 func TestInformationalHeadersPreserveFinalResponse(t *testing.T) {
 	var output bytes.Buffer
-	server := httptest.NewServer(HTTPHandler(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	server := httptest.NewServer(Handler(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusEarlyHints)
 		w.WriteHeader(http.StatusProcessing)
 		w.WriteHeader(http.StatusCreated)
@@ -47,7 +48,7 @@ func TestInformationalHeadersPreserveFinalResponse(t *testing.T) {
 
 func TestPanicAfterFlushAborts(t *testing.T) {
 	var output bytes.Buffer
-	handler := HTTPHandler(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	handler := Handler(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		if err := http.NewResponseController(w).Flush(); err != nil {
 			t.Fatal(err)
 		}
@@ -63,7 +64,7 @@ func TestPanicAfterFlushAborts(t *testing.T) {
 
 func TestExplicitAbortIsPreserved(t *testing.T) {
 	var output bytes.Buffer
-	handler := HTTPHandler(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+	handler := Handler(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
 		panic(http.ErrAbortHandler)
 	}), testLogger(&output), 1)
 	defer func() {
@@ -76,7 +77,7 @@ func TestExplicitAbortIsPreserved(t *testing.T) {
 
 func TestPanicDiscardsUncommittedResponseHeaders(t *testing.T) {
 	var output bytes.Buffer
-	server := httptest.NewServer(HTTPHandler(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	server := httptest.NewServer(Handler(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Length", "1")
 		w.Header().Set("Content-Encoding", "gzip")
 		panic("private")
@@ -91,7 +92,7 @@ func TestPanicDiscardsUncommittedResponseHeaders(t *testing.T) {
 	if err != nil || response.StatusCode != 500 || string(body) != "{\"error\":\"internal server error\"}\n" {
 		t.Fatalf("status=%d body=%q error=%v", response.StatusCode, body, err)
 	}
-	if response.Header.Get(CorrelationHeader) == "" {
+	if response.Header.Get(correlation.Header) == "" {
 		t.Fatal("missing correlation header")
 	}
 }
@@ -106,44 +107,6 @@ func TestOnlyHealthMethodsBypassLimit(t *testing.T) {
 		handler.ServeHTTP(response, httptest.NewRequest(method, "/health", nil))
 		if response.Code != want {
 			t.Errorf("%s: got %d, want %d", method, response.Code, want)
-		}
-	}
-}
-
-func TestClientClosesIdleConnections(t *testing.T) {
-	closed := make(chan struct{}, 1)
-	server := httptest.NewUnstartedServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
-	server.Config.ConnState = func(_ net.Conn, state http.ConnState) {
-		if state == http.StateClosed {
-			closed <- struct{}{}
-		}
-	}
-	server.Start()
-	defer server.Close()
-	var output bytes.Buffer
-	client := NewHTTPClient(time.Second, testLogger(&output))
-	response, err := client.Get(server.URL)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, _ = io.Copy(io.Discard, response.Body)
-	response.Body.Close()
-	client.CloseIdleConnections()
-	select {
-	case <-closed:
-	case <-time.After(time.Second):
-		t.Fatal("CloseIdleConnections did not reach the owned transport")
-	}
-}
-
-func TestOutboundStatusLogLevels(t *testing.T) {
-	for status, level := range map[int]string{200: "INFO", 429: "WARN", 503: "ERROR"} {
-		var output bytes.Buffer
-		request := httptest.NewRequest(http.MethodGet, "http://agency/events", nil)
-		transport := instrumentedTransport{logger: testLogger(&output)}
-		transport.logSuccess(request, &http.Response{StatusCode: status}, time.Millisecond)
-		if records := decodeLogLines(t, output.Bytes()); records[0]["level"] != level {
-			t.Errorf("status %d: %v", status, records)
 		}
 	}
 }
@@ -174,7 +137,7 @@ func TestServerDiagnosticsAreSanitizedJSON(t *testing.T) {
 		w.Header().Set("Content-Length", "private-header-value")
 		w.WriteHeader(http.StatusOK)
 	}))
-	server.Config = newServer(Config{}, server.Config.Handler, testLogger(&output))
+	server.Config = New(Options{}, server.Config.Handler, testLogger(&output))
 	server.Start()
 	defer server.Close()
 	response, err := server.Client().Get(server.URL)

@@ -1,12 +1,17 @@
-package platform
+// Package httpserver provides HTTP middleware, health probes, and server lifecycle.
+package httpserver
 
 import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
 	"time"
+
+	"github.com/Staryo40/AsosiasiAdmirerTsundere/bnpb/internal/platform/correlation"
+	"github.com/Staryo40/AsosiasiAdmirerTsundere/bnpb/internal/platform/logging"
 )
 
+// RegisterHealth adds the GET /health endpoint to mux.
 func RegisterHealth(mux *http.ServeMux, service string) {
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -14,8 +19,8 @@ func RegisterHealth(mux *http.ServeMux, service string) {
 	})
 }
 
-// HTTPHandler applies the shared request middleware to ordinary HTTP routes.
-func HTTPHandler(next http.Handler, logger *slog.Logger, maxInFlight int) http.Handler {
+// Handler applies the shared request middleware to ordinary HTTP routes.
+func Handler(next http.Handler, logger *slog.Logger, maxInFlight int) http.Handler {
 	handler := limitRequests(next, maxInFlight)
 	handler = recoverPanics(handler, logger)
 	handler = logAccess(handler, logger)
@@ -24,15 +29,15 @@ func HTTPHandler(next http.Handler, logger *slog.Logger, maxInFlight int) http.H
 
 func correlate(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		values := r.Header.Values(CorrelationHeader)
+		values := r.Header.Values(correlation.Header)
 		correlationID := ""
-		if len(values) == 1 && correlationPattern.MatchString(values[0]) {
+		if len(values) == 1 && correlation.ValidID(values[0]) {
 			correlationID = values[0]
 		} else {
-			correlationID = newCorrelationID()
+			correlationID = correlation.NewID()
 		}
-		w.Header().Set(CorrelationHeader, correlationID)
-		next.ServeHTTP(w, r.WithContext(WithCorrelationID(r.Context(), correlationID)))
+		w.Header().Set(correlation.Header, correlationID)
+		next.ServeHTTP(w, r.WithContext(correlation.WithID(r.Context(), correlationID)))
 	})
 }
 
@@ -60,13 +65,13 @@ func recoverPanics(next http.Handler, logger *slog.Logger) http.Handler {
 			if recovered == nil {
 				return
 			}
-			logEvent(r.Context(), logger, logRecord{slog.LevelError, "http_panic", "recovered HTTP handler panic"})
+			logging.Event(r.Context(), logger, logging.Record{Level: slog.LevelError, Event: "http_panic", Message: "recovered HTTP handler panic"})
 			if recovered == http.ErrAbortHandler || responseStarted(w) {
 				panic(http.ErrAbortHandler)
 			}
 			// Headers prepared for the failed response may corrupt the JSON error.
 			clear(w.Header())
-			w.Header().Set(CorrelationHeader, CorrelationID(r.Context()))
+			w.Header().Set(correlation.Header, correlation.ID(r.Context()))
 			writeJSONError(w, http.StatusInternalServerError, "internal server error")
 		}()
 		next.ServeHTTP(w, r)
@@ -84,7 +89,7 @@ func logAccess(next http.Handler, logger *slog.Logger) http.Handler {
 
 func logRequest(request *http.Request, logger *slog.Logger, recorder *responseRecorder, start time.Time) {
 	status := recorder.Status()
-	logEvent(request.Context(), logger, logRecord{accessLevel(request.URL.Path, status), "http_request", "HTTP request completed"},
+	logging.Event(request.Context(), logger, logging.Record{Level: accessLevel(request.URL.Path, status), Event: "http_request", Message: "HTTP request completed"},
 		"method", request.Method,
 		"path", request.URL.Path,
 		"status", status,
@@ -93,16 +98,10 @@ func logRequest(request *http.Request, logger *slog.Logger, recorder *responseRe
 }
 
 func accessLevel(path string, status int) slog.Level {
-	switch {
-	case status >= 500:
-		return slog.LevelError
-	case status >= 400:
-		return slog.LevelWarn
-	case path == "/health":
+	if path == "/health" && status < 400 {
 		return slog.LevelDebug
-	default:
-		return slog.LevelInfo
 	}
+	return logging.HTTPLevel(status)
 }
 
 type responseRecorder struct {

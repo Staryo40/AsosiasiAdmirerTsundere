@@ -1,4 +1,5 @@
-package platform
+// Package httpclient provides reusable, instrumented outbound HTTP clients.
+package httpclient
 
 import (
 	"context"
@@ -8,10 +9,13 @@ import (
 	"net/http"
 	"net/url"
 	"time"
+
+	"github.com/Staryo40/AsosiasiAdmirerTsundere/bnpb/internal/platform/correlation"
+	"github.com/Staryo40/AsosiasiAdmirerTsundere/bnpb/internal/platform/logging"
 )
 
-// NewHTTPClient returns an isolated, reusable client with correlation and latency logging.
-func NewHTTPClient(timeout time.Duration, logger *slog.Logger) *http.Client {
+// New returns an isolated, reusable client with correlation and latency logging.
+func New(timeout time.Duration, logger *slog.Logger) *http.Client {
 	transport := &http.Transport{
 		Proxy:                 http.ProxyFromEnvironment,
 		DialContext:           (&net.Dialer{Timeout: timeout, KeepAlive: 30 * time.Second}).DialContext,
@@ -54,24 +58,24 @@ func (t instrumentedTransport) RoundTrip(request *http.Request) (*http.Response,
 
 func requestWithCorrelation(request *http.Request) *http.Request {
 	outbound := request.Clone(request.Context())
-	correlationID := CorrelationID(request.Context())
+	correlationID := correlation.ID(request.Context())
 	if correlationID == "" {
-		correlationID = newCorrelationID()
-		outbound = outbound.WithContext(WithCorrelationID(outbound.Context(), correlationID))
+		correlationID = correlation.NewID()
+		outbound = outbound.WithContext(correlation.WithID(outbound.Context(), correlationID))
 	}
-	outbound.Header.Set(CorrelationHeader, correlationID)
+	outbound.Header.Set(correlation.Header, correlationID)
 	return outbound
 }
 
 func (t instrumentedTransport) logFailure(request *http.Request, err error, elapsed time.Duration) {
 	attrs := outboundLogAttrs(request, elapsed)
 	attrs = append(attrs, "failure", transportFailure(request.Context(), err))
-	logEvent(request.Context(), t.logger, logRecord{slog.LevelError, "outbound_http", "outbound HTTP request failed"}, attrs...)
+	logging.Event(request.Context(), t.logger, logging.Record{Level: slog.LevelError, Event: "outbound_http", Message: "outbound HTTP request failed"}, attrs...)
 }
 
 func (t instrumentedTransport) logSuccess(request *http.Request, response *http.Response, elapsed time.Duration) {
 	attrs := append(outboundLogAttrs(request, elapsed), "status", response.StatusCode)
-	logEvent(request.Context(), t.logger, logRecord{accessLevel("", response.StatusCode), "outbound_http", "outbound HTTP response headers received"}, attrs...)
+	logging.Event(request.Context(), t.logger, logging.Record{Level: logging.HTTPLevel(response.StatusCode), Event: "outbound_http", Message: "outbound HTTP response headers received"}, attrs...)
 }
 
 func outboundLogAttrs(request *http.Request, elapsed time.Duration) []any {

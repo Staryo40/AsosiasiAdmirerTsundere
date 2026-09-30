@@ -5,13 +5,14 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/Staryo40/AsosiasiAdmirerTsundere/bnpb/internal/platform"
+	"github.com/Staryo40/AsosiasiAdmirerTsundere/bnpb/internal/platform/config"
+	"github.com/Staryo40/AsosiasiAdmirerTsundere/bnpb/internal/platform/service"
 )
 
 func main() {
-	os.Exit(platform.Bootstrap("bnpb-auth", "BNPB_AUTH_HTTP_ADDR", ":8084", registerRoutes))
+	os.Exit(service.Bootstrap("bnpb-auth", "BNPB_AUTH_HTTP_ADDR", ":8084", registerRoutes))
 }
 
-func registerRoutes(_ *http.ServeMux, _ platform.Config, _ *slog.Logger) {
+func registerRoutes(_ *http.ServeMux, _ config.Config, _ *slog.Logger) {
 	// Token issuance and refresh routes are registered here.
 }
