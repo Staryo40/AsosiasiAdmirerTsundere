@@ -1,0 +1,90 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "HazardNotification v1",
+  "description": "Consumer contract: required v1 envelope fields with future optional keys tolerated. Producers use #/$defs/Producer. Cross-field IDs, retry identity and AMQP properties require implementation checks.",
+  "$ref": "#/$defs/Envelope",
+  "$defs": {
+    "Envelope": {
+      "type": "object",
+      "required": [
+        "schema_version",
+        "message_id",
+        "hazard_id",
+        "revision",
+        "correlation_id",
+        "event_type",
+        "produced_at",
+        "hazard_event"
+      ],
+      "properties": {
+        "schema_version": {
+          "type": "integer",
+          "const": 1
+        },
+        "message_id": {
+          "$ref": "hazard-event.schema.json#/$defs/NonEmptyString"
+        },
+        "hazard_id": {
+          "$ref": "hazard-event.schema.json#/$defs/NonEmptyString"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "correlation_id": {
+          "$ref": "hazard-event.schema.json#/$defs/NonEmptyString"
+        },
+        "event_type": {
+          "type": "string",
+          "enum": [
+            "hazard.created",
+            "hazard.updated"
+          ]
+        },
+        "produced_at": {
+          "$ref": "hazard-event.schema.json#/$defs/UtcTimestamp"
+        },
+        "hazard_event": {
+          "$ref": "hazard-event.schema.json"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "revision": {
+                "const": 1
+              }
+            },
+            "required": [
+              "revision"
+            ]
+          },
+          "then": {
+            "properties": {
+              "event_type": {
+                "const": "hazard.created"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "event_type": {
+                "const": "hazard.updated"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "Producer": {
+      "description": "Current producer emits exactly the eight agreed v1 fields.",
+      "allOf": [
+        {
+          "$ref": "#/$defs/Envelope"
+        }
+      ],
+      "unevaluatedProperties": false
+    }
+  }
+}

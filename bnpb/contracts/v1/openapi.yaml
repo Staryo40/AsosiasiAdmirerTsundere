@@ -1,0 +1,449 @@
+openapi: 3.1.1
+info:
+  title: BNPB Aggregator Internal API
+  version: 1.0.0
+  description: >-
+    A1 snapshot API for the authenticated A2 service. Only Aggregator accesses
+    Canonical Store. Reads do not wait for agency or broker calls. Mapping,
+    freshness rollups, authorization and cursor semantics are specified in README.md.
+security:
+  - InternalKey: []
+paths:
+  /internal/hazards:
+    get:
+      operationId: listHazards
+      summary: Read stored canonical hazards
+      description: >-
+        Order descending by (occurred_at, hazard_id), using locale-independent ID
+        comparison. Time bounds are inclusive. Authentication precedes application
+        validation. Reject unknown, duplicate, empty or inconsistent parameters.
+        Cached/stale and mixed-source reads return 200. Return source_unavailable
+        only when every selected source is unavailable without cached data;
+        availability is independent of filtered matches. Cursor values are opaque,
+        filter-bound, bounded keyset tokens; limit may change between pages.
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+        - name: source
+          in: query
+          schema:
+            $ref: './schemas/hazard-event.schema.json#/properties/source'
+        - name: hazard_type
+          in: query
+          schema:
+            $ref: './schemas/hazard-event.schema.json#/properties/hazard_type'
+        - name: severity
+          in: query
+          schema:
+            $ref: './schemas/hazard-event.schema.json#/properties/severity'
+        - name: occurred_from
+          in: query
+          description: Inclusive RFC 3339 lower bound; explicit offset required.
+          schema:
+            type: string
+            format: date-time
+        - name: occurred_to
+          in: query
+          description: Inclusive RFC 3339 upper bound, at or after occurred_from.
+          schema:
+            type: string
+            format: date-time
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 500
+            default: 100
+        - name: cursor
+          in: query
+          description: >-
+            Unpadded base64url cursor v1, at most 2048 ASCII bytes. Validate version,
+            decoded values and normalized filters. It provides no authorization or
+            snapshot isolation. Do not construct it on the client.
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 2048
+            pattern: '^[A-Za-z0-9_-]+$'
+      responses:
+        '200':
+          description: Stored results, including empty, stale or mixed-source results.
+          headers:
+            X-Correlation-ID:
+              $ref: '#/components/headers/CorrelationId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HazardList'
+        '400':
+          $ref: '#/components/responses/InvalidQuery'
+        '401':
+          $ref: '#/components/responses/MissingCredential'
+        '403':
+          $ref: '#/components/responses/InvalidCredential'
+        '429':
+          $ref: '#/components/responses/AdmissionLimited'
+        '500':
+          $ref: '#/components/responses/UnexpectedError'
+        '503':
+          $ref: '#/components/responses/DependencyUnavailable'
+  /internal/hazards/{hazard_id}:
+    get:
+      operationId: getHazard
+      summary: Read one stored canonical hazard
+      description: >-
+        Accept no query parameters. Return 404 for a missing ID in a usable store,
+        including during source outage. An existing stale record returns 200.
+        sources contains only the record's source. Authentication precedes lookup.
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+        - name: hazard_id
+          in: path
+          required: true
+          schema:
+            $ref: './schemas/hazard-event.schema.json#/properties/hazard_id'
+      responses:
+        '200':
+          description: Full stored record and source freshness.
+          headers:
+            X-Correlation-ID:
+              $ref: '#/components/headers/CorrelationId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HazardDetail'
+        '400':
+          $ref: '#/components/responses/InvalidQuery'
+        '401':
+          $ref: '#/components/responses/MissingCredential'
+        '403':
+          $ref: '#/components/responses/InvalidCredential'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/AdmissionLimited'
+        '500':
+          $ref: '#/components/responses/UnexpectedError'
+        '503':
+          $ref: '#/components/responses/DependencyUnavailable'
+  /ready:
+    get:
+      operationId: readiness
+      summary: Check initialized schema and database readiness
+      security: []
+      responses:
+        '200':
+          description: Initialized schema and database are usable; body not specified.
+        '503':
+          description: Initialization or database is unavailable; body not specified.
+  /health:
+    get:
+      operationId: liveness
+      summary: Existing platform liveness probe
+      description: Agency and broker outages do not fail liveness.
+      security: []
+      responses:
+        '200':
+          description: Existing platform service health.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [service, status]
+                additionalProperties: false
+                properties:
+                  service:
+                    type: string
+                    minLength: 1
+                  status:
+                    type: string
+                    const: ok
+components:
+  securitySchemes:
+    InternalKey:
+      type: apiKey
+      in: header
+      name: X-BNPB-Internal-Key
+      description: >-
+        Dedicated API-to-Aggregator credential. Missing gives 401; empty, repeated
+        or invalid gives 403. Authorization is not a substitute. Never echo the key.
+  parameters:
+    CorrelationId:
+      name: X-Correlation-ID
+      in: header
+      description: >-
+        Platform accepts 1-64 ASCII letters, digits, dot, underscore or hyphen.
+        Missing/invalid values are replaced, not rejected. Response carries the
+        resulting request correlation ID, separate from ingestion correlation.
+      schema:
+        type: string
+  headers:
+    CorrelationId:
+      required: true
+      schema:
+        $ref: '#/components/schemas/CorrelationId'
+  schemas:
+    HazardEvent:
+      $ref: './schemas/hazard-event.schema.json'
+    HazardSummary:
+      $ref: './schemas/hazard-summary.schema.json'
+    UtcTimestamp:
+      $ref: './schemas/hazard-event.schema.json#/$defs/UtcTimestamp'
+    NullableTimestamp:
+      anyOf:
+        - $ref: '#/components/schemas/UtcTimestamp'
+        - type: 'null'
+    CorrelationId:
+      type: string
+      minLength: 1
+      maxLength: 64
+      pattern: '^[A-Za-z0-9._-]+$'
+    Observation:
+      type: object
+      required: [status, last_successful_poll, stale_since, last_attempt_at, error_category]
+      additionalProperties: false
+      properties:
+        status:
+          type: string
+          enum: [healthy, stale, unavailable]
+        last_successful_poll:
+          $ref: '#/components/schemas/NullableTimestamp'
+        stale_since:
+          $ref: '#/components/schemas/NullableTimestamp'
+        last_attempt_at:
+          $ref: '#/components/schemas/NullableTimestamp'
+        error_category:
+          type: [string, 'null']
+          enum: [outage, auth, rate_limited, timeout, network, invalid_response, store, null]
+    SourceState:
+      type: object
+      description: Rollup formulas and hung-poll thresholds are specified in README.md.
+      required: [status, last_successful_poll, stale_since, last_attempt_at, error_category, has_cached_data, endpoints]
+      additionalProperties: false
+      properties:
+        status:
+          $ref: '#/components/schemas/Observation/properties/status'
+        last_successful_poll:
+          $ref: '#/components/schemas/NullableTimestamp'
+        stale_since:
+          $ref: '#/components/schemas/NullableTimestamp'
+        last_attempt_at:
+          $ref: '#/components/schemas/NullableTimestamp'
+        error_category:
+          $ref: '#/components/schemas/Observation/properties/error_category'
+        has_cached_data:
+          type: boolean
+        endpoints:
+          type: object
+    Sources:
+      type: object
+      description: Only selected sources, or the detail record's source, are present.
+      minProperties: 1
+      maxProperties: 2
+      additionalProperties: false
+      properties:
+        BMKG:
+          allOf:
+            - $ref: '#/components/schemas/SourceState'
+            - properties:
+                endpoints:
+                  type: object
+                  required: [seismic_events, tsunami_warnings]
+                  additionalProperties: false
+                  properties:
+                    seismic_events:
+                      $ref: '#/components/schemas/Observation'
+                    tsunami_warnings:
+                      $ref: '#/components/schemas/Observation'
+        PVMBG:
+          allOf:
+            - $ref: '#/components/schemas/SourceState'
+            - properties:
+                endpoints:
+                  type: object
+                  required: [volcanic_reports]
+                  additionalProperties: false
+                  properties:
+                    volcanic_reports:
+                      $ref: '#/components/schemas/Observation'
+    HazardList:
+      type: object
+      required: [items, next_cursor, sources, as_of]
+      additionalProperties: false
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/HazardEvent'
+        next_cursor:
+          anyOf:
+            - type: string
+              minLength: 1
+              maxLength: 2048
+              pattern: '^[A-Za-z0-9_-]+$'
+            - type: 'null'
+        sources:
+          $ref: '#/components/schemas/Sources'
+        as_of:
+          $ref: '#/components/schemas/UtcTimestamp'
+    HazardDetail:
+      type: object
+      required: [item, sources, as_of]
+      additionalProperties: false
+      properties:
+        item:
+          $ref: '#/components/schemas/HazardEvent'
+        sources:
+          allOf:
+            - $ref: '#/components/schemas/Sources'
+            - maxProperties: 1
+        as_of:
+          $ref: '#/components/schemas/UtcTimestamp'
+    ErrorDetail:
+      type: object
+      required: [code, message, correlation_id]
+      additionalProperties: false
+      properties:
+        code:
+          type: string
+          enum: [invalid_query, missing_credential, invalid_credential, not_found, source_unavailable, store_unavailable]
+        message:
+          type: string
+          minLength: 1
+          description: Sanitized message without credentials, upstream bodies or diagnostics.
+        correlation_id:
+          $ref: '#/components/schemas/CorrelationId'
+    ApplicationError:
+      type: object
+      required: [error]
+      additionalProperties: false
+      properties:
+        error:
+          $ref: '#/components/schemas/ErrorDetail'
+    SourceUnavailableError:
+      type: object
+      required: [error, sources, as_of]
+      additionalProperties: false
+      properties:
+        error:
+          allOf:
+            - $ref: '#/components/schemas/ErrorDetail'
+            - properties:
+                code:
+                  const: source_unavailable
+        sources:
+          $ref: '#/components/schemas/Sources'
+        as_of:
+          $ref: '#/components/schemas/UtcTimestamp'
+    StoreUnavailableError:
+      allOf:
+        - $ref: '#/components/schemas/ApplicationError'
+        - properties:
+            error:
+              properties:
+                code:
+                  const: store_unavailable
+    TransportError:
+      type: object
+      required: [error]
+      additionalProperties: false
+      properties:
+        error:
+          type: string
+          minLength: 1
+  responses:
+    InvalidQuery:
+      description: Invalid, duplicate, empty, unknown or inconsistent query; code invalid_query.
+      headers:
+        X-Correlation-ID:
+          $ref: '#/components/headers/CorrelationId'
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '#/components/schemas/ApplicationError'
+              - properties:
+                  error:
+                    properties:
+                      code:
+                        const: invalid_query
+    MissingCredential:
+      description: Missing internal key; code missing_credential. No hazard payload.
+      headers:
+        X-Correlation-ID:
+          $ref: '#/components/headers/CorrelationId'
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '#/components/schemas/ApplicationError'
+              - properties:
+                  error:
+                    properties:
+                      code:
+                        const: missing_credential
+    InvalidCredential:
+      description: Invalid, empty or repeated internal key; code invalid_credential.
+      headers:
+        X-Correlation-ID:
+          $ref: '#/components/headers/CorrelationId'
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '#/components/schemas/ApplicationError'
+              - properties:
+                  error:
+                    properties:
+                      code:
+                        const: invalid_credential
+    NotFound:
+      description: Unknown hazard ID in a usable store; code not_found.
+      headers:
+        X-Correlation-ID:
+          $ref: '#/components/headers/CorrelationId'
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '#/components/schemas/ApplicationError'
+              - properties:
+                  error:
+                    properties:
+                      code:
+                        const: not_found
+    DependencyUnavailable:
+      description: >-
+        source_unavailable includes trustworthy sources/as_of; store_unavailable
+        omits them. Source unavailability is based on source state, not filtered rows.
+      headers:
+        X-Correlation-ID:
+          $ref: '#/components/headers/CorrelationId'
+      content:
+        application/json:
+          schema:
+            oneOf:
+              - $ref: '#/components/schemas/SourceUnavailableError'
+              - $ref: '#/components/schemas/StoreUnavailableError'
+    AdmissionLimited:
+      description: Existing platform admission rejection; no Retry-After guarantee.
+      headers:
+        X-Correlation-ID:
+          $ref: '#/components/headers/CorrelationId'
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '#/components/schemas/TransportError'
+              - properties:
+                  error:
+                    const: too many requests
+    UnexpectedError:
+      description: Existing platform string error; no hazard data or diagnostics.
+      headers:
+        X-Correlation-ID:
+          $ref: '#/components/headers/CorrelationId'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/TransportError'

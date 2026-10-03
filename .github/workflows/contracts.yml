@@ -1,0 +1,86 @@
+name: Contracts
+
+on:
+  pull_request:
+    paths:
+      - 'bnpb/contracts/**'
+      - '.github/workflows/contracts.yml'
+  push:
+    paths:
+      - 'bnpb/contracts/**'
+      - '.github/workflows/contracts.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: bnpb/go.mod
+          cache: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.13'
+      - name: Install contract tools
+        run: |
+          go install github.com/oasdiff/oasdiff@v1.33.0
+          python -m pip install jsonschema==4.25.1 referencing==0.37.0
+      - name: Validate schema definitions and local references
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from jsonschema import Draft202012Validator
+          from referencing import Registry, Resource
+
+          directory = Path('bnpb/contracts/v1/schemas').resolve()
+          names = ('hazard-event', 'hazard-summary', 'hazard-notification')
+          resources = {}
+          for name in names:
+              path = directory / f'{name}.schema.json'
+              schema = json.loads(path.read_text(encoding='utf-8'))
+              if schema.get('$schema') != Draft202012Validator.META_SCHEMA['$id']:
+                  raise ValueError(f'{path.name}: expected Draft 2020-12')
+              Draft202012Validator.check_schema(schema)
+              resources[path.as_uri()] = Resource.from_contents(schema)
+
+          registry = Registry().with_resources(resources.items())
+
+          def check_references(resource, resolver):
+              if isinstance(resource.contents, dict) and '$ref' in resource.contents:
+                  resolver.lookup(resource.contents['$ref'])
+              for child in resource.subresources():
+                  check_references(child, resolver.in_subresource(child))
+
+          for uri, resource in resources.items():
+              check_references(resource, registry.resolver(uri))
+              print(f'Valid schema and references: {uri}')
+          PY
+      - name: Validate OpenAPI
+        run: oasdiff validate bnpb/contracts/v1/openapi.yaml
+      - name: Check existing Go application
+        working-directory: bnpb
+        run: |
+          go test ./...
+          go vet ./...
+          go build ./cmd/...
+      - name: Check HTTP compatibility with pull request base
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          spec=bnpb/contracts/v1/openapi.yaml
+          if git cat-file -e "${BASE_SHA}:${spec}" 2>/dev/null; then
+            base_dir=$(mktemp -d)
+            git archive "$BASE_SHA" bnpb/contracts/v1 | tar -x -C "$base_dir"
+            oasdiff breaking "$base_dir/$spec" "$spec" --fail-on ERR
+          else
+            echo 'First OpenAPI contract: no previous specification to compare.'
+          fi

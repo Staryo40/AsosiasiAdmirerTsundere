@@ -2,8 +2,10 @@ package httpserver
 
 import (
 	"bytes"
+	"encoding/json"
 	"io"
 	"log"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -13,7 +15,30 @@ import (
 	"testing"
 
 	"github.com/Staryo40/AsosiasiAdmirerTsundere/bnpb/internal/platform/correlation"
+	"github.com/Staryo40/AsosiasiAdmirerTsundere/bnpb/internal/platform/logging"
 )
+
+// Keep regression helpers independent of ignored local test files.
+func regressionLogger(buffer *bytes.Buffer) *slog.Logger {
+	return logging.New("test-service", slog.LevelDebug, buffer)
+}
+
+func decodeRegressionLogLines(t *testing.T, data []byte) []map[string]any {
+	t.Helper()
+	lines := bytes.Split(bytes.TrimSpace(data), []byte("\n"))
+	result := make([]map[string]any, 0, len(lines))
+	for _, line := range lines {
+		if len(line) == 0 {
+			continue
+		}
+		var record map[string]any
+		if err := json.Unmarshal(line, &record); err != nil {
+			t.Fatalf("invalid JSON log %q: %v", line, err)
+		}
+		result = append(result, record)
+	}
+	return result
+}
 
 func TestInformationalHeadersPreserveFinalResponse(t *testing.T) {
 	var output bytes.Buffer
@@ -22,7 +47,7 @@ func TestInformationalHeadersPreserveFinalResponse(t *testing.T) {
 		w.WriteHeader(http.StatusProcessing)
 		w.WriteHeader(http.StatusCreated)
 		_, _ = io.WriteString(w, "created")
-	}), testLogger(&output), 1))
+	}), regressionLogger(&output), 1))
 	defer server.Close()
 	var hints []int
 	trace := &httptrace.ClientTrace{Got1xxResponse: func(code int, _ textproto.MIMEHeader) error {
@@ -41,7 +66,7 @@ func TestInformationalHeadersPreserveFinalResponse(t *testing.T) {
 	if err != nil || response.StatusCode != http.StatusCreated || string(body) != "created" || len(hints) != 2 {
 		t.Fatalf("status=%d body=%q hints=%v error=%v", response.StatusCode, body, hints, err)
 	}
-	if records := decodeLogLines(t, output.Bytes()); records[0]["status"] != float64(http.StatusCreated) {
+	if records := decodeRegressionLogLines(t, output.Bytes()); records[0]["status"] != float64(http.StatusCreated) {
 		t.Fatalf("wrong final status: %v", records)
 	}
 }
@@ -53,7 +78,7 @@ func TestPanicAfterFlushAborts(t *testing.T) {
 			t.Fatal(err)
 		}
 		panic("private")
-	}), testLogger(&output), 1)
+	}), regressionLogger(&output), 1)
 	defer func() {
 		if recovered := recover(); recovered != http.ErrAbortHandler {
 			t.Errorf("got %v, want abort after flushed headers", recovered)
@@ -66,7 +91,7 @@ func TestExplicitAbortIsPreserved(t *testing.T) {
 	var output bytes.Buffer
 	handler := Handler(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
 		panic(http.ErrAbortHandler)
-	}), testLogger(&output), 1)
+	}), regressionLogger(&output), 1)
 	defer func() {
 		if recovered := recover(); recovered != http.ErrAbortHandler {
 			t.Errorf("got %v, want explicit abort", recovered)
@@ -81,7 +106,7 @@ func TestPanicDiscardsUncommittedResponseHeaders(t *testing.T) {
 		w.Header().Set("Content-Length", "1")
 		w.Header().Set("Content-Encoding", "gzip")
 		panic("private")
-	}), testLogger(&output), 1))
+	}), regressionLogger(&output), 1))
 	defer server.Close()
 	response, err := server.Client().Get(server.URL)
 	if err != nil {
@@ -137,7 +162,7 @@ func TestServerDiagnosticsAreSanitizedJSON(t *testing.T) {
 		w.Header().Set("Content-Length", "private-header-value")
 		w.WriteHeader(http.StatusOK)
 	}))
-	server.Config = New(Options{}, server.Config.Handler, testLogger(&output))
+	server.Config = New(Options{}, server.Config.Handler, regressionLogger(&output))
 	server.Start()
 	defer server.Close()
 	response, err := server.Client().Get(server.URL)
@@ -149,7 +174,7 @@ func TestServerDiagnosticsAreSanitizedJSON(t *testing.T) {
 	if strings.Contains(diagnostics.String(), "private-header-value") {
 		t.Fatal("server leaked header value through the default text logger")
 	}
-	records := decodeLogLines(t, output.Bytes())
+	records := decodeRegressionLogLines(t, output.Bytes())
 	if len(records) != 1 || records[0]["event"] != "http_server_error" || strings.Contains(output.String(), "private-header-value") {
 		t.Fatalf("unexpected diagnostic: %s", output.String())
 	}

@@ -1,0 +1,154 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "HazardEvent v1",
+  "description": "Complete internal canonical record. Authorization and mapping behavior are defined in ../README.md.",
+  "type": "object",
+  "required": [
+    "hazard_id",
+    "source",
+    "source_ref_id",
+    "hazard_type",
+    "severity",
+    "area_name",
+    "latitude",
+    "longitude",
+    "occurred_at",
+    "ingested_at",
+    "attributes"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "hazard_id": {
+      "$ref": "#/$defs/NonEmptyString",
+      "x-classification": "Ringkasan"
+    },
+    "source": {
+      "type": "string",
+      "enum": [
+        "BMKG",
+        "PVMBG"
+      ],
+      "x-classification": "Ringkasan"
+    },
+    "source_ref_id": {
+      "$ref": "#/$defs/NonEmptyString",
+      "x-classification": "Mentah"
+    },
+    "hazard_type": {
+      "type": "string",
+      "enum": [
+        "SEISMIC",
+        "VOLCANIC"
+      ],
+      "x-classification": "Ringkasan"
+    },
+    "severity": {
+      "type": "string",
+      "enum": [
+        "NORMAL",
+        "WASPADA",
+        "SIAGA",
+        "AWAS"
+      ],
+      "x-classification": "Ringkasan"
+    },
+    "area_name": {
+      "$ref": "#/$defs/NonEmptyString",
+      "x-classification": "Ringkasan"
+    },
+    "latitude": {
+      "type": "number",
+      "minimum": -90,
+      "maximum": 90,
+      "x-classification": "Mentah"
+    },
+    "longitude": {
+      "type": "number",
+      "minimum": -180,
+      "maximum": 180,
+      "x-classification": "Mentah"
+    },
+    "occurred_at": {
+      "$ref": "#/$defs/UtcTimestamp",
+      "x-classification": "Ringkasan"
+    },
+    "ingested_at": {
+      "$ref": "#/$defs/UtcTimestamp",
+      "x-classification": "Ringkasan"
+    },
+    "attributes": {
+      "type": "object",
+      "additionalProperties": true,
+      "x-classification": "Mentah",
+      "description": "Preserve additive source JSON, including nested values. Reserved-key collision handling is a mapper responsibility."
+    }
+  },
+  "allOf": [
+    {
+      "$ref": "#/$defs/SourceTypePair"
+    },
+    {
+      "if": {
+        "properties": {
+          "source": {
+            "const": "PVMBG"
+          }
+        },
+        "required": [
+          "source"
+        ]
+      },
+      "then": {
+        "properties": {
+          "attributes": {
+            "properties": {
+              "confidence_level": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "NonEmptyString": {
+      "type": "string",
+      "minLength": 1
+    },
+    "UtcTimestamp": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "Z$",
+      "description": "RFC 3339 UTC output, preserving available fractional precision. Enable format assertion in payload validators."
+    },
+    "SourceTypePair": {
+      "if": {
+        "properties": {
+          "source": {
+            "const": "BMKG"
+          }
+        },
+        "required": [
+          "source"
+        ]
+      },
+      "then": {
+        "properties": {
+          "hazard_type": {
+            "const": "SEISMIC"
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "hazard_type": {
+            "const": "VOLCANIC"
+          }
+        }
+      }
+    }
+  }
+}

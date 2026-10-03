@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "HazardSummary v1",
+  "description": "One Media projection item, not the HTTP wrapper. A2 must enforce authorization and construct this allowlist.",
+  "type": "object",
+  "required": [
+    "hazard_id",
+    "source",
+    "hazard_type",
+    "severity",
+    "area_name",
+    "occurred_at",
+    "ingested_at"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "hazard_id": {
+      "$ref": "hazard-event.schema.json#/properties/hazard_id"
+    },
+    "source": {
+      "$ref": "hazard-event.schema.json#/properties/source"
+    },
+    "hazard_type": {
+      "$ref": "hazard-event.schema.json#/properties/hazard_type"
+    },
+    "severity": {
+      "$ref": "hazard-event.schema.json#/properties/severity"
+    },
+    "area_name": {
+      "$ref": "hazard-event.schema.json#/properties/area_name"
+    },
+    "occurred_at": {
+      "$ref": "hazard-event.schema.json#/properties/occurred_at"
+    },
+    "ingested_at": {
+      "$ref": "hazard-event.schema.json#/properties/ingested_at"
+    }
+  },
+  "allOf": [
+    {
+      "$ref": "hazard-event.schema.json#/$defs/SourceTypePair"
+    }
+  ]
+}
