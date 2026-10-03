@@ -4,6 +4,7 @@ WORKDIR /src
 COPY go.mod ./
 COPY cmd/aggregator ./cmd/aggregator
 COPY internal/platform ./internal/platform
+COPY internal/aggregator ./internal/aggregator
 RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/bnpb-aggregator ./cmd/aggregator
 
 FROM scratch
