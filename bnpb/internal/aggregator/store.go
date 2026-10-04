@@ -18,7 +18,10 @@ var initialSchema string
 //go:embed migrations/002_outbox_identity.sql
 var outboxIdentitySchema string
 
-const currentSchemaVersion = 2
+//go:embed migrations/003_snapshot_indexes.sql
+var snapshotIndexSchema string
+
+const currentSchemaVersion = 3
 
 const schemaHistoryQuery = `SELECT COALESCE(max(version), 0), count(*),
     COALESCE(min(version), 0) FROM schema_migrations`
@@ -133,9 +136,15 @@ func applyPendingMigrations(ctx context.Context, tx pgx.Tx, version int) error {
 			return err
 		}
 	}
-	if version < currentSchemaVersion {
-		_, err := tx.Exec(ctx, outboxIdentitySchema)
-		return err
+	for _, migration := range []struct {
+		version int
+		sql     string
+	}{{2, outboxIdentitySchema}, {3, snapshotIndexSchema}} {
+		if version < migration.version {
+			if _, err := tx.Exec(ctx, migration.sql); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
 }
