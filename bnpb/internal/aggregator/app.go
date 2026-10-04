@@ -12,7 +12,6 @@ import (
 	"github.com/Staryo40/AsosiasiAdmirerTsundere/bnpb/internal/platform/service"
 )
 
-// Initialize acquires only local resources.
 func Initialize(ctx context.Context, mux *http.ServeMux, platform config.Config, logger *slog.Logger) (service.Shutdown, error) {
 	cfg, err := LoadConfig()
 	if err == nil && cfg.ReadMaxInFlight >= platform.MaxInFlight {
@@ -22,17 +21,27 @@ func Initialize(ctx context.Context, mux *http.ServeMux, platform config.Config,
 		logging.Event(ctx, logger, logging.Record{Level: slog.LevelError, Event: "configuration_invalid", Message: err.Error()})
 		return nil, err
 	}
-	app := application{sources: newSourceClients(cfg, logger)}
+	store, err := OpenStore(ctx, cfg)
+	if err != nil {
+		logging.Event(ctx, logger, logging.Record{Level: slog.LevelError, Event: "canonical_store_initialization_failed", Message: err.Error()})
+		return nil, err
+	}
+	app := application{sources: newSourceClients(cfg, logger), store: store}
 	mux.HandleFunc("GET /ready", app.ready)
 	return app.start(ctx), nil
 }
 
 type application struct {
 	sources sourceClients
+	store   *Store
 }
 
-func (app application) ready(w http.ResponseWriter, _ *http.Request) {
-	http.Error(w, "canonical store is not initialized", http.StatusServiceUnavailable)
+func (app application) ready(w http.ResponseWriter, request *http.Request) {
+	if app.store == nil || app.store.Ready(request.Context()) != nil {
+		http.Error(w, "canonical store is unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
 }
 
 // Fix the worker set before shutdown can wait.
@@ -53,6 +62,10 @@ func (app application) start(ctx context.Context, workers ...func(context.Contex
 		cancel()
 		select {
 		case <-done:
+			// The platform invokes cleanup after HTTP drain
+			if app.store != nil {
+				app.store.Close()
+			}
 			return nil
 		case <-shutdownCtx.Done():
 			return shutdownCtx.Err()
