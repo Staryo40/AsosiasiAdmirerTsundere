@@ -1,0 +1,32 @@
+[
+  {
+    "name": "seismic zero coordinates and false with additive collision",
+    "source": "BMKG",
+    "input": {"event_id":"evt-1","magnitude":4.99,"depth_km":0,"epicenter_lat":0,"epicenter_lon":0,"region_name":"Equator","occurred_at":"2026-10-03T07:00:00.123456789+07:00","potential_tsunami":false,"custom":{"large":9007199254740993,"nested":[null,{"enabled":true}]},"tsunami_warnings":{"upstream":true},"source_extras":[1,2]},
+    "warnings": [],
+    "expected": {"hazard_id":"hazard-test","source":"BMKG","source_ref_id":"evt-1","hazard_type":"SEISMIC","severity":"NORMAL","area_name":"Equator","latitude":0,"longitude":0,"occurred_at":"2026-10-03T00:00:00.123456789Z","ingested_at":"2026-10-03T01:00:00Z","attributes":{"magnitude":4.99,"depth_km":0,"potential_tsunami":false,"custom":{"large":9007199254740993,"nested":[null,{"enabled":true}]},"source_extras":{"tsunami_warnings":{"upstream":true},"source_extras":[1,2]}}}
+  },
+  {
+    "name": "warnings replace magnitude and preserve future issuance",
+    "source": "BMKG",
+    "input": {"event_id":"evt-2","magnitude":7,"depth_km":12.5,"epicenter_lat":-7.8,"epicenter_lon":110.4,"region_name":"Yogyakarta","occurred_at":"2026-10-03T00:00:00Z","potential_tsunami":true},
+    "warnings": [
+      {"warning_id":"tsw-b","related_event_id":"evt-2","threat_level":"Waspada","affected_zones":["South"],"estimated_arrival":"2026-10-03T00:15:00Z","issued_at":"2026-10-04T00:00:00Z","custom":{"large":9007199254740993}},
+      {"warning_id":"tsw-a","related_event_id":"evt-2","threat_level":"Waspada","affected_zones":[],"estimated_arrival":"2026-10-03T00:30:00Z","issued_at":"2026-10-04T00:00:00Z"},
+      {"warning_id":"tsw-unmatched","related_event_id":"other","threat_level":"Awas","affected_zones":["Elsewhere"],"estimated_arrival":"2026-10-03T00:30:00Z","issued_at":"2026-10-03T00:01:00Z"}
+    ],
+    "expected": {"hazard_id":"hazard-test","source":"BMKG","source_ref_id":"evt-2","hazard_type":"SEISMIC","severity":"WASPADA","area_name":"Yogyakarta","latitude":-7.8,"longitude":110.4,"occurred_at":"2026-10-03T00:00:00Z","ingested_at":"2026-10-03T01:00:00Z","attributes":{"magnitude":7,"depth_km":12.5,"potential_tsunami":true,"tsunami_warnings":[{"warning_id":"tsw-a","related_event_id":"evt-2","threat_level":"Waspada","affected_zones":[],"estimated_arrival":"2026-10-03T00:30:00Z","issued_at":"2026-10-04T00:00:00Z"},{"warning_id":"tsw-b","related_event_id":"evt-2","threat_level":"Waspada","affected_zones":["South"],"estimated_arrival":"2026-10-03T00:15:00Z","issued_at":"2026-10-04T00:00:00Z","custom":{"large":9007199254740993}}]}}
+  },
+  {
+    "name": "volcanic V1 retains unknown objects and absent confidence",
+    "source": "PVMBG",
+    "input": {"report_id":"rpt-1","volcano_id":"merapi","alert_level":"Siaga","eruption_count_24h":0,"ash_column_height_m":0,"reported_at":"2026-10-03T00:00:00Z","extra":{"readings":[9007199254740993,null]},"source_extras":{"original":true}},
+    "expected": {"hazard_id":"hazard-test","source":"PVMBG","source_ref_id":"rpt-1","hazard_type":"VOLCANIC","severity":"SIAGA","area_name":"Merapi","latitude":-7.54,"longitude":110.446,"occurred_at":"2026-10-03T00:00:00Z","ingested_at":"2026-10-03T01:00:00Z","attributes":{"volcano_id":"merapi","eruption_count_24h":0,"ash_column_height_m":0,"extra":{"readings":[9007199254740993,null]},"source_extras":{"source_extras":{"original":true}}}}
+  },
+  {
+    "name": "volcanic V2 confidence zero and northern latitude",
+    "source": "PVMBG",
+    "input": {"report_id":"rpt-2","volcano_id":"sinabung","alert_level":"Awas","eruption_count_24h":2,"ash_column_height_m":1500.5,"reported_at":"2026-10-03T07:00:00+07:00","confidence_level":0,"tsunami_warnings":{"upstream":"volcanic attribute"}},
+    "expected": {"hazard_id":"hazard-test","source":"PVMBG","source_ref_id":"rpt-2","hazard_type":"VOLCANIC","severity":"AWAS","area_name":"Sinabung","latitude":3.17,"longitude":98.392,"occurred_at":"2026-10-03T00:00:00Z","ingested_at":"2026-10-03T01:00:00Z","attributes":{"volcano_id":"sinabung","eruption_count_24h":2,"ash_column_height_m":1500.5,"confidence_level":0,"tsunami_warnings":{"upstream":"volcanic attribute"}}}
+  }
+]

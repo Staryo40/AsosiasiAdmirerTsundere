@@ -1,4 +1,3 @@
-// Package aggregator owns ingestion, canonical storage and the internal read API.
 package aggregator
 
 import (
