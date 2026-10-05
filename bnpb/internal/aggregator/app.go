@@ -29,7 +29,9 @@ func Initialize(ctx context.Context, mux *http.ServeMux, platform config.Config,
 	app := application{sources: newSourceClients(cfg, logger), store: store}
 	mux.HandleFunc("GET /ready", app.ready)
 	registerSnapshotRoutes(mux, store, cfg)
-	return app.start(ctx, app.pollWorkers(cfg, logger)...), nil
+	dispatcher := &outboxDispatcher{store: store, publisher: newAMQPPublisher(cfg), cfg: cfg, logger: logger}
+	workers := append(app.pollWorkers(cfg, logger), dispatcher.run)
+	return app.start(ctx, workers...), nil
 }
 
 type application struct {
