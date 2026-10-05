@@ -1,0 +1,66 @@
+name: aat
+
+include:
+  - bmkg/compose.yaml
+  - pvmbg/compose.yaml
+  - bnpb/compose.yaml
+
+services:
+  postgres-test:
+    profiles: [tests]
+    image: postgres:18.6-alpine
+    environment:
+      POSTGRES_DB: bnpb_test
+      POSTGRES_USER: bnpb_test
+      POSTGRES_PASSWORD: local-test-only
+    tmpfs:
+      - /var/lib/postgresql
+    networks:
+      - test-store
+    healthcheck:
+      test: [CMD, pg_isready, -U, bnpb_test, -d, bnpb_test]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  tests:
+    profiles: [tests]
+    image: golang:1.26.8-alpine
+    working_dir: /src
+    volumes:
+      - ./bnpb:/src:ro
+      - go-mod-cache:/go/pkg/mod
+      - go-build-cache:/root/.cache/go-build
+    env_file: ./bnpb/.env
+    environment:
+      BNPB_TEST_DATABASE_URL: postgres://bnpb_test:local-test-only@postgres-test:5432/bnpb_test?sslmode=disable
+    entrypoint:
+      - /bin/sh
+      - -ec
+      - |
+        export BNPB_TEST_BMKG_BASE_URL=http://bmkg:8081
+        export BNPB_TEST_PVMBG_BASE_URL=http://pvmbg:8082
+        export BNPB_TEST_BMKG_API_KEY="$$BNPB_BMKG_API_KEY"
+        export BNPB_TEST_PVMBG_READER_CLIENT_ID="$$BNPB_PVMBG_READER_CLIENT_ID"
+        export BNPB_TEST_PVMBG_READER_CLIENT_SECRET="$$BNPB_PVMBG_READER_CLIENT_SECRET"
+        exec "$$@"
+      - --
+    command: [go, test, -tags=integration, -count=1, ./...]
+    depends_on:
+      postgres-test:
+        condition: service_healthy
+      bmkg:
+        condition: service_healthy
+      pvmbg:
+        condition: service_healthy
+    networks:
+      - backend
+      - test-store
+
+networks:
+  test-store:
+    internal: true
+
+volumes:
+  go-mod-cache:
+  go-build-cache:

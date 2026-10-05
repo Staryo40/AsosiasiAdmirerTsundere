@@ -1,0 +1,29 @@
+# Loaded automatically when running `docker compose` from the repository root.
+# Local integration settings extend the included standalone applications.
+services:
+  bmkg:
+    networks: !override [backend]
+    healthcheck:
+      test: [CMD, wget, -q, -O, /dev/null, http://127.0.0.1:8081/health]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  pvmbg:
+    networks: !override [backend]
+    healthcheck:
+      test: [CMD, wget, -q, -O, /dev/null, http://127.0.0.1:8082/health]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  aggregator:
+    ports:
+      - "127.0.0.1:8083:8083"
+    depends_on:
+      bmkg:
+        condition: service_healthy
+      pvmbg:
+        condition: service_healthy

@@ -62,7 +62,7 @@ func (store *Store) ingestChunk(ctx context.Context, chunk IngestChunk, policy c
 	}
 	ctx, cancel := context.WithTimeout(ctx, store.writeTimeout)
 	defer cancel()
-	tx, err := store.write.BeginTx(ctx, pgx.TxOptions{})
+	tx, err := store.write.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
 	if err != nil {
 		return storeError("begin ingest", err)
 	}
@@ -153,7 +153,7 @@ func (store *Store) writeRecord(ctx context.Context, tx pgx.Tx, chunk IngestChun
 func (store *Store) writeSourceRecord(ctx context.Context, tx pgx.Tx, chunk IngestChunk, raw json.RawMessage) error {
 	switch chunk.Endpoint {
 	case WarningEndpoint:
-		return writeWarning(ctx, tx, raw)
+		return store.writeWarning(ctx, tx, chunk, raw)
 	case SeismicEndpoint:
 		return store.writeSeismic(ctx, tx, chunk, raw)
 	default:
@@ -173,18 +173,10 @@ func (store *Store) writeSeismic(ctx context.Context, tx pgx.Tx, chunk IngestChu
 	if len(hazard.SourceRefID) > 2048 {
 		return invalidField("event_id", "storage_limit")
 	}
-	warnings, err := store.storedWarnings(ctx, tx, hazard.SourceRefID)
-	if err != nil {
-		return err
-	}
-	hazard, err = MapSeismic(raw, warnings, Receipt{hazard.HazardID, hazard.IngestedAt})
-	if err != nil {
-		return err
-	}
 	if err := writeSeismicSource(ctx, tx, raw, hazard); err != nil {
 		return err
 	}
-	return writeHazard(ctx, tx, hazard)
+	return store.writeEnrichedSeismic(ctx, tx, raw, hazard)
 }
 
 func writeSeismicSource(ctx context.Context, tx pgx.Tx, raw json.RawMessage, hazard HazardEvent) error {
@@ -198,49 +190,6 @@ func writeSeismicSource(ctx context.Context, tx pgx.Tx, raw json.RawMessage, haz
 		return invalidField("event_id", "source_identity_reused")
 	}
 	return nil
-}
-
-func writeWarning(ctx context.Context, tx pgx.Tx, raw json.RawMessage) error {
-	warning, err := parseWarning(raw)
-	if err != nil {
-		return err
-	}
-	if len(warning.id) > 2048 || len(warning.eventID) > 2048 {
-		return invalidField("warning_id", "storage_limit")
-	}
-	command, err := tx.Exec(ctx, `INSERT INTO source_warnings (warning_id, related_event_id, issued_at, payload)
-        VALUES ($1, $2, $3, $4) ON CONFLICT (warning_id) DO UPDATE SET payload = EXCLUDED.payload
-        WHERE (source_warnings.related_event_id, source_warnings.issued_at) =
-              (EXCLUDED.related_event_id, EXCLUDED.issued_at)`, warning.id, warning.eventID, databaseTime(warning.issuedAt), raw)
-	if err != nil {
-		return err
-	}
-	if command.RowsAffected() == 0 {
-		return invalidField("warning_id", "source_identity_reused")
-	}
-	return nil
-}
-
-func (store *Store) storedWarnings(ctx context.Context, tx pgx.Tx, eventID string) ([]json.RawMessage, error) {
-	rows, err := tx.Query(ctx, "SELECT payload FROM source_warnings WHERE related_event_id = $1 ORDER BY issued_at, warning_id", eventID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	warnings := make([]json.RawMessage, 0)
-	var bytes int64
-	for rows.Next() {
-		var raw json.RawMessage
-		if err := rows.Scan(&raw); err != nil {
-			return nil, err
-		}
-		bytes += int64(len(raw))
-		if bytes > store.maxBytes {
-			return nil, invalidField("tsunami_warnings", "storage_limit")
-		}
-		warnings = append(warnings, raw)
-	}
-	return warnings, rows.Err()
 }
 
 func rejectReason(err error) (string, string) {
