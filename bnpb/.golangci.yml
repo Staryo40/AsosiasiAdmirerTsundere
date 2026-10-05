@@ -1,0 +1,115 @@
+version: "2"
+
+run:
+  timeout: 5m
+  relative-path-mode: cfg
+  tests: true
+  build-tags:
+    - integration
+
+linters:
+  default: none
+  enable:
+    - depguard
+  exclusions:
+    generated: disable
+    presets: []
+  settings:
+    depguard:
+      rules:
+        # Intinya mah service ga bisa import package selain internal/platform
+        # Klo misal ada tambah service bisa tambahin aja rule-nya
+        platform-and-unassigned:
+          list-mode: lax
+          files:
+            - $all
+            - '!**/cmd/api/**'
+            - '!**/internal/api/**'
+            - '!**/cmd/auth/**'
+            - '!**/internal/auth/**'
+            - '!**/cmd/aggregator/**'
+            - '!**/internal/aggregator/**'
+            - '!**/cmd/consumer-1/**'
+            - '!**/internal/consumer-1/**'
+            - '!**/cmd/consumer-2/**'
+            - '!**/internal/consumer-2/**'
+            - '!**/cmd/consumer-3/**'
+            - '!**/internal/consumer-3/**'
+          allow:
+            - github.com/Staryo40/AsosiasiAdmirerTsundere/bnpb/internal/platform$
+            - github.com/Staryo40/AsosiasiAdmirerTsundere/bnpb/internal/platform/
+          deny: &bnpb-boundary
+            - pkg: github.com/Staryo40/AsosiasiAdmirerTsundere/bnpb/
+              desc: Import only this service's packages and internal/platform
+
+        api:
+          list-mode: lax
+          files:
+            - '**/cmd/api/**'
+            - '**/internal/api/**'
+          allow:
+            - github.com/Staryo40/AsosiasiAdmirerTsundere/bnpb/internal/api$
+            - github.com/Staryo40/AsosiasiAdmirerTsundere/bnpb/internal/api/
+            - github.com/Staryo40/AsosiasiAdmirerTsundere/bnpb/internal/platform$
+            - github.com/Staryo40/AsosiasiAdmirerTsundere/bnpb/internal/platform/
+          deny: *bnpb-boundary
+
+        auth:
+          list-mode: lax
+          files:
+            - '**/cmd/auth/**'
+            - '**/internal/auth/**'
+          allow:
+            - github.com/Staryo40/AsosiasiAdmirerTsundere/bnpb/internal/auth$
+            - github.com/Staryo40/AsosiasiAdmirerTsundere/bnpb/internal/auth/
+            - github.com/Staryo40/AsosiasiAdmirerTsundere/bnpb/internal/platform$
+            - github.com/Staryo40/AsosiasiAdmirerTsundere/bnpb/internal/platform/
+          deny: *bnpb-boundary
+
+        aggregator:
+          list-mode: lax
+          files:
+            - '**/cmd/aggregator/**'
+            - '**/internal/aggregator/**'
+          allow:
+            - github.com/Staryo40/AsosiasiAdmirerTsundere/bnpb/internal/aggregator$
+            - github.com/Staryo40/AsosiasiAdmirerTsundere/bnpb/internal/aggregator/
+            - github.com/Staryo40/AsosiasiAdmirerTsundere/bnpb/internal/platform$
+            - github.com/Staryo40/AsosiasiAdmirerTsundere/bnpb/internal/platform/
+          deny: *bnpb-boundary
+
+        consumer-1:
+          list-mode: lax
+          files:
+            - '**/cmd/consumer-1/**'
+            - '**/internal/consumer-1/**'
+          allow:
+            - github.com/Staryo40/AsosiasiAdmirerTsundere/bnpb/internal/consumer-1$
+            - github.com/Staryo40/AsosiasiAdmirerTsundere/bnpb/internal/consumer-1/
+            - github.com/Staryo40/AsosiasiAdmirerTsundere/bnpb/internal/platform$
+            - github.com/Staryo40/AsosiasiAdmirerTsundere/bnpb/internal/platform/
+          deny: *bnpb-boundary
+
+        consumer-2:
+          list-mode: lax
+          files:
+            - '**/cmd/consumer-2/**'
+            - '**/internal/consumer-2/**'
+          allow:
+            - github.com/Staryo40/AsosiasiAdmirerTsundere/bnpb/internal/consumer-2$
+            - github.com/Staryo40/AsosiasiAdmirerTsundere/bnpb/internal/consumer-2/
+            - github.com/Staryo40/AsosiasiAdmirerTsundere/bnpb/internal/platform$
+            - github.com/Staryo40/AsosiasiAdmirerTsundere/bnpb/internal/platform/
+          deny: *bnpb-boundary
+
+        consumer-3:
+          list-mode: lax
+          files:
+            - '**/cmd/consumer-3/**'
+            - '**/internal/consumer-3/**'
+          allow:
+            - github.com/Staryo40/AsosiasiAdmirerTsundere/bnpb/internal/consumer-3$
+            - github.com/Staryo40/AsosiasiAdmirerTsundere/bnpb/internal/consumer-3/
+            - github.com/Staryo40/AsosiasiAdmirerTsundere/bnpb/internal/platform$
+            - github.com/Staryo40/AsosiasiAdmirerTsundere/bnpb/internal/platform/
+          deny: *bnpb-boundary
