@@ -29,7 +29,7 @@ func Initialize(ctx context.Context, mux *http.ServeMux, platform config.Config,
 	app := application{sources: newSourceClients(cfg, logger), store: store}
 	mux.HandleFunc("GET /ready", app.ready)
 	registerSnapshotRoutes(mux, store, cfg)
-	return app.start(ctx), nil
+	return app.start(ctx, app.pollWorkers(cfg, logger)...), nil
 }
 
 type application struct {

@@ -44,6 +44,19 @@ var ingestEndpoints = map[Endpoint]endpointFields{
 
 // Ingest commits one bounded chunk. Callers must decode a complete response before submitting chunks.
 func (store *Store) Ingest(ctx context.Context, chunk IngestChunk) (err error) {
+	return store.ingestChunk(ctx, chunk, checkpointPolicy{completePoll: true})
+}
+
+// Pollers can commit chunks without advertising a successful incomplete response.
+type checkpointPolicy struct {
+	ceiling      *time.Time
+	started      *time.Time
+	completed    *time.Time
+	hold         bool
+	completePoll bool
+}
+
+func (store *Store) ingestChunk(ctx context.Context, chunk IngestChunk, policy checkpointPolicy) (err error) {
 	if err := store.validateChunk(chunk); err != nil {
 		return err
 	}
@@ -63,7 +76,7 @@ func (store *Store) Ingest(ctx context.Context, chunk IngestChunk) (err error) {
 	if _, err = tx.Exec(ctx, "SELECT pg_advisory_xact_lock(4031, $1)", ingestEndpoints[chunk.Endpoint].lock); err != nil {
 		return err
 	}
-	if err = store.writeChunk(ctx, tx, chunk); err != nil {
+	if err = store.writeChunk(ctx, tx, chunk, policy); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)
@@ -89,7 +102,7 @@ func (store *Store) validateChunk(chunk IngestChunk) error {
 	return nil
 }
 
-func (store *Store) writeChunk(ctx context.Context, tx pgx.Tx, chunk IngestChunk) error {
+func (store *Store) writeChunk(ctx context.Context, tx pgx.Tx, chunk IngestChunk, policy checkpointPolicy) error {
 	var checkpoint *time.Time
 	completeTimestamps := true
 	for _, raw := range chunk.Records {
@@ -104,12 +117,17 @@ func (store *Store) writeChunk(ctx context.Context, tx pgx.Tx, chunk IngestChunk
 			return err
 		}
 	}
-	if !completeTimestamps {
+	if !completeTimestamps || policy.hold {
 		checkpoint = nil
 	}
-	_, err := tx.Exec(ctx, `UPDATE poll_state SET checkpoint = GREATEST(checkpoint, $2::timestamptz),
-        last_attempt_at = $3, last_successful_poll = $3, stale_since = NULL, error_category = NULL
-        WHERE endpoint = $1`, string(chunk.Endpoint), checkpoint, databaseTime(chunk.ReceivedAt))
+	_, err := tx.Exec(ctx, `UPDATE poll_state
+        SET checkpoint = CASE WHEN GREATEST(checkpoint, $2::timestamptz) IS NULL THEN NULL
+            ELSE LEAST(GREATEST(checkpoint, $2::timestamptz), $4::timestamptz) END,
+		last_attempt_at = COALESCE($6::timestamptz, $3),
+        last_successful_poll = CASE WHEN $5 THEN COALESCE($7::timestamptz, $3) ELSE last_successful_poll END,
+        stale_since = CASE WHEN $5 THEN NULL ELSE stale_since END,
+        error_category = CASE WHEN $5 THEN NULL ELSE error_category END
+        WHERE endpoint = $1`, string(chunk.Endpoint), checkpoint, databaseTime(chunk.ReceivedAt), policy.ceiling, policy.completePoll, policy.started, policy.completed)
 	return err
 }
 

@@ -6,7 +6,7 @@ WORKDIR /workspace
 
 COPY gradlew settings.gradle.kts build.gradle.kts gradle.properties ./
 COPY gradle gradle
-RUN ./gradlew --no-daemon dependencies > /dev/null
+RUN chmod +x gradlew && ./gradlew --no-daemon dependencies > /dev/null
 
 COPY src src
 RUN ./gradlew --no-daemon shadowJar

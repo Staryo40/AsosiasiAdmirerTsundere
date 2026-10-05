@@ -1,6 +1,7 @@
 package aggregator
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -388,27 +389,31 @@ func TestApplicationCleanupDeadlineIsReported(t *testing.T) {
 }
 
 func TestReadinessAndLivenessWithoutDependencies(t *testing.T) {
-	for name, configured := range requiredEnvironment() {
-		t.Setenv(name, configured)
-	}
-	t.Setenv("BNPB_BMKG_BASE_URL", "http://127.0.0.1:1")
-	t.Setenv("BNPB_PVMBG_BASE_URL", "http://127.0.0.1:1")
 	mux := http.NewServeMux()
 	httpserver.RegisterHealth(mux, "bnpb-aggregator")
-	shutdown, err := Initialize(t.Context(), mux, config.Config{MaxInFlight: 64}, quietLogger())
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() {
-		if err := shutdown(t.Context()); err != nil {
-			t.Error(err)
-		}
-	}()
+	app := application{}
+	mux.HandleFunc("GET /ready", app.ready)
 	for path, want := range map[string]int{"/health": 200, "/ready": 503} {
 		response := httptest.NewRecorder()
 		mux.ServeHTTP(response, httptest.NewRequest("GET", path, nil))
 		if response.Code != want {
 			t.Errorf("%s: got %d, want %d", path, response.Code, want)
 		}
+	}
+}
+
+func TestInitializeFailsWithUnavailableStoreWithoutExposingCredentials(t *testing.T) {
+	for name, configured := range requiredEnvironment() {
+		t.Setenv(name, configured)
+	}
+	t.Setenv("BNPB_CANONICAL_DATABASE_URL", "postgres://writer:private@127.0.0.1:1/bnpb")
+	var logs bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&logs, nil))
+	shutdown, err := Initialize(t.Context(), http.NewServeMux(), config.Config{MaxInFlight: 64}, logger)
+	if shutdown != nil || err == nil || strings.Contains(err.Error(), "private") {
+		t.Fatalf("expected sanitized startup failure and no acquired resources, got %v", err)
+	}
+	if !strings.Contains(logs.String(), "canonical_store_initialization_failed") || strings.Contains(logs.String(), "private") {
+		t.Fatalf("startup diagnostic is missing or unsafe: %s", logs.String())
 	}
 }

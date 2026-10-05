@@ -43,6 +43,7 @@ func endpointThreshold(endpoint Endpoint, cfg Config) time.Duration {
 	source := cfg.BMKG
 	if endpoint == VolcanicEndpoint {
 		source = cfg.PVMBG
+		return max(3*source.PollInterval, cfg.PVMBGCycleTimeout+source.PollInterval)
 	}
 	return max(3*source.PollInterval, source.HTTPTimeout+source.PollInterval)
 }

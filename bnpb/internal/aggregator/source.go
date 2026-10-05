@@ -11,7 +11,9 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Staryo40/AsosiasiAdmirerTsundere/bnpb/internal/platform/httpclient"
 )
@@ -39,6 +41,7 @@ type sourceError struct {
 	category   string
 	statusCode int
 	cause      error
+	retryAfter time.Duration
 }
 
 func (err *sourceError) Error() string {
@@ -115,9 +118,23 @@ func (client *sourceClient) doJSON(ctx context.Context, request sourceRequest, t
 	}
 	defer response.Body.Close()
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return &sourceError{category: "http_status", statusCode: response.StatusCode}
+		return &sourceError{category: "http_status", statusCode: response.StatusCode,
+			retryAfter: retryAfter(response.Header.Get("Retry-After"), time.Now())}
 	}
 	return client.decode(response, target)
+}
+
+func retryAfter(header string, now time.Time) time.Duration {
+	if seconds, err := strconv.ParseInt(strings.TrimSpace(header), 10, 64); err == nil {
+		if seconds > 0 {
+			return time.Duration(min(seconds, int64((1<<63-1)/time.Second))) * time.Second
+		}
+		return 0
+	}
+	if stamp, err := http.ParseTime(header); err == nil {
+		return max(0, stamp.Sub(now))
+	}
+	return 0
 }
 
 func (client *sourceClient) decode(response *http.Response, target any) error {
