@@ -110,13 +110,22 @@ func (poller *poller) pollEndpoint(ctx context.Context, endpoint Endpoint) error
 }
 
 func (poller *poller) pollOnce(ctx context.Context, endpoint Endpoint, started time.Time) error {
-	checkpoint, err := poller.store.pollCheckpoint(ctx, endpoint)
+	position, err := poller.store.pollPosition(ctx, endpoint)
 	if err != nil {
 		return err
 	}
-	if err := poller.store.recordPollAttempt(ctx, endpoint, started); err != nil {
+	previous := endpointObservation(endpointSnapshot{endpoint: endpoint, pollObservation: position.observation}, started, poller.cfg)
+	if err := poller.store.recordPollAttempt(ctx, endpoint, started, previous); err != nil {
 		return err
 	}
+	if err := poller.importEndpoint(ctx, endpoint, position.checkpoint, started); err != nil {
+		return err
+	}
+	poller.logRecovery(ctx, endpoint, previous)
+	return nil
+}
+
+func (poller *poller) importEndpoint(ctx context.Context, endpoint Endpoint, checkpoint *time.Time, started time.Time) error {
 	query := pollQuery(checkpoint, poller.cfg.PollOverlap, started, endpoint)
 	reconcile := endpoint == WarningEndpoint && started.Sub(poller.lastWarningReconcile) >= poller.cfg.WarningReconcileInterval
 	if reconcile {
@@ -133,6 +142,15 @@ func (poller *poller) pollOnce(ctx context.Context, endpoint Endpoint, started t
 		poller.lastWarningReconcile = started
 	}
 	return nil
+}
+
+func (poller *poller) logRecovery(ctx context.Context, endpoint Endpoint, previous pollObservation) {
+	if previous.Status == "healthy" {
+		return
+	}
+	logging.Event(ctx, poller.logger, logging.Record{Level: slog.LevelInfo, Event: "agency_poll_recovered", Message: "agency endpoint recovered"},
+		"endpoint", string(endpoint), "status", "healthy", "previous_status", previous.Status,
+		"previous_error_category", previous.ErrorCategory, "stale_since", previous.StaleSince)
 }
 
 func pollQuery(checkpoint *time.Time, overlap time.Duration, started time.Time, endpoint Endpoint) url.Values {
