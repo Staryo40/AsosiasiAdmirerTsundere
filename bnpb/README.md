@@ -123,7 +123,7 @@ Invoke-RestMethod http://localhost:8080/ready
 Test Go:
 
 ```powershell
-go test -race ./internal/authservice ./internal/api
+go test -race ./internal/auth ./internal/api
 go test ./...
 go vet ./...
 ```

@@ -1,5 +1,5 @@
-// Package authservice implements BNPB downstream-client authentication.
-package authservice
+// Package auth implements BNPB downstream-client authentication.
+package auth
 
 import (
 	"crypto/sha256"

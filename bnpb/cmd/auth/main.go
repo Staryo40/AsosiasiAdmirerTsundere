@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/Staryo40/AsosiasiAdmirerTsundere/bnpb/internal/authservice"
+	"github.com/Staryo40/AsosiasiAdmirerTsundere/bnpb/internal/auth"
 	"github.com/Staryo40/AsosiasiAdmirerTsundere/bnpb/internal/platform/config"
 	"github.com/Staryo40/AsosiasiAdmirerTsundere/bnpb/internal/platform/service"
 )
@@ -16,14 +16,14 @@ func main() {
 }
 
 func initialize(_ context.Context, mux *http.ServeMux, _ config.Config, logger *slog.Logger) (service.Shutdown, error) {
-	authConfig, err := authservice.LoadConfig()
+	authConfig, err := auth.LoadConfig()
 	if err != nil {
 		return nil, err
 	}
-	auth, err := authservice.New(authConfig, logger)
+	authService, err := auth.New(authConfig, logger)
 	if err != nil {
 		return nil, err
 	}
-	auth.RegisterRoutes(mux)
+	authService.RegisterRoutes(mux)
 	return nil, nil
 }
