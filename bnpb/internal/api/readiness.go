@@ -16,12 +16,22 @@ import (
 )
 
 func Initialize(_ context.Context, mux *http.ServeMux, cfg config.Config, logger *slog.Logger) (service.Shutdown, error) {
+	clientConfig, err := loadClientConfig()
+	if err != nil {
+		return nil, err
+	}
 	address, err := aggregatorReadyURL()
 	if err != nil {
 		return nil, err
 	}
 	client := httpclient.New(cfg.OutboundHTTPTimeout, logger)
-	mux.HandleFunc("GET /ready", dependencyReadiness(client, address))
+	publicAPI, err := newPublicService(clientConfig, client, logger)
+	if err != nil {
+		return nil, err
+	}
+	publicAPI.registerRoutes(mux)
+	authHealthAddress := joinedURL(clientConfig.authBaseURL, "/health", "")
+	mux.HandleFunc("GET /ready", dependencyReadiness(client, address, authHealthAddress))
 	return func(context.Context) error {
 		client.CloseIdleConnections()
 		return nil
@@ -42,17 +52,30 @@ func aggregatorReadyURL() (string, error) {
 	return address.String(), nil
 }
 
-func dependencyReadiness(client *http.Client, address string) http.HandlerFunc {
+func dependencyReadiness(client *http.Client, addresses ...string) http.HandlerFunc {
 	return func(w http.ResponseWriter, incoming *http.Request) {
-		if !aggregatorAvailable(incoming.Context(), client, address) {
-			http.Error(w, "aggregator is unavailable", http.StatusServiceUnavailable)
+		if !dependenciesAvailable(incoming.Context(), client, addresses) {
+			http.Error(w, "API dependency is unavailable", http.StatusServiceUnavailable)
 			return
 		}
 		w.WriteHeader(http.StatusOK)
 	}
 }
 
-func aggregatorAvailable(ctx context.Context, client *http.Client, address string) bool {
+func dependenciesAvailable(ctx context.Context, client *http.Client, addresses []string) bool {
+	results := make(chan bool, len(addresses))
+	for _, address := range addresses {
+		go func() { results <- dependencyAvailable(ctx, client, address) }()
+	}
+	for range addresses {
+		if !<-results {
+			return false
+		}
+	}
+	return true
+}
+
+func dependencyAvailable(ctx context.Context, client *http.Client, address string) bool {
 	outgoing, err := http.NewRequestWithContext(ctx, http.MethodGet, address, nil)
 	if err != nil {
 		return false

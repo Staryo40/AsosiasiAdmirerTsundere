@@ -1,18 +1,29 @@
 package main
 
 import (
+	"context"
 	"log/slog"
 	"net/http"
 	"os"
 
+	"github.com/Staryo40/AsosiasiAdmirerTsundere/bnpb/internal/auth"
 	"github.com/Staryo40/AsosiasiAdmirerTsundere/bnpb/internal/platform/config"
 	"github.com/Staryo40/AsosiasiAdmirerTsundere/bnpb/internal/platform/service"
 )
 
 func main() {
-	os.Exit(service.Bootstrap("bnpb-auth", "BNPB_AUTH_HTTP_ADDR", ":8084", registerRoutes))
+	os.Exit(service.BootstrapApplication("bnpb-auth", "BNPB_AUTH_HTTP_ADDR", ":8084", initialize))
 }
 
-func registerRoutes(_ *http.ServeMux, _ config.Config, _ *slog.Logger) {
-	// Token issuance and refresh routes are registered here.
+func initialize(_ context.Context, mux *http.ServeMux, _ config.Config, logger *slog.Logger) (service.Shutdown, error) {
+	authConfig, err := auth.LoadConfig()
+	if err != nil {
+		return nil, err
+	}
+	authService, err := auth.New(authConfig, logger)
+	if err != nil {
+		return nil, err
+	}
+	authService.RegisterRoutes(mux)
+	return nil, nil
 }

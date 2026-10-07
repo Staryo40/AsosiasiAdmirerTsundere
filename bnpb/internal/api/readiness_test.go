@@ -14,7 +14,22 @@ import (
 	"github.com/Staryo40/AsosiasiAdmirerTsundere/bnpb/internal/platform/correlation"
 )
 
+func setRequiredAPISecrets(t *testing.T) {
+	t.Helper()
+	t.Setenv("BNPB_AUTH_INTERNAL_KEY", strings.Repeat("a", 32))
+	t.Setenv("BNPB_AGGREGATOR_INTERNAL_KEY", strings.Repeat("g", 32))
+}
+
 func TestReadinessDependencyLifecycle(t *testing.T) {
+	setRequiredAPISecrets(t)
+	auth := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/health" {
+			t.Errorf("Auth readiness called %s", r.URL.Path)
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer auth.Close()
+	t.Setenv("BNPB_AUTH_BASE_URL", auth.URL)
 	observed := make(chan string, 1)
 	aggregator := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/ready" || r.Header.Get("X-BNPB-Internal-Key") != "" {
@@ -54,6 +69,15 @@ func TestReadinessRejectsNonOKAndBoundsWait(t *testing.T) {
 		{"unready", 503}, {"unexpected-success", 204}, {"redirect", 302}, {"timeout", 0},
 	} {
 		t.Run(scenario.name, func(t *testing.T) {
+			setRequiredAPISecrets(t)
+			auth := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/health" {
+					t.Errorf("Auth readiness called %s", r.URL.Path)
+				}
+				w.WriteHeader(http.StatusOK)
+			}))
+			defer auth.Close()
+			t.Setenv("BNPB_AUTH_BASE_URL", auth.URL)
 			aggregator := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if scenario.status == 0 {
 					<-r.Context().Done()
