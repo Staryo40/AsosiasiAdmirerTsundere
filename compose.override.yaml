@@ -1,0 +1,6 @@
+# Loaded automatically when running `docker compose` from the repository root.
+# Host-only access for A1 inspection. Source wiring is in the base model.
+services:
+  aggregator:
+    ports:
+      - "127.0.0.1:8083:8083"

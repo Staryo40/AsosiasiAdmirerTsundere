@@ -4,6 +4,7 @@ WORKDIR /src
 COPY go.mod ./
 COPY cmd/api ./cmd/api
 COPY internal/platform ./internal/platform
+COPY internal/api ./internal/api
 RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/bnpb-api ./cmd/api
 
 FROM scratch

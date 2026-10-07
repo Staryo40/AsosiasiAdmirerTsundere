@@ -1,0 +1,42 @@
+{
+  "merapi": {
+    "name": "Merapi",
+    "latitude": -7.54,
+    "longitude": 110.446,
+    "source_url": "https://volcano.si.edu/volcano.cfm?vn=263250",
+    "interpretation": "Smithsonian GVP Merapi volcano profile location",
+    "verified_on": "2026-10-03"
+  },
+  "semeru": {
+    "name": "Semeru",
+    "latitude": -8.108,
+    "longitude": 112.922,
+    "source_url": "https://volcano.si.edu/volcano.cfm?vn=263300",
+    "interpretation": "Smithsonian GVP Semeru volcano profile location",
+    "verified_on": "2026-10-03"
+  },
+  "bromo": {
+    "name": "Bromo",
+    "latitude": -7.942,
+    "longitude": 112.95,
+    "source_url": "https://www.sciencedirect.com/science/article/abs/pii/S0377027315002863",
+    "interpretation": "Bromo cone/crater within Tengger Caldera; crater/summit interpretation confirmed by the user on 2026-10-03",
+    "verified_on": "2026-10-03"
+  },
+  "krakatau": {
+    "name": "Krakatau",
+    "latitude": -6.1009,
+    "longitude": 105.4233,
+    "source_url": "https://volcano.si.edu/volcano.cfm?vn=262000&vtab=Weekly",
+    "interpretation": "Smithsonian GVP Krakatau volcano profile location",
+    "verified_on": "2026-10-03"
+  },
+  "sinabung": {
+    "name": "Sinabung",
+    "latitude": 3.17,
+    "longitude": 98.392,
+    "source_url": "https://volcano.si.edu/volcano.cfm?vn=261080",
+    "interpretation": "Smithsonian GVP Sinabung volcano profile location (north latitude)",
+    "verified_on": "2026-10-03"
+  }
+}
