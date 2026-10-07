@@ -52,10 +52,18 @@ services:
       <<: *bnpb-environment
       BNPB_API_HTTP_ADDR: ${BNPB_API_HTTP_ADDR:-:8080}
       BNPB_AGGREGATOR_BASE_URL: ${BNPB_AGGREGATOR_BASE_URL:-http://aggregator:8083}
+      BNPB_AGGREGATOR_INTERNAL_KEY: ${BNPB_AGGREGATOR_INTERNAL_KEY:?Set BNPB_AGGREGATOR_INTERNAL_KEY in .env}
+      BNPB_AUTH_BASE_URL: ${BNPB_AUTH_BASE_URL:-http://auth:8084}
+      BNPB_AUTH_INTERNAL_KEY: ${BNPB_AUTH_INTERNAL_KEY:?Set BNPB_AUTH_INTERNAL_KEY in .env}
     ports:
       - "8080:8080"
     networks:
       - backend
+    depends_on:
+      aggregator:
+        condition: service_healthy
+      auth:
+        condition: service_healthy
     healthcheck:
       test: [CMD, /bnpb-api, -healthcheck]
       interval: 10s
@@ -122,6 +130,15 @@ services:
     environment:
       <<: *bnpb-environment
       BNPB_AUTH_HTTP_ADDR: ${BNPB_AUTH_HTTP_ADDR:-:8084}
+      BNPB_AUTH_ACCESS_TOKEN_TTL: ${BNPB_AUTH_ACCESS_TOKEN_TTL:-60s}
+      BNPB_AUTH_REFRESH_SESSION_TTL: ${BNPB_AUTH_REFRESH_SESSION_TTL:-8h}
+      BNPB_AUTH_INTERNAL_KEY: ${BNPB_AUTH_INTERNAL_KEY:?Set BNPB_AUTH_INTERNAL_KEY in .env}
+      BNPB_MEDIA_CLIENT_ID: ${BNPB_MEDIA_CLIENT_ID:-media}
+      BNPB_MEDIA_CLIENT_SECRET: ${BNPB_MEDIA_CLIENT_SECRET:?Set BNPB_MEDIA_CLIENT_SECRET in .env}
+      BNPB_FIELD_CLIENT_ID: ${BNPB_FIELD_CLIENT_ID:-field-team}
+      BNPB_FIELD_CLIENT_SECRET: ${BNPB_FIELD_CLIENT_SECRET:?Set BNPB_FIELD_CLIENT_SECRET in .env}
+      BNPB_OPS_CLIENT_ID: ${BNPB_OPS_CLIENT_ID:-internal-ops}
+      BNPB_OPS_CLIENT_SECRET: ${BNPB_OPS_CLIENT_SECRET:?Set BNPB_OPS_CLIENT_SECRET in .env}
     networks:
       - backend
     healthcheck:
