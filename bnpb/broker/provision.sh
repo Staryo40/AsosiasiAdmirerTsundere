@@ -38,6 +38,10 @@ ensure_permissions() {
 	put "/permissions/%2F/$user" "$body"
 }
 
+# Declared here (not left to the Aggregator's own idempotent declare) so a
+# consumer can start, bind, and be tested before the Aggregator ever runs.
+put "/exchanges/%2F/hazard.events" '{"type":"fanout","durable":true}'
+
 # Main queues (hazard.events.<role>): 3h TTL, 10k cap, oldest dropped first,
 # queue deleted after 24h with no consumer. See Decision 1.
 ensure_policy main-bounds '^hazard\.events\.[a-z0-9-]+$' \
@@ -52,19 +56,23 @@ ensure_policy failed-bounds '^hazard\.events\.[a-z0-9-]+\.failed$' \
 ensure_user "$BNPB_RABBITMQ_PUBLISHER_USER" "$BNPB_RABBITMQ_PUBLISHER_PASSWORD"
 ensure_permissions "$BNPB_RABBITMQ_PUBLISHER_USER" '^hazard\.events$' '^hazard\.events$' '^$'
 
-# Each consumer: may declare/bind its own queue and its own failed queue
-# (configure), bind to the exchange and publish to its failed queue (write),
-# and read only its own queue. The queue name is the role, e.g. "dashboard".
+# Each consumer: may declare its own queue and its own failed queue
+# (configure); write covers publishing to its failed queue and binding its
+# queue to the exchange, which needs write on the queue (already covered)
+# plus read on the exchange, so read spans both the exchange and its queue.
 provision_consumer() {
 	role="$1"
 	password="$2"
 	queue="hazard.events.$role"
 	queue_pattern=$(printf '%s' "$queue" | sed 's/\./\\./g')
 	ensure_user "$role" "$password"
+	# Publishing to the failed queue goes through the default exchange
+	# (routing key = queue name), which RabbitMQ checks as write access to
+	# the exchange literally named "amq.default", not the queue name.
 	ensure_permissions "$role" \
 		"^${queue_pattern}(\\.failed)?\$" \
-		"^(hazard\\.events|${queue_pattern}(\\.failed)?)\$" \
-		"^${queue_pattern}\$"
+		"^(hazard\\.events|amq\\.default|${queue_pattern}(\\.failed)?)\$" \
+		"^(hazard\\.events|${queue_pattern})\$"
 }
 
 provision_consumer "$BNPB_CONSUMER_1_RABBITMQ_USER" "$BNPB_CONSUMER_1_RABBITMQ_PASSWORD"
