@@ -204,6 +204,8 @@ services:
       BNPB_CONSUMER_2_HTTP_ADDR: ${BNPB_CONSUMER_2_HTTP_ADDR:-:8086}
       BNPB_CONSUMER_2_RABBITMQ_USER: ${BNPB_CONSUMER_2_RABBITMQ_USER:-notifications}
       BNPB_CONSUMER_2_RABBITMQ_PASSWORD: ${BNPB_CONSUMER_2_RABBITMQ_PASSWORD:?Set BNPB_CONSUMER_2_RABBITMQ_PASSWORD in .env}
+    volumes:
+      - consumer-2-data:/data
     depends_on:
       broker-init:
         condition: service_completed_successfully
@@ -246,3 +248,4 @@ volumes:
   postgres-data:
   rabbitmq-data:
   consumer-1-data:
+  consumer-2-data:
