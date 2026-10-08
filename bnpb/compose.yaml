@@ -28,7 +28,7 @@ services:
       retries: 10
 
   rabbitmq:
-    image: rabbitmq:4.3.5-alpine
+    image: rabbitmq:4.3.5-management-alpine
     hostname: bnpb-rabbitmq
     environment:
       RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER:-bnpb}
@@ -43,6 +43,32 @@ services:
       interval: 10s
       timeout: 5s
       retries: 10
+
+  # One-shot: declares queue bound policies and per-identity RabbitMQ users
+  # over the management HTTP API (see broker/provision.sh). Every PUT it
+  # makes is idempotent, so re-running on every `compose up` is safe.
+  broker-init:
+    image: alpine:3.20
+    entrypoint: [/bin/sh, -c]
+    command: ["apk add --no-cache curl jq >/dev/null && exec sh /broker/provision.sh"]
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER:-bnpb}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS:?Set RABBITMQ_DEFAULT_PASS in .env}
+      BNPB_RABBITMQ_PUBLISHER_USER: ${BNPB_RABBITMQ_PUBLISHER_USER:-publisher}
+      BNPB_RABBITMQ_PUBLISHER_PASSWORD: ${BNPB_RABBITMQ_PUBLISHER_PASSWORD:?Set BNPB_RABBITMQ_PUBLISHER_PASSWORD in .env}
+      BNPB_CONSUMER_1_RABBITMQ_USER: ${BNPB_CONSUMER_1_RABBITMQ_USER:-dashboard}
+      BNPB_CONSUMER_1_RABBITMQ_PASSWORD: ${BNPB_CONSUMER_1_RABBITMQ_PASSWORD:?Set BNPB_CONSUMER_1_RABBITMQ_PASSWORD in .env}
+      BNPB_CONSUMER_2_RABBITMQ_USER: ${BNPB_CONSUMER_2_RABBITMQ_USER:-notifications}
+      BNPB_CONSUMER_2_RABBITMQ_PASSWORD: ${BNPB_CONSUMER_2_RABBITMQ_PASSWORD:?Set BNPB_CONSUMER_2_RABBITMQ_PASSWORD in .env}
+      BNPB_CONSUMER_3_RABBITMQ_USER: ${BNPB_CONSUMER_3_RABBITMQ_USER:-demo}
+      BNPB_CONSUMER_3_RABBITMQ_PASSWORD: ${BNPB_CONSUMER_3_RABBITMQ_PASSWORD:?Set BNPB_CONSUMER_3_RABBITMQ_PASSWORD in .env}
+    volumes:
+      - ./broker/provision.sh:/broker/provision.sh:ro
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - events
 
   api:
     build:
@@ -111,8 +137,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      rabbitmq:
-        condition: service_started
+      broker-init:
+        condition: service_completed_successfully
     networks:
       - backend
       - canonical-store
@@ -154,9 +180,13 @@ services:
     environment:
       <<: *bnpb-environment
       BNPB_CONSUMER_1_HTTP_ADDR: ${BNPB_CONSUMER_1_HTTP_ADDR:-:8085}
+      BNPB_CONSUMER_1_RABBITMQ_USER: ${BNPB_CONSUMER_1_RABBITMQ_USER:-dashboard}
+      BNPB_CONSUMER_1_RABBITMQ_PASSWORD: ${BNPB_CONSUMER_1_RABBITMQ_PASSWORD:?Set BNPB_CONSUMER_1_RABBITMQ_PASSWORD in .env}
+    volumes:
+      - consumer-1-data:/data
     depends_on:
-      rabbitmq:
-        condition: service_healthy
+      broker-init:
+        condition: service_completed_successfully
     networks:
       - events
     healthcheck:
@@ -172,9 +202,13 @@ services:
     environment:
       <<: *bnpb-environment
       BNPB_CONSUMER_2_HTTP_ADDR: ${BNPB_CONSUMER_2_HTTP_ADDR:-:8086}
+      BNPB_CONSUMER_2_RABBITMQ_USER: ${BNPB_CONSUMER_2_RABBITMQ_USER:-notifications}
+      BNPB_CONSUMER_2_RABBITMQ_PASSWORD: ${BNPB_CONSUMER_2_RABBITMQ_PASSWORD:?Set BNPB_CONSUMER_2_RABBITMQ_PASSWORD in .env}
+    volumes:
+      - consumer-2-data:/data
     depends_on:
-      rabbitmq:
-        condition: service_healthy
+      broker-init:
+        condition: service_completed_successfully
     networks:
       - events
     healthcheck:
@@ -191,9 +225,13 @@ services:
     environment:
       <<: *bnpb-environment
       BNPB_CONSUMER_3_HTTP_ADDR: ${BNPB_CONSUMER_3_HTTP_ADDR:-:8087}
+      BNPB_CONSUMER_3_RABBITMQ_USER: ${BNPB_CONSUMER_3_RABBITMQ_USER:-demo}
+      BNPB_CONSUMER_3_RABBITMQ_PASSWORD: ${BNPB_CONSUMER_3_RABBITMQ_PASSWORD:?Set BNPB_CONSUMER_3_RABBITMQ_PASSWORD in .env}
+    volumes:
+      - consumer-3-data:/data
     depends_on:
-      rabbitmq:
-        condition: service_healthy
+      broker-init:
+        condition: service_completed_successfully
     networks:
       - events
     healthcheck:
@@ -211,3 +249,6 @@ networks:
 volumes:
   postgres-data:
   rabbitmq-data:
+  consumer-1-data:
+  consumer-2-data:
+  consumer-3-data:

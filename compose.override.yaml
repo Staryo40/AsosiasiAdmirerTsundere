@@ -4,3 +4,7 @@ services:
   aggregator:
     ports:
       - "127.0.0.1:8083:8083"
+
+  rabbitmq:
+    ports:
+      - "127.0.0.1:15672:15672"
