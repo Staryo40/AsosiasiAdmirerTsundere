@@ -227,6 +227,8 @@ services:
       BNPB_CONSUMER_3_HTTP_ADDR: ${BNPB_CONSUMER_3_HTTP_ADDR:-:8087}
       BNPB_CONSUMER_3_RABBITMQ_USER: ${BNPB_CONSUMER_3_RABBITMQ_USER:-demo}
       BNPB_CONSUMER_3_RABBITMQ_PASSWORD: ${BNPB_CONSUMER_3_RABBITMQ_PASSWORD:?Set BNPB_CONSUMER_3_RABBITMQ_PASSWORD in .env}
+    volumes:
+      - consumer-3-data:/data
     depends_on:
       broker-init:
         condition: service_completed_successfully
@@ -249,3 +251,4 @@ volumes:
   rabbitmq-data:
   consumer-1-data:
   consumer-2-data:
+  consumer-3-data:
