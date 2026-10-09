@@ -14,13 +14,16 @@ import (
 	"github.com/Staryo40/AsosiasiAdmirerTsundere/bnpb/internal/platform/logging"
 )
 
+const maxIdleConnections = 100
+
 // New returns an isolated, reusable client with correlation and latency logging.
 func New(timeout time.Duration, logger *slog.Logger) *http.Client {
 	transport := &http.Transport{
 		Proxy:                 http.ProxyFromEnvironment,
 		DialContext:           (&net.Dialer{Timeout: timeout, KeepAlive: 30 * time.Second}).DialContext,
 		ForceAttemptHTTP2:     true,
-		MaxIdleConns:          100,
+		MaxIdleConns:          maxIdleConnections,
+		MaxIdleConnsPerHost:   maxIdleConnections,
 		IdleConnTimeout:       90 * time.Second,
 		TLSHandshakeTimeout:   10 * time.Second,
 		ExpectContinueTimeout: time.Second,

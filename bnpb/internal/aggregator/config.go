@@ -112,7 +112,7 @@ func loadCounts(lookup func(string) (string, bool), cfg *Config) error {
 		{"BNPB_INGEST_CHUNK_RECORDS", 100, 1000, &cfg.IngestChunkRecords},
 		{"BNPB_DB_READ_MAX_CONNS", 16, 64, &cfg.DBReadMaxConns},
 		{"BNPB_DB_WRITE_MAX_CONNS", 4, 64, &cfg.DBWriteMaxConns},
-		{"BNPB_READ_MAX_IN_FLIGHT", 32, 1024, &cfg.ReadMaxInFlight},
+		{"BNPB_READ_MAX_IN_FLIGHT", 4, 1024, &cfg.ReadMaxInFlight},
 		{"BNPB_LIST_DEFAULT_LIMIT", 100, 500, &cfg.ListDefaultLimit},
 		{"BNPB_LIST_MAX_LIMIT", 500, 500, &cfg.ListMaxLimit},
 		{"BNPB_OUTBOX_BATCH_SIZE", 100, 1000, &cfg.OutboxBatchSize},
@@ -190,6 +190,7 @@ func (cfg Config) validateBudgets() error {
 		{cfg.PVMBGCycleTimeout < 2*cfg.PVMBG.HTTPTimeout, "BNPB_PVMBG_CYCLE_TIMEOUT: must cover two BNPB_PVMBG_HTTP_TIMEOUT requests"},
 		{cfg.SourceStaleAfter <= cfg.PVMBGCycleTimeout || cfg.SourceStaleAfter <= cfg.BMKG.HTTPTimeout+cfg.BMKG.PollInterval || cfg.SourceStaleAfter <= cfg.PVMBG.HTTPTimeout+cfg.PVMBG.PollInterval, "BNPB_SOURCE_STALE_AFTER: must exceed source request/cycle budgets"},
 		{cfg.ListDefaultLimit > cfg.ListMaxLimit, "BNPB_LIST_DEFAULT_LIMIT: must not exceed BNPB_LIST_MAX_LIMIT"},
+		{cfg.ReadMaxInFlight > cfg.DBReadMaxConns, "BNPB_READ_MAX_IN_FLIGHT: must not exceed BNPB_DB_READ_MAX_CONNS"},
 		{cfg.DBReadMaxConns+cfg.DBWriteMaxConns > 64, "BNPB_DB_READ_MAX_CONNS + BNPB_DB_WRITE_MAX_CONNS: must not exceed 64"},
 	} {
 		if check.invalid {

@@ -50,7 +50,7 @@ func quietLogger() *slog.Logger { return slog.New(slog.NewJSONHandler(io.Discard
 
 func TestConfigDefaultsAndOverrides(t *testing.T) {
 	cfg := testConfig(t)
-	if cfg.BMKG.HTTPTimeout != time.Second || cfg.PVMBG.HTTPTimeout != 5*time.Second || cfg.MaxResponseBytes != 32<<20 || cfg.HazardExchange != "hazard.events" {
+	if cfg.BMKG.HTTPTimeout != time.Second || cfg.PVMBG.HTTPTimeout != 5*time.Second || cfg.MaxResponseBytes != 32<<20 || cfg.HazardExchange != "hazard.events" || cfg.ReadMaxInFlight != 4 {
 		t.Fatalf("unexpected nonsecret defaults: BMKG=%s PVMBG=%s bytes=%d", cfg.BMKG.HTTPTimeout, cfg.PVMBG.HTTPTimeout, cfg.MaxResponseBytes)
 	}
 	env := requiredEnvironment()
@@ -88,6 +88,7 @@ func TestConfigRejectsInvalidSettingsWithoutSecrets(t *testing.T) {
 		{"excessive bytes", "BNPB_INGEST_MAX_RESPONSE_BYTES", "134217729"},
 		{"overflow", "BNPB_OUTBOX_BATCH_SIZE", "99999999999999999999999"},
 		{"invalid integer", "BNPB_READ_MAX_IN_FLIGHT", "private"},
+		{"read admission exceeds pool", "BNPB_READ_MAX_IN_FLIGHT", "17"},
 		{"contract page ceiling", "BNPB_LIST_MAX_LIMIT", "501"},
 		{"page cross bound", "BNPB_LIST_MAX_LIMIT", "99"},
 		{"cycle cross bound", "BNPB_PVMBG_CYCLE_TIMEOUT", "9s"},
