@@ -2,20 +2,75 @@ package httpclient
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/Staryo40/AsosiasiAdmirerTsundere/bnpb/internal/platform/correlation"
 	"github.com/Staryo40/AsosiasiAdmirerTsundere/bnpb/internal/platform/logging"
 )
 
 func testLogger(buffer *bytes.Buffer) *slog.Logger {
 	return logging.New("test-service", slog.LevelDebug, buffer)
+}
+
+func TestOutboundCorrelationLatencyAndRedactionOverNetwork(t *testing.T) {
+	for _, scenario := range []struct {
+		name   string
+		status int
+	}{
+		{"success", 200}, {"error", 503}, {"timeout", 0},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			seen := make(chan string, 1)
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				seen <- r.Header.Get(correlation.Header)
+				if scenario.status == 0 {
+					<-r.Context().Done()
+					return
+				}
+				w.WriteHeader(scenario.status)
+			}))
+			defer server.Close()
+			var output bytes.Buffer
+			client := New(time.Second, testLogger(&output))
+			defer client.CloseIdleConnections()
+			ctx, cancel := context.WithTimeout(correlation.WithID(t.Context(), "original-cid"), 100*time.Millisecond)
+			defer cancel()
+			request, err := http.NewRequestWithContext(ctx, http.MethodGet, server.URL+"/events?token=private-query", nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			request.Header.Set("Authorization", "Bearer private-token")
+			response, err := client.Do(request)
+			if response != nil {
+				response.Body.Close()
+			}
+			if (err != nil) != (scenario.status == 0) {
+				t.Fatalf("unexpected outcome: %v", err)
+			}
+			if <-seen != "original-cid" {
+				t.Fatal("CID not propagated")
+			}
+			record := decodeLogLines(t, output.Bytes())[0]
+			if record["correlation_id"] != "original-cid" || record["duration_ms"] == nil {
+				t.Fatalf("invalid trace: %v", record)
+			}
+			if scenario.status == 0 && record["failure"] != "timeout" {
+				t.Fatalf("timeout not classified: %v", record)
+			}
+			if strings.Contains(output.String(), "private-") {
+				t.Fatal("credential/query leaked")
+			}
+		})
+	}
 }
 
 func decodeLogLines(t *testing.T, data []byte) []map[string]any {

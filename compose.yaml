@@ -66,6 +66,8 @@ services:
       - /bin/sh
       - -ec
       - |
+        # Shell regression tools belong to the test harness, not production startup.
+        apk add --no-cache curl jq >/dev/null
         export BNPB_TEST_BMKG_BASE_URL=http://bmkg:8081
         export BNPB_TEST_PVMBG_BASE_URL=http://pvmbg:8082
         export BNPB_TEST_BMKG_API_KEY="$$BNPB_BMKG_API_KEY"

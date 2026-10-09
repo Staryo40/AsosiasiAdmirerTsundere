@@ -65,8 +65,8 @@ Prinsip penting dari spesifikasi:
 | BNPB Aggregator | Go | 8083 internal | Polling kedua mock, mapping canonical, PostgreSQL owner, snapshot API, freshness, transactional outbox, AMQP publisher, readiness, dan test sudah diimplementasikan. |
 | BNPB Client-Facing API | Go | 8080 | Login/refresh facade, introspection, filter, proyeksi summary/full, pemanggilan Aggregator, pemetaan error, readiness, dan test sudah diimplementasikan. |
 | BNPB Auth | Go | 8084 internal | Tiga identitas, opaque token, access TTL 60 detik, sesi refresh absolut 8 jam, rotation/revocation, introspection, internal key, dan test sudah diimplementasikan. |
-| Consumer 1 dan 2 | Go | 8085, 8086 | Container dan fondasi HTTP sudah ada; konsumsi RabbitMQ masih stub. |
-| Consumer 3 | Go | 8087 | Stub dan hanya aktif pada Compose profile `demo`. |
+| Consumer 1 dan 2 | Go | 8085, 8086 | Subscriber RabbitMQ independen dengan efek SQLite lokal, deduplikasi persisten, log CID dan latensi AMQP. |
+| Consumer 3 | Go | 8087 | Subscriber feed dan hanya aktif pada Compose profile `demo`. |
 | PostgreSQL | Image resmi | internal | Canonical Store milik tunggal Aggregator, lengkap dengan migration dan outbox. |
 | RabbitMQ | Image resmi | internal | Sudah didefinisikan di Compose BNPB untuk fan-out event. |
 
@@ -92,8 +92,8 @@ mock -> Aggregator -> API -> client dapat dinyalakan dari root dengan satu
 perintah. Compose per folder tetap berguna untuk pengembangan komponen secara
 mandiri.
 
-Consumer RabbitMQ masih merupakan pekerjaan terpisah; hal itu tidak menghalangi
-jalur read Client-Facing API.
+Broker-init memprovisikan identitas dan permission broker sebelum Aggregator
+serta consumer dimulai.
 
 ## 3. Prasyarat Docker
 
@@ -172,6 +172,10 @@ BNPB_AGGREGATOR_INTERNAL_KEY=<rahasia-khusus-API-ke-Aggregator-minimal-32-karakt
 BNPB_MEDIA_CLIENT_SECRET=<rahasia-media-minimal-16-karakter>
 BNPB_FIELD_CLIENT_SECRET=<rahasia-field-minimal-16-karakter>
 BNPB_OPS_CLIENT_SECRET=<rahasia-ops-minimal-16-karakter>
+BNPB_RABBITMQ_PUBLISHER_PASSWORD=<rahasia-publisher>
+BNPB_CONSUMER_1_RABBITMQ_PASSWORD=<rahasia-dashboard>
+BNPB_CONSUMER_2_RABBITMQ_PASSWORD=<rahasia-notifier>
+BNPB_CONSUMER_3_RABBITMQ_PASSWORD=<rahasia-demo>
 ```
 
 Untuk integrasi Aggregator dengan kedua mock, lengkapi juga:
@@ -182,7 +186,7 @@ BNPB_PVMBG_READER_CLIENT_ID=<sama-dengan-reader-PVMBG>
 BNPB_PVMBG_READER_CLIENT_SECRET=<sama-dengan-secret-reader-PVMBG>
 BNPB_AGGREGATOR_INTERNAL_KEY=<rahasia-khusus-API-ke-Aggregator>
 BNPB_CANONICAL_DATABASE_URL=postgres://bnpb:<password>@postgres:5432/bnpb?sslmode=disable
-BNPB_AMQP_URL=amqp://bnpb:<password>@rabbitmq:5672/
+BNPB_AMQP_URL=amqp://publisher:<rahasia-publisher>@rabbitmq:5672/
 ```
 
 Nilai `BNPB_BMKG_API_KEY` memang harus sama dengan kunci yang BMKG validasi,
@@ -205,6 +209,12 @@ docker compose ps
 Invoke-RestMethod http://localhost:8080/health
 Invoke-RestMethod http://localhost:8080/ready
 ```
+
+Periksa juga `docker compose ps --all`: `broker-init` harus **Exited (0)** dan
+lognya memuat `broker_provisioning_complete`. Detached `up` yang exit 0 belum
+menjadi bukti alur data; cocokkan `message_id` pada `broker_publication` Aggregator
+dan `message_received` consumer 1 serta 2. Job menunggu autentikasi/readiness
+Management RabbitMQ dengan batas waktu; paket curl/jq sudah dibangun ke image.
 
 `/health` memeriksa liveness API. `/ready` baru menghasilkan 200 ketika Auth dan
 Aggregator siap; readiness Aggregator sendiri mensyaratkan Canonical Store siap.

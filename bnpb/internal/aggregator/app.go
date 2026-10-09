@@ -21,7 +21,7 @@ func Initialize(ctx context.Context, mux *http.ServeMux, platform config.Config,
 		logging.Event(ctx, logger, logging.Record{Level: slog.LevelError, Event: "configuration_invalid", Message: err.Error()})
 		return nil, err
 	}
-	store, err := OpenStore(ctx, cfg)
+	store, err := OpenStore(ctx, cfg, logger)
 	if err != nil {
 		logging.Event(ctx, logger, logging.Record{Level: slog.LevelError, Event: "canonical_store_initialization_failed", Message: err.Error()})
 		return nil, err

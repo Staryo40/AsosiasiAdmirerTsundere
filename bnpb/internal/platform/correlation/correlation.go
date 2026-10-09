@@ -37,3 +37,14 @@ func NewID() string {
 func ValidID(id string) bool {
 	return correlationPattern.MatchString(id)
 }
+
+// MessageContext prefers the transport identity; legacy envelopes can supply a valid fallback.
+func MessageContext(ctx context.Context, transportID, envelopeID string) context.Context {
+	if ValidID(transportID) {
+		return WithID(ctx, transportID)
+	}
+	if ValidID(envelopeID) {
+		return WithID(ctx, envelopeID)
+	}
+	return WithID(ctx, NewID())
+}

@@ -25,6 +25,7 @@ func Initialize(ctx context.Context, mux *http.ServeMux, _ config.Config, logger
 
 	mux.HandleFunc("GET /stats", statsHandler(store))
 
+	ctx, cancel := context.WithCancel(ctx)
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
@@ -32,9 +33,13 @@ func Initialize(ctx context.Context, mux *http.ServeMux, _ config.Config, logger
 	}()
 
 	return func(shutdownCtx context.Context) error {
+		cancel()
 		select {
 		case <-done:
 		case <-shutdownCtx.Done():
+			// Keep store ownership with live workers if the shutdown budget expires.
+			go func() { <-done; _ = store.Close() }()
+			return shutdownCtx.Err()
 		}
 		return store.Close()
 	}, nil

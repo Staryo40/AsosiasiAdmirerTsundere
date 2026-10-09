@@ -4,7 +4,7 @@ WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY cmd/auth ./cmd/auth
-COPY internal/authservice ./internal/authservice
+COPY internal/auth ./internal/auth
 COPY internal/platform ./internal/platform
 RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/bnpb-auth ./cmd/auth
 

@@ -5,6 +5,7 @@ import (
 	_ "embed"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -38,17 +39,17 @@ type Store struct {
 	maxBytes                  int64
 }
 
-func OpenStore(ctx context.Context, cfg Config) (*Store, error) {
+func OpenStore(ctx context.Context, cfg Config, logger *slog.Logger) (*Store, error) {
 	ctx, cancel := context.WithTimeout(ctx, cfg.DBWriteTimeout)
 	defer cancel()
 	store := &Store{readTimeout: cfg.DBReadTimeout, writeTimeout: cfg.DBWriteTimeout,
 		chunkRecords: cfg.IngestChunkRecords, maxBytes: cfg.MaxResponseBytes}
 	var err error
-	if store.write, err = openPool(ctx, cfg.DatabaseURL, cfg.DBWriteMaxConns); err != nil {
+	if store.write, err = openPool(ctx, cfg.DatabaseURL, cfg.DBWriteMaxConns, logger); err != nil {
 		return nil, storeError("open write pool", err)
 	}
 	if err = store.migrate(ctx); err == nil {
-		store.read, err = openPool(ctx, cfg.DatabaseURL, cfg.DBReadMaxConns)
+		store.read, err = openPool(ctx, cfg.DatabaseURL, cfg.DBReadMaxConns, logger)
 	}
 	if err != nil {
 		store.Close()
@@ -57,21 +58,30 @@ func OpenStore(ctx context.Context, cfg Config) (*Store, error) {
 	return store, nil
 }
 
-func openPool(ctx context.Context, address string, maximum int) (*pgxpool.Pool, error) {
+func openPool(ctx context.Context, address string, maximum int, logger *slog.Logger) (*pgxpool.Pool, error) {
 	cfg, err := pgxpool.ParseConfig(address)
 	if err != nil {
 		return nil, err
 	}
 	cfg.MaxConns, cfg.MinConns, cfg.MinIdleConns = int32(maximum), 0, 0
+	cfg.ConnConfig.Tracer = databaseTracer{logger: logger}
 	pool, err := pgxpool.NewWithConfig(ctx, cfg)
 	if err != nil {
 		return nil, err
 	}
-	if err := pool.Ping(ctx); err != nil {
+	if err := pingPool(ctx, pool, logger); err != nil {
 		pool.Close()
 		return nil, err
 	}
 	return pool, nil
+}
+
+func pingPool(ctx context.Context, pool *pgxpool.Pool, logger *slog.Logger) error {
+	// pgx Pool.Ping bypasses QueryTracer, so its complete startup probe needs a separate measurement.
+	ctx = databaseTraceContext(ctx)
+	err := pool.Ping(ctx)
+	databaseTracer{logger: logger}.recordCompletion(ctx, "ping", err)
+	return err
 }
 
 func (store *Store) Close() {

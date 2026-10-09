@@ -1,0 +1,8 @@
+* text=auto
+
+# Scripts executed in Linux containers.
+*.sh text eol=lf
+gradlew text eol=lf
+
+*.bat text eol=crlf
+*.cmd text eol=crlf

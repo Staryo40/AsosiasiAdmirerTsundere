@@ -89,6 +89,7 @@ func (dispatcher *outboxDispatcher) dispatchPending(ctx context.Context) (time.D
 }
 
 func (dispatcher *outboxDispatcher) dispatchMessage(ctx context.Context, message outboxMessage) error {
+	ctx = correlation.WithID(ctx, message.CorrelationID)
 	if err := dispatcher.store.attemptOutbox(ctx, message.Sequence); err != nil {
 		return err
 	}
@@ -103,12 +104,12 @@ func (dispatcher *outboxDispatcher) dispatchMessage(ctx context.Context, message
 }
 
 func (dispatcher *outboxDispatcher) publishMessage(ctx context.Context, message Publication) error {
+	ctx = correlation.WithID(ctx, message.CorrelationID)
 	publishCtx, cancel := context.WithTimeout(ctx, dispatcher.cfg.PublishTimeout)
 	started := time.Now()
 	err := dispatcher.publisher.Publish(publishCtx, message)
 	duration := time.Since(started)
 	cancel()
-	ctx = correlation.WithID(ctx, message.CorrelationID)
 	level, category := publicationStatus(err, "broker")
 	logging.Event(ctx, dispatcher.logger, logging.Record{Level: level, Event: "broker_publication", Message: "broker publication completed"},
 		"message_id", message.MessageID, "hazard_id", message.HazardID, "revision", message.Revision,
@@ -120,6 +121,7 @@ func (dispatcher *outboxDispatcher) retryMessage(ctx context.Context, message ou
 	if ctx.Err() != nil {
 		return 0, ctx.Err()
 	}
+	ctx = correlation.WithID(ctx, message.CorrelationID)
 	delay := failureDelay(outboxPollInterval, dispatcher.cfg.RetryMaxBackoff, min(message.Attempts, 63)+1, failure)
 	err := dispatcher.store.retryOutbox(ctx, message.Sequence, time.Now().Add(delay))
 	dispatcher.logOutcome(ctx, message.Publication, failure)
