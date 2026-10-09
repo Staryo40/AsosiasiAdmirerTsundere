@@ -18,6 +18,13 @@ build/
 bin/
 .gradle/
 .kotlin/
+__pycache__/
+*.py[cod]
 
 *.local.*
 *.local/
+
+# Generated acceptance-test evidence may contain runtime metadata. Commit only
+# deliberately sanitized evidence outside this working results directory.
+testing/results/*
+!testing/results/.gitkeep
