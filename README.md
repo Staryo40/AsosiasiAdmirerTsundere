@@ -19,19 +19,33 @@ Alur utama sistem adalah:
 
 ```mermaid
 flowchart LR
-    Media[Media / Pers]
-    Field[Tim Lapangan]
-    Ops[BNPB Internal Ops]
+    subgraph Clients["Klien downstream"]
+        Media[Media / Pers]
+        Field[Tim Lapangan]
+        Ops[BNPB Internal Ops]
+    end
 
-    Auth[Auth / Token Service\n:8084]
-    API[Client-Facing API\n:8080]
-    Agg[Gateway / Aggregator\n:8083]
-    DB[(Canonical Store\nPostgreSQL)]
-    MQ[(RabbitMQ\nhazard.events)]
-    C1[Consumer 1\n:8085]
-    C2[Consumer 2\n:8086]
-    BMKG[Mock BMKG\n:8081]
-    PVMBG[Mock PVMBG\n:8082]
+    subgraph Sumber["network bmkg-source / pvmbg-source"]
+        BMKG[Mock BMKG\n:8081]
+        PVMBG[Mock PVMBG\n:8082]
+    end
+
+    subgraph Backend["network backend"]
+        API[Client-Facing API\n:8080]
+        Auth[Auth / Token Service\n:8084]
+    end
+
+    subgraph Canon["network canonical-store (internal)"]
+        Agg[Gateway / Aggregator\n:8083]
+        DB[(Canonical Store\nPostgreSQL)]
+    end
+
+    subgraph Events["network events"]
+        MQ[(RabbitMQ\nhazard.events)]
+        C1[Consumer 1\ndashboard updater]
+        C2[Consumer 2\nnotifier]
+        C3[Consumer 3\nportal feed - profile demo]
+    end
 
     Media -->|read + token / refresh| API
     Field -->|read + token / refresh| API
@@ -41,10 +55,17 @@ flowchart LR
     Agg -->|polling + X-BMKG-Key| BMKG
     Agg -->|polling + PVMBG Bearer token| PVMBG
     Agg -->|owner tunggal| DB
-    Agg -->|publish| MQ
+    Agg -->|publish via outbox| MQ
     MQ --> C1
     MQ --> C2
+    MQ -.->|opt-in, profile demo| C3
 ```
+
+Tiga network Docker (`backend`, `canonical-store`, `events`) di atas bukan
+sekadar pengelompokan logis: `canonical-store` ditandai `internal: true` pada
+Compose, sehingga hanya Aggregator dan PostgreSQL yang benar-benar bisa
+menjangkaunya. API dan Auth tidak mempunyai jalur jaringan ke PostgreSQL atau
+RabbitMQ sama sekali.
 
 Prinsip penting dari spesifikasi:
 
@@ -115,6 +136,101 @@ repositori:
 
 ```powershell
 Set-Location D:\Code\AAT\AsosiasiAdmirerTsundere
+```
+
+### 3.1 Menjalankan dari Linux/macOS (bash)
+
+Bagian 4-7 di bawah ditulis untuk PowerShell. Blok ini adalah jalur setara
+dalam bash yang cukup untuk menyiapkan konfigurasi dan menjalankan seluruh
+sistem dari Linux/macOS; untuk skenario lanjutan (login PVMBG, admin toggle,
+dsb.) pola yang sama (`curl` + `jq` menggantikan `Invoke-RestMethod`) tinggal
+diterapkan ke perintah PowerShell terkait.
+
+```bash
+docker --version
+docker compose version
+docker info
+cd /path/ke/repo   # root repositori
+```
+
+Siapkan ketiga `.env`:
+
+```bash
+# BMKG
+cp bmkg/.env.example bmkg/.env
+secret=$(openssl rand -hex 32)
+sed -i.bak "s/^BMKG_API_KEY=.*/BMKG_API_KEY=$secret/" bmkg/.env && rm bmkg/.env.bak
+unset secret
+
+# PVMBG — isi manual PVMBG_JWT_SECRET, PVMBG_READER_CLIENT_ID/SECRET,
+# PVMBG_ADMIN_CLIENT_ID/SECRET di pvmbg/.env memakai nilai dari perintah berikut
+cp pvmbg/.env.example pvmbg/.env
+openssl rand -hex 32
+
+# BNPB — isi manual nilai kosong (lihat bagian 4.3): POSTGRES_PASSWORD,
+# RABBITMQ_DEFAULT_PASS, BNPB_AUTH_INTERNAL_KEY, BNPB_AGGREGATOR_INTERNAL_KEY,
+# BNPB_MEDIA/FIELD/OPS_CLIENT_SECRET, dst.
+cp bnpb/.env.example bnpb/.env
+openssl rand -hex 32
+```
+
+Jalankan seluruh sistem dari root:
+
+```bash
+docker compose up -d --build
+docker compose ps
+curl http://localhost:8080/health
+curl http://localhost:8080/ready
+docker compose logs -f api auth aggregator bmkg pvmbg
+docker compose down
+```
+
+Smoke test BMKG:
+
+```bash
+cd bmkg
+docker compose up -d --build
+bmkgKey=$(grep '^BMKG_API_KEY=' .env | cut -d= -f2)
+curl http://localhost:8081/health
+curl -H "X-BMKG-Key: $bmkgKey" http://localhost:8081/seismic-events
+curl -H "X-BMKG-Key: $bmkgKey" http://localhost:8081/tsunami-warnings
+docker compose down
+cd ..
+```
+
+Smoke test PVMBG (login reader lalu baca data; perlu `jq`, instal lewat
+`apt`/`brew` bila belum ada):
+
+```bash
+cd pvmbg
+docker compose up -d --build
+curl http://localhost:8082/health
+
+set -a; source .env; set +a
+login=$(curl -s -X POST http://localhost:8082/auth/login \
+  -H 'Content-Type: application/json' \
+  -d "{\"client_id\":\"$PVMBG_READER_CLIENT_ID\",\"client_secret\":\"$PVMBG_READER_CLIENT_SECRET\"}")
+token=$(echo "$login" | jq -r .access_token)
+curl -H "Authorization: Bearer $token" http://localhost:8082/volcanic-reports
+docker compose down
+cd ..
+```
+
+Cek port yang bentrok:
+
+```bash
+ss -ltnp | grep -E ':(8080|8081|8082|8083|8084)\b'
+# atau di macOS:
+lsof -i -P -n | grep LISTEN | grep -E ':(8080|8081|8082|8083|8084)'
+```
+
+Testing tanpa Docker (bagian 7) sudah portable, kecuali wrapper Gradle:
+
+```bash
+cd pvmbg
+chmod +x gradlew   # sekali saja, bila belum executable
+./gradlew test     # ganti gradlew.bat
+cd ..
 ```
 
 ## 4. Menyiapkan Konfigurasi

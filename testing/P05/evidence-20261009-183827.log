@@ -1,0 +1,326 @@
+NAME               IMAGE                              COMMAND                  SERVICE      CREATED          STATUS                    PORTS
+aat-aggregator-1   aat-aggregator                     "/bnpb-aggregator"       aggregator   2 hours ago      Up 2 hours (healthy)      127.0.0.1:8083->8083/tcp
+aat-api-1          aat-api                            "/bnpb-api"              api          2 hours ago      Up 2 hours (healthy)      0.0.0.0:8080->8080/tcp, [::]:8080->8080/tcp
+aat-auth-1         aat-auth                           "/bnpb-auth"             auth         2 hours ago      Up 2 hours (healthy)      
+aat-bmkg-1         bmkg                               "./bmkg"                 bmkg         2 hours ago      Up 2 hours (healthy)      0.0.0.0:8081->8081/tcp, [::]:8081->8081/tcp
+aat-consumer-1-1   aat-consumer-1                     "/bnpb-consumer-1"       consumer-1   2 hours ago      Up 2 hours (healthy)      
+aat-consumer-2-1   aat-consumer-2                     "/bnpb-consumer-2"       consumer-2   2 hours ago      Up 10 minutes (healthy)   
+aat-consumer-3-1   aat-consumer-3                     "/bnpb-consumer-3"       consumer-3   10 minutes ago   Up 10 minutes (healthy)   
+aat-postgres-1     postgres:18.6-alpine               "docker-entrypoint.s…"   postgres     2 hours ago      Up 2 hours (healthy)      5432/tcp
+aat-pvmbg-1        pvmbg                              "java -XX:MaxRAMPerc…"   pvmbg        2 hours ago      Up 2 hours (healthy)      0.0.0.0:8082->8082/tcp, [::]:8082->8082/tcp
+aat-rabbitmq-1     rabbitmq:4.3.5-management-alpine   "docker-entrypoint.s…"   rabbitmq     2 hours ago      Up 2 hours (healthy)      4369/tcp, 5671-5672/tcp, 15671/tcp, 15691-15692/tcp, 25672/tcp, 127.0.0.1:15672->15672/tcp
+#1 [internal] load local bake definitions
+#1 reading from stdin 725B done
+#1 DONE 0.0s
+
+#2 [internal] load build definition from Dockerfile
+#2 transferring dockerfile: 694B done
+#2 DONE 0.1s
+
+#3 [internal] load metadata for docker.io/library/golang:1.26.8-alpine
+#3 DONE 0.1s
+
+#4 [internal] load .dockerignore
+#4 transferring context: 88B done
+#4 DONE 0.0s
+
+#5 [internal] load build context
+#5 DONE 0.0s
+
+#6 [build  1/10] FROM docker.io/library/golang:1.26.8-alpine@sha256:8ac98ca534ac3f51e1f420a1dd2c15e74c75cfa0f23f3ad27eb5d7236c349a0c
+#6 resolve docker.io/library/golang:1.26.8-alpine@sha256:8ac98ca534ac3f51e1f420a1dd2c15e74c75cfa0f23f3ad27eb5d7236c349a0c 0.1s done
+#6 DONE 0.1s
+
+#5 [internal] load build context
+#5 transferring context: 1.67kB 0.0s done
+#5 DONE 0.1s
+
+#7 [stage-1 1/3] COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
+#7 CACHED
+
+#8 [build  6/10] COPY cmd/consumer-3 ./cmd/consumer-3
+#8 CACHED
+
+#9 [build  3/10] WORKDIR /src
+#9 CACHED
+
+#10 [stage-1 2/3] COPY --from=build /out/bnpb-consumer-3 /bnpb-consumer-3
+#10 CACHED
+
+#11 [build  9/10] RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/bnpb-consumer-3 ./cmd/consumer-3
+#11 CACHED
+
+#12 [build  7/10] COPY internal/platform ./internal/platform
+#12 CACHED
+
+#13 [build  8/10] COPY internal/consumer-3 ./internal/consumer-3
+#13 CACHED
+
+#14 [build  5/10] RUN go mod download
+#14 CACHED
+
+#15 [build 10/10] RUN mkdir -p /data
+#15 CACHED
+
+#16 [build  2/10] RUN apk add --no-cache ca-certificates
+#16 CACHED
+
+#17 [build  4/10] COPY go.mod go.sum ./
+#17 CACHED
+
+#18 [stage-1 3/3] COPY --from=build --chown=65532:65532 /data /data
+#18 CACHED
+
+#19 exporting to image
+#19 exporting layers done
+#19 exporting manifest sha256:d51b673876412ae4c10299c5aebc8a4e6ecd9d0e7289ab2224e7224a13c1d32e 0.0s done
+#19 exporting config sha256:e45320a4f19c05802362c202648596d19890523cd7e39488083a56e85313fdf1 0.0s done
+#19 exporting attestation manifest sha256:d9f67552791a235e66ef5d42c262724844062e4488d3346df983859034b25ee8 0.1s done
+#19 exporting manifest list sha256:c51ffbfa31b18f52baa24e9c34d292d1fdf6ae557466d5a00fe234a4bd251df6
+#19 exporting manifest list sha256:c51ffbfa31b18f52baa24e9c34d292d1fdf6ae557466d5a00fe234a4bd251df6 0.0s done
+#19 naming to docker.io/library/aat-consumer-3:latest 0.0s done
+#19 unpacking to docker.io/library/aat-consumer-3:latest 0.0s done
+#19 DONE 0.2s
+
+#20 resolving provenance for metadata file
+#20 DONE 0.0s
+
+==============================================================================
+PREFLIGHT
+==============================================================================
+
+==============================================================================
+P5.1 / P5.2 -- fanout to >=2 independent consumers (organic traffic)
+==============================================================================
+consumer-1 /stats (before):
+{
+    "hazards_tracked": 9255,
+    "messages_seen": 9278
+}
+consumer-2 /stats (before):
+{
+    "alerts_sent": 3709,
+    "messages_seen": 9279
+}
+
+Waiting 20s for organic BMKG/PVMBG traffic through the Aggregator...
+consumer-1 /stats (after):
+{
+    "hazards_tracked": 9260,
+    "messages_seen": 9283
+}
+consumer-2 /stats (after):
+{
+    "alerts_sent": 3712,
+    "messages_seen": 9283
+}
+[PASS] P5.2: consumer-1 advanced on organic traffic
+[PASS] P5.2: consumer-2 advanced on organic traffic, independently
+
+Recent consumer-1 log lines:
+{
+    "time": "2026-10-09T11:38:45.734444064Z",
+    "level": "INFO",
+    "msg": "hazard state updated",
+    "service": "bnpb-consumer-1",
+    "correlation_id": "b3a92e8d57b6700e9eb9fddc21d7f107",
+    "event": "dashboard_update_recorded",
+    "hazard_id": "haz-OVSRSC6IKU4DLHNMZUIBR3QKTS",
+    "revision": 1
+}
+{
+    "time": "2026-10-09T11:38:47.264978917Z",
+    "level": "INFO",
+    "msg": "hazard state updated",
+    "service": "bnpb-consumer-1",
+    "correlation_id": "1a092aba3a646edea398b862ae4c7ffc",
+    "event": "dashboard_update_recorded",
+    "hazard_id": "haz-DEZMFB2W35BAXXYFVOIHDHI6UP",
+    "revision": 1
+}
+{
+    "time": "2026-10-09T11:38:50.250921202Z",
+    "level": "INFO",
+    "msg": "HTTP request completed",
+    "service": "bnpb-consumer-1",
+    "correlation_id": "51abea30f6a65b1204939d7dc7f661ba",
+    "event": "http_request",
+    "method": "GET",
+    "path": "/stats",
+    "status": 200,
+    "duration_ms": 0
+}
+
+Recent consumer-2 log lines:
+{
+    "time": "2026-10-09T11:38:45.729024571Z",
+    "level": "INFO",
+    "msg": "severity does not warrant an alert",
+    "service": "bnpb-consumer-2",
+    "correlation_id": "b3a92e8d57b6700e9eb9fddc21d7f107",
+    "event": "message_ignored",
+    "hazard_id": "haz-OVSRSC6IKU4DLHNMZUIBR3QKTS",
+    "severity": "NORMAL"
+}
+{
+    "time": "2026-10-09T11:38:47.270229181Z",
+    "level": "WARN",
+    "msg": "alert recorded for a SIAGA/AWAS hazard",
+    "service": "bnpb-consumer-2",
+    "correlation_id": "1a092aba3a646edea398b862ae4c7ffc",
+    "event": "alert_sent",
+    "hazard_id": "haz-DEZMFB2W35BAXXYFVOIHDHI6UP",
+    "severity": "AWAS"
+}
+{
+    "time": "2026-10-09T11:38:50.997179257Z",
+    "level": "INFO",
+    "msg": "HTTP request completed",
+    "service": "bnpb-consumer-2",
+    "correlation_id": "59c267ed046df776db028e1a8e9d40f9",
+    "event": "http_request",
+    "method": "GET",
+    "path": "/stats",
+    "status": 200,
+    "duration_ms": 0
+}
+
+==============================================================================
+P5.3 -- stop consumer-2 (notifier)
+==============================================================================
+consumer-2 stopped. Waiting 30s for organic traffic to accumulate while it's down...
+
+consumer-1 /stats while consumer-2 is down (must keep advancing):
+{
+    "hazards_tracked": 9266,
+    "messages_seen": 9289
+}
+[PASS] P5.3: producer/other consumer unaffected by the down consumer
+hazard.events.notifications while down:
+{
+    "messages_ready": 5,
+    "messages": 5,
+    "consumers": 0
+}
+[PASS] P5.3: backlog accumulated in the queue while the consumer was down
+
+==============================================================================
+P5.3 -- restart consumer-2, show catch-up
+==============================================================================
+consumer-2 /stats after restart:
+{
+    "alerts_sent": 3713,
+    "messages_seen": 9291
+}
+[PASS] P5.3: downtime backlog was caught up, not lost
+
+hazard.events.notifications after catch-up:
+{
+    "messages": 0
+}
+[PASS] P5.3: queue fully drained after catch-up
+
+Drained backlog log lines:
+{
+    "time": "2026-10-09T11:39:27.326091925Z",
+    "level": "INFO",
+    "msg": "severity does not warrant an alert",
+    "service": "bnpb-consumer-2",
+    "correlation_id": "2d4974959d85de49ef33d27d91be0ef8",
+    "event": "message_ignored",
+    "hazard_id": "haz-6CDQW5UI4NNTN53HIBGGZ633FM",
+    "severity": "NORMAL"
+}
+{
+    "time": "2026-10-09T11:39:27.337487772Z",
+    "level": "INFO",
+    "msg": "severity does not warrant an alert",
+    "service": "bnpb-consumer-2",
+    "correlation_id": "de48dd35f1ae21527073ba7443206412",
+    "event": "message_ignored",
+    "hazard_id": "haz-6CZDAO4GVF6TMC45XG2RJYVZEQ",
+    "severity": "NORMAL"
+}
+{
+    "time": "2026-10-09T11:39:27.348926451Z",
+    "level": "INFO",
+    "msg": "severity does not warrant an alert",
+    "service": "bnpb-consumer-2",
+    "correlation_id": "893ee3b7413d269bd1216630f84f0d8c",
+    "event": "message_ignored",
+    "hazard_id": "haz-GXNGN2K6VX7N4P5H4MKHUYH7Y5",
+    "severity": "NORMAL"
+}
+{
+    "time": "2026-10-09T11:39:27.360243219Z",
+    "level": "INFO",
+    "msg": "severity does not warrant an alert",
+    "service": "bnpb-consumer-2",
+    "correlation_id": "df5df14bac22c8f11a2de170f4c1f7e1",
+    "event": "message_ignored",
+    "hazard_id": "haz-MPUK7Z2RDD5NEEBPSGJMUR6JYK",
+    "severity": "WASPADA"
+}
+{
+    "time": "2026-10-09T11:39:27.371732352Z",
+    "level": "INFO",
+    "msg": "severity does not warrant an alert",
+    "service": "bnpb-consumer-2",
+    "correlation_id": "54081ebd6e8fe68c56c1dfc64f00d676",
+    "event": "message_ignored",
+    "hazard_id": "haz-DFRSX5T7I6IBLFHBHKP2RQ3PKJ",
+    "severity": "WASPADA"
+}
+{
+    "time": "2026-10-09T11:39:27.382712656Z",
+    "level": "INFO",
+    "msg": "severity does not warrant an alert",
+    "service": "bnpb-consumer-2",
+    "correlation_id": "75c2e35e05a0c5088f62a75e80434e97",
+    "event": "message_ignored",
+    "hazard_id": "haz-EDZFJXB6J7MD2KWCCEDNNENLOA",
+    "severity": "WASPADA"
+}
+{
+    "time": "2026-10-09T11:39:32.813263114Z",
+    "level": "INFO",
+    "msg": "HTTP request completed",
+    "service": "bnpb-consumer-2",
+    "correlation_id": "d5804a5511fb311dfa51697ceef3b986",
+    "event": "http_request",
+    "method": "GET",
+    "path": "/stats",
+    "status": 200,
+    "duration_ms": 1
+}
+
+==============================================================================
+P5.4 -- add consumer-3 live, no restart of 1/2, no producer change
+==============================================================================
+consumer-1 StartedAt (before): 2026-10-09T09:44:11.317632524Z
+consumer-2 StartedAt (before): 2026-10-09T11:39:27.053969748Z
+[PASS] P5.4: consumer-1 was never restarted to make room for consumer-3
+[PASS] P5.4: consumer-2 was never restarted to make room for consumer-3
+
+Waiting 15s for the next organic event to reach all three...
+consumer-1 /stats:
+{
+    "hazards_tracked": 9273,
+    "messages_seen": 9296
+}
+consumer-2 /stats:
+{
+    "alerts_sent": 3715,
+    "messages_seen": 9297
+}
+consumer-3 /stats:
+{
+    "feed_entries": 144,
+    "messages_seen": 144
+}
+[PASS] P5.4: the new consumer received at least one event with zero producer changes
+
+==============================================================================
+SUMMARY
+==============================================================================
+9/9 checks passed.
