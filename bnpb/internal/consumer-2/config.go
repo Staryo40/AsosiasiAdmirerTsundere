@@ -1,8 +1,8 @@
 // Package consumer2 records "alert sent" entries for SIAGA/AWAS hazard
 // events from the hazard.events broker stream. Its own copy of the
-// connect/consume/ack pattern is intentional: KI.1 forbids a shared
-// business-logic library across services, so this is not imported by
-// consumer-1 or consumer-3.
+// connect/consume/ack pattern is intentional: services must not share a
+// business-logic library, so this is not imported by consumer-1 or
+// consumer-3.
 package consumer2
 
 import (

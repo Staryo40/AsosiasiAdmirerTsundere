@@ -1,7 +1,7 @@
 #!/bin/sh
-# Idempotent broker provisioning: queue bound policies (Decision 1/2) and one
-# RabbitMQ user per publisher/consumer, each scoped to only its own queue
-# (KI.5-6). Topology changes use PUT, so re-running converges to the same state.
+# Idempotent broker provisioning: queue bound policies and one RabbitMQ user
+# per publisher/consumer, each scoped to only its own queue. Topology changes
+# use PUT, so re-running converges to the same state.
 set -eu
 
 base="http://rabbitmq:15672/api"
@@ -164,7 +164,7 @@ ensure_permissions() {
 put "/exchanges/%2F/hazard.events" '{"type":"fanout","durable":true}'
 
 # Main queues (hazard.events.<role>): 3h TTL, 10k cap, oldest dropped first,
-# queue deleted after 24h with no consumer. See Decision 1.
+# queue deleted after 24h with no consumer.
 ensure_policy main-bounds '^hazard\.events\.[a-z0-9-]+$' \
 	'{"message-ttl":10800000,"max-length":10000,"overflow":"drop-head","expires":86400000}'
 

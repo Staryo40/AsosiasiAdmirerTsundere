@@ -1,7 +1,7 @@
 // Package consumer1 records the latest dashboard state per hazard_id from
 // the hazard.events broker stream. Its own copy of the connect/consume/ack
-// pattern is intentional: KI.1 forbids a shared business-logic library
-// across services, so this is not imported by consumer-2 or consumer-3.
+// pattern is intentional: services must not share a business-logic library,
+// so this is not imported by consumer-2 or consumer-3.
 package consumer1
 
 import (

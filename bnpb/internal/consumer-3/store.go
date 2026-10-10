@@ -10,9 +10,9 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-// processedMessageWindow must exceed the broker's 3h message TTL (Decision
-// 1): a message older than that can never be redelivered, so its dedupe row
-// is safe to prune.
+// processedMessageWindow must exceed the broker's 3h message TTL: a message
+// older than that can never be redelivered, so its dedupe row is safe to
+// prune.
 const processedMessageWindow = 4 * time.Hour
 
 // errDuplicateMessage marks a message_id already recorded in

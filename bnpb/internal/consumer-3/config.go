@@ -1,9 +1,9 @@
 // Package consumer3 records a regional-portal feed entry for every hazard
 // event from the hazard.events broker stream. It exists purely to prove
-// P5.4: a third consumer can bind to the existing exchange without any
+// that a third consumer can bind to the existing exchange without any
 // producer change. Its own copy of the connect/consume/ack pattern is
-// intentional: KI.1 forbids a shared business-logic library across
-// services, so this is not imported by consumer-1 or consumer-2.
+// intentional: services must not share a business-logic library, so this
+// is not imported by consumer-1 or consumer-2.
 package consumer3
 
 import (

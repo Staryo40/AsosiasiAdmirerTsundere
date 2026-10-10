@@ -10,9 +10,9 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-// processedMessageWindow must exceed the broker's 3h message TTL (Decision
-// 1): a message older than that can never be redelivered, so its dedupe row
-// is safe to prune.
+// processedMessageWindow must exceed the broker's 3h message TTL: a message
+// older than that can never be redelivered, so its dedupe row is safe to
+// prune.
 const processedMessageWindow = 4 * time.Hour
 
 // errDuplicateMessage marks a message_id already recorded in
@@ -88,7 +88,7 @@ type ApplyResult struct {
 
 // Apply records the delivery transactionally: a duplicate message_id rolls
 // back and reports errDuplicateMessage; otherwise, only SIAGA/AWAS events
-// get an alerts_sent row (Decision 4).
+// get an alerts_sent row.
 func (store *Store) Apply(ctx context.Context, alert HazardAlert) (ApplyResult, error) {
 	tx, err := store.db.BeginTx(ctx, nil)
 	if err != nil {

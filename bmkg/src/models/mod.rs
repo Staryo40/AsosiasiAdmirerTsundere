@@ -1,7 +1,8 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-/// Field names, types and casing are fixed by the spec; `issued_at` is an addition beyond it.
+/// Field names, types and casing here are the exact contract BMKG serves —
+/// the Aggregator parses these literally.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SeismicEvent {
     pub event_id: String,
@@ -21,6 +22,9 @@ pub enum ThreatLevel {
     Awas,
 }
 
+/// `issued_at` is included alongside the five originally-expected fields:
+/// `since` filtering needs a real creation timestamp, and `estimated_arrival`
+/// is a future prediction, not one.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TsunamiWarning {
     pub warning_id: String,

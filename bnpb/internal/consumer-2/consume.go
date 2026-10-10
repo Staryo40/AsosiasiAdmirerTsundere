@@ -168,7 +168,7 @@ func (worker *consumer) applyEnvelope(ctx context.Context, messageID string, env
 func (worker *consumer) logApplied(ctx context.Context, env envelope, applied ApplyResult) {
 	if applied.AlertSent {
 		// Logged only after Apply's transaction committed, so a log line
-		// never claims an alert the DB doesn't record (Decision 4).
+		// never claims an alert the DB doesn't record.
 		logging.Event(ctx, worker.logger, logging.Record{Level: slog.LevelWarn, Event: "alert_sent", Message: "alert recorded for a SIAGA/AWAS hazard"}, "hazard_id", env.HazardID, "severity", env.HazardEvent.Severity)
 	} else {
 

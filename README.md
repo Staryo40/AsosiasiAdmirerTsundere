@@ -149,6 +149,22 @@ docker compose down -v
 
 ### Other useful commands
 
+Service names, as Compose knows them (use any of these in place of `<service-name>` below):
+
+| Service | What it is |
+| --- | --- |
+| `bmkg` | Mock BMKG — seismic/tsunami data source |
+| `pvmbg` | Mock PVMBG — volcanic data source |
+| `aggregator` | Polls both mocks, maps to canonical `HazardEvent`, owns PostgreSQL, publishes to RabbitMQ |
+| `auth` | Issues, refreshes, and introspects tokens for the three downstream identities |
+| `api` | The public Client-Facing API — the only entrypoint for downstream clients |
+| `consumer-1` | Dashboard updater — latest state per hazard |
+| `consumer-2` | Notifier — records SIAGA/AWAS alerts |
+| `consumer-3` | Regional portal feed — append-only log (`demo` profile only) |
+| `postgres` | The Canonical Store, owned solely by the Aggregator |
+| `rabbitmq` | The message broker (`hazard.events` fanout exchange) |
+| `broker-init` | One-shot: provisions RabbitMQ policies and per-service users before anything else starts |
+
 ```bash
 docker compose ps                        # status of every service
 docker compose logs -f <service-name>     # follow one service's logs

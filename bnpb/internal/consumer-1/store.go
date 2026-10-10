@@ -10,9 +10,9 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-// processedMessageWindow must exceed the broker's 3h message TTL (Decision
-// 1): a message older than that can never be redelivered, so its dedupe row
-// is safe to prune.
+// processedMessageWindow must exceed the broker's 3h message TTL: a message
+// older than that can never be redelivered, so its dedupe row is safe to
+// prune.
 const processedMessageWindow = 4 * time.Hour
 
 // errDuplicateMessage marks a message_id already recorded in
@@ -92,7 +92,7 @@ type ApplyResult struct {
 // Apply records the update transactionally: a duplicate message_id rolls
 // back and reports errDuplicateMessage; otherwise hazard_state is upserted
 // with a newest-wins guard on revision, so a requeued older delivery can
-// never roll severity back down (Decision 4).
+// never roll severity back down.
 func (store *Store) Apply(ctx context.Context, update HazardUpdate) (ApplyResult, error) {
 	tx, err := store.db.BeginTx(ctx, nil)
 	if err != nil {
