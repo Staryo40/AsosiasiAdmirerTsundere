@@ -1,0 +1,250 @@
+{
+  "test_id": "T11",
+  "started_at": "2026-10-09T19:48:35+07:00",
+  "result": "PASS",
+  "containers": {
+    "aggregator": {
+      "id": "cb222e887be7d7b8363ed94a3fb7b560465469e0cb12dac9b3d6d0816870eb34",
+      "image": "sha256:075f910b94a953dbb26f78ddf022fd0a2072a4ac33117a92ccaec4a158c4c1f1",
+      "started_at": "2026-10-09T12:47:31.03784764Z",
+      "running": true,
+      "restart_count": 0
+    },
+    "api": {
+      "id": "27f88fdef39f3cfa412d34bc8ad54bf161099ceadb19873b1a5eb3ff8380f6c1",
+      "image": "sha256:b684cdd8e2a9bd6ac517f53afc2ff06fc9029db830e0b27d5f986919313cd7cc",
+      "started_at": "2026-10-09T12:47:41.436091572Z",
+      "running": true,
+      "restart_count": 0
+    },
+    "auth": {
+      "id": "a2ea6502ea2982297d0991c331117b7f0119de4dd21491fd4ec4aeb77b51514f",
+      "image": "sha256:a85d4d9450fa58edd13603fdeb65c8e339a9ac00af39c3f7b6944b6439e1f93f",
+      "started_at": "2026-10-09T12:46:52.151303341Z",
+      "running": true,
+      "restart_count": 0
+    },
+    "bmkg": {
+      "id": "a935f755a0e5445db9d502f266ee713186f7e26c384ecacbad8e9cc32db50b09",
+      "image": "sha256:a4880f4d39366080ddbb51e0baad8c08096cea8134d3985640c87555c435efd9",
+      "started_at": "2026-10-09T12:46:53.120604397Z",
+      "running": true,
+      "restart_count": 0
+    },
+    "broker-init": {
+      "id": "e12a4f29b6941f762dfea168886a603ec9f178dfcf0fd2fda5872927c0005038",
+      "image": "sha256:825dacc22c6482ba2c896238902be8f0b0c7c7576569c308f0c7b4768cab83b5",
+      "started_at": "2026-10-09T12:47:25.944735234Z",
+      "running": false,
+      "restart_count": 0
+    },
+    "consumer-1": {
+      "id": "075c6f14fe96b8c4a8d7eab0615330e656285fee806c0732f94bbef2887c0be6",
+      "image": "sha256:b8b976462ad7420e7d6aa14a27a80fafe776c5504ebaa788e00d6f8b2e292702",
+      "started_at": "2026-10-09T12:48:18.216199039Z",
+      "running": true,
+      "restart_count": 0
+    },
+    "consumer-2": {
+      "id": "84e0716ca2422313a7555629d880eb1899fb386d4a115ed307ef3bd173658f29",
+      "image": "sha256:f093085c8e1689e250bfc65e1eeb785a7c4b0d0e10aeb05161c48634649b1b1c",
+      "started_at": "2026-10-09T12:47:30.071237568Z",
+      "running": true,
+      "restart_count": 0
+    },
+    "postgres": {
+      "id": "b7852c6df7a88df0a47e5a6d365e9078a8902b5fa1d90dfe3c9d83038a0f3e46",
+      "image": "sha256:77f585114c32fbca283dc835b0596f4e52b51b4c6662d7810b2f4084f60a1873",
+      "started_at": "2026-10-09T12:46:54.740826188Z",
+      "running": true,
+      "restart_count": 0
+    },
+    "pvmbg": {
+      "id": "6faba34068be16b8a9d3ad0a4bad22d652a4694deaec8386b51e00e195a26c52",
+      "image": "sha256:b03983ba874726e6c8dff401a3339b8a4c5459a65de36396b92b8d2330622d09",
+      "started_at": "2026-10-09T12:46:50.669349445Z",
+      "running": true,
+      "restart_count": 0
+    },
+    "rabbitmq": {
+      "id": "9706465bed21504e3748e98d27dcd7fdecd2c0fa47640d3a689699e4fb32aee3",
+      "image": "sha256:b3b8b7f95f5382a19f9ea33540e604f30aad081d37ad9aba72255135765373a1",
+      "started_at": "2026-10-09T12:46:55.80646729Z",
+      "running": true,
+      "restart_count": 0
+    }
+  },
+  "isolation": {
+    "network": "aat-p4-b56412ea7532_canonical-store",
+    "owners": [
+      "aggregator",
+      "postgres"
+    ],
+    "host_port_bindings": {},
+    "database_mounts": [
+      {
+        "Type": "volume",
+        "Name": "aat-p4-b56412ea7532_postgres-data",
+        "Source": "/var/lib/docker/volumes/aat-p4-b56412ea7532_postgres-data/_data",
+        "Destination": "/var/lib/postgresql",
+        "Driver": "local",
+        "Mode": "rw",
+        "RW": true,
+        "Propagation": ""
+      }
+    ]
+  },
+  "probes": {
+    "aggregator": [
+      {
+        "address": "postgres",
+        "exit_code": 0,
+        "at": "2026-10-09T19:48:41+07:00"
+      },
+      {
+        "address": "10.251.243.2",
+        "exit_code": 0,
+        "at": "2026-10-09T19:48:43+07:00"
+      }
+    ],
+    "api": [
+      {
+        "address": "postgres",
+        "exit_code": 2,
+        "at": "2026-10-09T19:48:51+07:00"
+      },
+      {
+        "address": "10.251.243.2",
+        "exit_code": 2,
+        "at": "2026-10-09T19:48:56+07:00"
+      }
+    ],
+    "auth": [
+      {
+        "address": "postgres",
+        "exit_code": 2,
+        "at": "2026-10-09T19:49:04+07:00"
+      },
+      {
+        "address": "10.251.243.2",
+        "exit_code": 2,
+        "at": "2026-10-09T19:49:10+07:00"
+      }
+    ],
+    "bmkg": [
+      {
+        "address": "postgres",
+        "exit_code": 2,
+        "at": "2026-10-09T19:49:18+07:00"
+      },
+      {
+        "address": "10.251.243.2",
+        "exit_code": 2,
+        "at": "2026-10-09T19:49:23+07:00"
+      }
+    ],
+    "consumer-1": [
+      {
+        "address": "postgres",
+        "exit_code": 2,
+        "at": "2026-10-09T19:49:30+07:00"
+      },
+      {
+        "address": "10.251.243.2",
+        "exit_code": 2,
+        "at": "2026-10-09T19:49:35+07:00"
+      }
+    ],
+    "consumer-2": [
+      {
+        "address": "postgres",
+        "exit_code": 2,
+        "at": "2026-10-09T19:49:43+07:00"
+      },
+      {
+        "address": "10.251.243.2",
+        "exit_code": 2,
+        "at": "2026-10-09T19:49:47+07:00"
+      }
+    ],
+    "pvmbg": [
+      {
+        "address": "postgres",
+        "exit_code": 2,
+        "at": "2026-10-09T19:49:54+07:00"
+      },
+      {
+        "address": "10.251.243.2",
+        "exit_code": 2,
+        "at": "2026-10-09T19:49:59+07:00"
+      }
+    ],
+    "rabbitmq": [
+      {
+        "address": "postgres",
+        "exit_code": 2,
+        "at": "2026-10-09T19:50:07+07:00"
+      },
+      {
+        "address": "10.251.243.2",
+        "exit_code": 2,
+        "at": "2026-10-09T19:50:12+07:00"
+      }
+    ]
+  },
+  "api_trace": {
+    "correlation_id": "p4-b00825a1e0a144288ea19d028c38df98",
+    "status": 200,
+    "logs": {
+      "api": [
+        {
+          "event": "outbound_http",
+          "url": "http://auth:8084/internal/auth/introspect",
+          "status": 200,
+          "duration_ms": 39
+        },
+        {
+          "event": "outbound_http",
+          "url": "http://aggregator:8083/internal/hazards",
+          "status": 200,
+          "duration_ms": 36
+        },
+        {
+          "event": "http_request",
+          "path": "/v1/hazards",
+          "status": 200,
+          "duration_ms": 85
+        }
+      ],
+      "aggregator": [
+        {
+          "event": "outbound_database",
+          "duration_ms": 0.730051
+        },
+        {
+          "event": "outbound_database",
+          "duration_ms": 0.5897800000000001
+        },
+        {
+          "event": "outbound_database",
+          "duration_ms": 10.333191000000001
+        },
+        {
+          "event": "outbound_database",
+          "duration_ms": 9.818529
+        },
+        {
+          "event": "outbound_database",
+          "duration_ms": 1.062895
+        },
+        {
+          "event": "http_request",
+          "path": "/internal/hazards",
+          "status": 200,
+          "duration_ms": 25
+        }
+      ]
+    }
+  },
+  "finished_at": "2026-10-09T19:50:24+07:00"
+}

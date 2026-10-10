@@ -1,0 +1,420 @@
+{
+  "test_id": "T01",
+  "started_at": "2026-10-09T18:06:44+07:00",
+  "finished_at": "2026-10-09T18:08:07+07:00",
+  "git_commit": "1306625622959c010d0649911122669c14a663cb",
+  "result": "PASS",
+  "command": [
+    "docker",
+    "compose",
+    "--profile",
+    "tests",
+    "run",
+    "--rm",
+    "--no-deps",
+    "tests",
+    "go",
+    "test",
+    "-json",
+    "-tags=integration",
+    "-count=1",
+    "-run",
+    "^TestP1",
+    "./internal/aggregator"
+  ],
+  "python_version": "3.13.5",
+  "validator_version": "4.25.1",
+  "compose_project": "aat-p1-acceptance",
+  "compose_files": "compose.yaml;testing/P01/compose.acceptance.yaml;testing/P01/compose.cache.local.yaml",
+  "working_tree_dirty": true,
+  "cases": [
+    {
+      "case": "TestP1IntegrationSchemaCoexistence",
+      "result": "PASS"
+    },
+    {
+      "case": "TestP1IntegrationLateWarningsAndDeduplication",
+      "result": "PASS"
+    },
+    {
+      "case": "TestP1IntegrationInvalidRecordsAndCheckpoint",
+      "result": "PASS"
+    },
+    {
+      "case": "TestP1IntegrationSourceIdentityAndOrphanWarning",
+      "result": "PASS"
+    },
+    {
+      "case": "TestP1IntegrationNetworkPolling",
+      "result": "PASS"
+    },
+    {
+      "case": "TestP1MappingContractFixtures/seismic_zero_coordinates_and_false_with_additive_collision",
+      "result": "PASS"
+    },
+    {
+      "case": "TestP1MappingContractFixtures/warnings_replace_magnitude_and_preserve_future_issuance",
+      "result": "PASS"
+    },
+    {
+      "case": "TestP1MappingContractFixtures/volcanic_V1_retains_unknown_objects_and_absent_confidence",
+      "result": "PASS"
+    },
+    {
+      "case": "TestP1MappingContractFixtures/volcanic_V2_confidence_zero_and_northern_latitude",
+      "result": "PASS"
+    },
+    {
+      "case": "TestP1MappingContractFixtures",
+      "result": "PASS"
+    },
+    {
+      "case": "TestP1MagnitudeBoundaries/4.99",
+      "result": "PASS"
+    },
+    {
+      "case": "TestP1MagnitudeBoundaries/5.0",
+      "result": "PASS"
+    },
+    {
+      "case": "TestP1MagnitudeBoundaries/6.49",
+      "result": "PASS"
+    },
+    {
+      "case": "TestP1MagnitudeBoundaries/6.5",
+      "result": "PASS"
+    },
+    {
+      "case": "TestP1MagnitudeBoundaries/4.999999999999999999",
+      "result": "PASS"
+    },
+    {
+      "case": "TestP1MagnitudeBoundaries/6.499999999999999999",
+      "result": "PASS"
+    },
+    {
+      "case": "TestP1MagnitudeBoundaries",
+      "result": "PASS"
+    },
+    {
+      "case": "TestP1WarningOverridesMagnitude/Waspada",
+      "result": "PASS"
+    },
+    {
+      "case": "TestP1WarningOverridesMagnitude/Siaga",
+      "result": "PASS"
+    },
+    {
+      "case": "TestP1WarningOverridesMagnitude/Awas",
+      "result": "PASS"
+    },
+    {
+      "case": "TestP1WarningOverridesMagnitude",
+      "result": "PASS"
+    },
+    {
+      "case": "TestP1VolcanicLevelsAndConfidence/Normal/absent",
+      "result": "PASS"
+    },
+    {
+      "case": "TestP1VolcanicLevelsAndConfidence/Normal/0",
+      "result": "PASS"
+    },
+    {
+      "case": "TestP1VolcanicLevelsAndConfidence/Normal/1",
+      "result": "PASS"
+    },
+    {
+      "case": "TestP1VolcanicLevelsAndConfidence/Waspada/absent",
+      "result": "PASS"
+    },
+    {
+      "case": "TestP1VolcanicLevelsAndConfidence/Waspada/0",
+      "result": "PASS"
+    },
+    {
+      "case": "TestP1VolcanicLevelsAndConfidence/Waspada/1",
+      "result": "PASS"
+    },
+    {
+      "case": "TestP1VolcanicLevelsAndConfidence/Siaga/absent",
+      "result": "PASS"
+    },
+    {
+      "case": "TestP1VolcanicLevelsAndConfidence/Siaga/0",
+      "result": "PASS"
+    },
+    {
+      "case": "TestP1VolcanicLevelsAndConfidence/Siaga/1",
+      "result": "PASS"
+    },
+    {
+      "case": "TestP1VolcanicLevelsAndConfidence/Awas/absent",
+      "result": "PASS"
+    },
+    {
+      "case": "TestP1VolcanicLevelsAndConfidence/Awas/0",
+      "result": "PASS"
+    },
+    {
+      "case": "TestP1VolcanicLevelsAndConfidence/Awas/1",
+      "result": "PASS"
+    },
+    {
+      "case": "TestP1VolcanicLevelsAndConfidence",
+      "result": "PASS"
+    },
+    {
+      "case": "TestP1InvalidCoreFields/BMKG/event_id/missing",
+      "result": "PASS"
+    },
+    {
+      "case": "TestP1InvalidCoreFields/BMKG/event_id/null",
+      "result": "PASS"
+    },
+    {
+      "case": "TestP1InvalidCoreFields/BMKG/event_id/object",
+      "result": "PASS"
+    },
+    {
+      "case": "TestP1InvalidCoreFields/BMKG/magnitude/missing",
+      "result": "PASS"
+    },
+    {
+      "case": "TestP1InvalidCoreFields/BMKG/magnitude/null",
+      "result": "PASS"
+    },
+    {
+      "case": "TestP1InvalidCoreFields/BMKG/magnitude/object",
+      "result": "PASS"
+    },
+    {
+      "case": "TestP1InvalidCoreFields/BMKG/region_name/missing",
+      "result": "PASS"
+    },
+    {
+      "case": "TestP1InvalidCoreFields/BMKG/region_name/null",
+      "result": "PASS"
+    },
+    {
+      "case": "TestP1InvalidCoreFields/BMKG/region_name/object",
+      "result": "PASS"
+    },
+    {
+      "case": "TestP1InvalidCoreFields/BMKG/occurred_at/missing",
+      "result": "PASS"
+    },
+    {
+      "case": "TestP1InvalidCoreFields/BMKG/occurred_at/null",
+      "result": "PASS"
+    },
+    {
+      "case": "TestP1InvalidCoreFields/BMKG/occurred_at/object",
+      "result": "PASS"
+    },
+    {
+      "case": "TestP1InvalidCoreFields/BMKG/potential_tsunami/missing",
+      "result": "PASS"
+    },
+    {
+      "case": "TestP1InvalidCoreFields/BMKG/potential_tsunami/null",
+      "result": "PASS"
+    },
+    {
+      "case": "TestP1InvalidCoreFields/BMKG/potential_tsunami/object",
+      "result": "PASS"
+    },
+    {
+      "case": "TestP1InvalidCoreFields/BMKG/depth_km/missing",
+      "result": "PASS"
+    },
+    {
+      "case": "TestP1InvalidCoreFields/BMKG/depth_km/null",
+      "result": "PASS"
+    },
+    {
+      "case": "TestP1InvalidCoreFields/BMKG/depth_km/object",
+      "result": "PASS"
+    },
+    {
+      "case": "TestP1InvalidCoreFields/BMKG/epicenter_lat/missing",
+      "result": "PASS"
+    },
+    {
+      "case": "TestP1InvalidCoreFields/BMKG/epicenter_lat/null",
+      "result": "PASS"
+    },
+    {
+      "case": "TestP1InvalidCoreFields/BMKG/epicenter_lat/object",
+      "result": "PASS"
+    },
+    {
+      "case": "TestP1InvalidCoreFields/BMKG/epicenter_lon/missing",
+      "result": "PASS"
+    },
+    {
+      "case": "TestP1InvalidCoreFields/BMKG/epicenter_lon/null",
+      "result": "PASS"
+    },
+    {
+      "case": "TestP1InvalidCoreFields/BMKG/epicenter_lon/object",
+      "result": "PASS"
+    },
+    {
+      "case": "TestP1InvalidCoreFields/PVMBG/report_id/missing",
+      "result": "PASS"
+    },
+    {
+      "case": "TestP1InvalidCoreFields/PVMBG/report_id/null",
+      "result": "PASS"
+    },
+    {
+      "case": "TestP1InvalidCoreFields/PVMBG/report_id/object",
+      "result": "PASS"
+    },
+    {
+      "case": "TestP1InvalidCoreFields/PVMBG/volcano_id/missing",
+      "result": "PASS"
+    },
+    {
+      "case": "TestP1InvalidCoreFields/PVMBG/volcano_id/null",
+      "result": "PASS"
+    },
+    {
+      "case": "TestP1InvalidCoreFields/PVMBG/volcano_id/object",
+      "result": "PASS"
+    },
+    {
+      "case": "TestP1InvalidCoreFields/PVMBG/alert_level/missing",
+      "result": "PASS"
+    },
+    {
+      "case": "TestP1InvalidCoreFields/PVMBG/alert_level/null",
+      "result": "PASS"
+    },
+    {
+      "case": "TestP1InvalidCoreFields/PVMBG/alert_level/object",
+      "result": "PASS"
+    },
+    {
+      "case": "TestP1InvalidCoreFields/PVMBG/eruption_count_24h/missing",
+      "result": "PASS"
+    },
+    {
+      "case": "TestP1InvalidCoreFields/PVMBG/eruption_count_24h/null",
+      "result": "PASS"
+    },
+    {
+      "case": "TestP1InvalidCoreFields/PVMBG/eruption_count_24h/object",
+      "result": "PASS"
+    },
+    {
+      "case": "TestP1InvalidCoreFields/PVMBG/ash_column_height_m/missing",
+      "result": "PASS"
+    },
+    {
+      "case": "TestP1InvalidCoreFields/PVMBG/ash_column_height_m/null",
+      "result": "PASS"
+    },
+    {
+      "case": "TestP1InvalidCoreFields/PVMBG/ash_column_height_m/object",
+      "result": "PASS"
+    },
+    {
+      "case": "TestP1InvalidCoreFields/PVMBG/reported_at/missing",
+      "result": "PASS"
+    },
+    {
+      "case": "TestP1InvalidCoreFields/PVMBG/reported_at/null",
+      "result": "PASS"
+    },
+    {
+      "case": "TestP1InvalidCoreFields/PVMBG/reported_at/object",
+      "result": "PASS"
+    },
+    {
+      "case": "TestP1InvalidCoreFields",
+      "result": "PASS"
+    },
+    {
+      "case": "TestP1RejectsUnsupportedChanges/confidence_level/null",
+      "result": "PASS"
+    },
+    {
+      "case": "TestP1RejectsUnsupportedChanges/confidence_level/true",
+      "result": "PASS"
+    },
+    {
+      "case": "TestP1RejectsUnsupportedChanges/confidence_level/\"0.5\"",
+      "result": "PASS"
+    },
+    {
+      "case": "TestP1RejectsUnsupportedChanges/confidence_level/-0.01",
+      "result": "PASS"
+    },
+    {
+      "case": "TestP1RejectsUnsupportedChanges/confidence_level/1.01",
+      "result": "PASS"
+    },
+    {
+      "case": "TestP1RejectsUnsupportedChanges/alert_level/\"Unknown\"",
+      "result": "PASS"
+    },
+    {
+      "case": "TestP1RejectsUnsupportedChanges/volcano_id/\"unknown-volcano\"",
+      "result": "PASS"
+    },
+    {
+      "case": "TestP1RejectsUnsupportedChanges/eruption_count_24h/1.5",
+      "result": "PASS"
+    },
+    {
+      "case": "TestP1RejectsUnsupportedChanges/eruption_count_24h/-1",
+      "result": "PASS"
+    },
+    {
+      "case": "TestP1RejectsUnsupportedChanges/reported_at/\"2026-10-03\"",
+      "result": "PASS"
+    },
+    {
+      "case": "TestP1RejectsUnsupportedChanges/{\"report_id\":\"a\",\"report_id\":\"b\"}",
+      "result": "PASS"
+    },
+    {
+      "case": "TestP1RejectsUnsupportedChanges/{\"extra\":{\"x\":1,\"x\":2}}",
+      "result": "PASS"
+    },
+    {
+      "case": "TestP1RejectsUnsupportedChanges/{\"report_id\":",
+      "result": "PASS"
+    },
+    {
+      "case": "TestP1RejectsUnsupportedChanges",
+      "result": "PASS"
+    },
+    {
+      "case": "TestP1PollingBoundaries/seismic",
+      "result": "PASS"
+    },
+    {
+      "case": "TestP1PollingBoundaries/warnings",
+      "result": "PASS"
+    },
+    {
+      "case": "TestP1PollingBoundaries/volcanic",
+      "result": "PASS"
+    },
+    {
+      "case": "TestP1PollingBoundaries",
+      "result": "PASS"
+    },
+    {
+      "case": "TestP1TiedTimestampOrdering",
+      "result": "PASS"
+    }
+  ],
+  "oracle_checks": "PASS",
+  "exit_code": 0,
+  "database": "postgres-test (isolated test profile)",
+  "raw_output": "T01-go.ndjson"
+}

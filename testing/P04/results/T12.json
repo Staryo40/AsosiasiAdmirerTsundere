@@ -1,0 +1,2505 @@
+{
+  "test_id": "T12",
+  "started_at": "2026-10-09T19:50:24+07:00",
+  "result": "FAIL",
+  "schema_before": {
+    "migrations": [
+      {
+        "version": 1,
+        "applied_at": "2026-10-09T12:47:32.282416+00:00"
+      },
+      {
+        "version": 2,
+        "applied_at": "2026-10-09T12:47:32.282416+00:00"
+      },
+      {
+        "version": 3,
+        "applied_at": "2026-10-09T12:47:32.282416+00:00"
+      },
+      {
+        "version": 4,
+        "applied_at": "2026-10-09T12:47:32.282416+00:00"
+      }
+    ],
+    "columns": [
+      {
+        "table_name": "hazard_events",
+        "ordinal_position": 1,
+        "column_name": "hazard_id",
+        "udt_name": "text",
+        "is_nullable": "NO",
+        "column_default": null
+      },
+      {
+        "table_name": "hazard_events",
+        "ordinal_position": 2,
+        "column_name": "source",
+        "udt_name": "text",
+        "is_nullable": "NO",
+        "column_default": null
+      },
+      {
+        "table_name": "hazard_events",
+        "ordinal_position": 3,
+        "column_name": "source_ref_id",
+        "udt_name": "text",
+        "is_nullable": "NO",
+        "column_default": null
+      },
+      {
+        "table_name": "hazard_events",
+        "ordinal_position": 4,
+        "column_name": "hazard_type",
+        "udt_name": "text",
+        "is_nullable": "NO",
+        "column_default": null
+      },
+      {
+        "table_name": "hazard_events",
+        "ordinal_position": 5,
+        "column_name": "severity",
+        "udt_name": "text",
+        "is_nullable": "NO",
+        "column_default": null
+      },
+      {
+        "table_name": "hazard_events",
+        "ordinal_position": 6,
+        "column_name": "area_name",
+        "udt_name": "text",
+        "is_nullable": "NO",
+        "column_default": null
+      },
+      {
+        "table_name": "hazard_events",
+        "ordinal_position": 7,
+        "column_name": "latitude",
+        "udt_name": "float8",
+        "is_nullable": "NO",
+        "column_default": null
+      },
+      {
+        "table_name": "hazard_events",
+        "ordinal_position": 8,
+        "column_name": "longitude",
+        "udt_name": "float8",
+        "is_nullable": "NO",
+        "column_default": null
+      },
+      {
+        "table_name": "hazard_events",
+        "ordinal_position": 9,
+        "column_name": "occurred_at",
+        "udt_name": "timestamptz",
+        "is_nullable": "NO",
+        "column_default": null
+      },
+      {
+        "table_name": "hazard_events",
+        "ordinal_position": 10,
+        "column_name": "ingested_at",
+        "udt_name": "timestamptz",
+        "is_nullable": "NO",
+        "column_default": null
+      },
+      {
+        "table_name": "hazard_events",
+        "ordinal_position": 11,
+        "column_name": "attributes",
+        "udt_name": "jsonb",
+        "is_nullable": "NO",
+        "column_default": null
+      },
+      {
+        "table_name": "hazard_events",
+        "ordinal_position": 12,
+        "column_name": "revision",
+        "udt_name": "int8",
+        "is_nullable": "NO",
+        "column_default": null
+      },
+      {
+        "table_name": "hazard_events",
+        "ordinal_position": 13,
+        "column_name": "updated_at",
+        "udt_name": "timestamptz",
+        "is_nullable": "NO",
+        "column_default": null
+      },
+      {
+        "table_name": "ingest_rejects",
+        "ordinal_position": 1,
+        "column_name": "reject_id",
+        "udt_name": "int8",
+        "is_nullable": "NO",
+        "column_default": null
+      },
+      {
+        "table_name": "ingest_rejects",
+        "ordinal_position": 2,
+        "column_name": "endpoint",
+        "udt_name": "text",
+        "is_nullable": "NO",
+        "column_default": null
+      },
+      {
+        "table_name": "ingest_rejects",
+        "ordinal_position": 3,
+        "column_name": "source_ref_id",
+        "udt_name": "text",
+        "is_nullable": "YES",
+        "column_default": null
+      },
+      {
+        "table_name": "ingest_rejects",
+        "ordinal_position": 4,
+        "column_name": "source_timestamp",
+        "udt_name": "timestamptz",
+        "is_nullable": "YES",
+        "column_default": null
+      },
+      {
+        "table_name": "ingest_rejects",
+        "ordinal_position": 5,
+        "column_name": "category",
+        "udt_name": "text",
+        "is_nullable": "NO",
+        "column_default": null
+      },
+      {
+        "table_name": "ingest_rejects",
+        "ordinal_position": 6,
+        "column_name": "field",
+        "udt_name": "text",
+        "is_nullable": "NO",
+        "column_default": null
+      },
+      {
+        "table_name": "ingest_rejects",
+        "ordinal_position": 7,
+        "column_name": "payload_sha256",
+        "udt_name": "text",
+        "is_nullable": "NO",
+        "column_default": null
+      },
+      {
+        "table_name": "ingest_rejects",
+        "ordinal_position": 8,
+        "column_name": "payload_bytes",
+        "udt_name": "int8",
+        "is_nullable": "NO",
+        "column_default": null
+      },
+      {
+        "table_name": "ingest_rejects",
+        "ordinal_position": 9,
+        "column_name": "first_seen_at",
+        "udt_name": "timestamptz",
+        "is_nullable": "NO",
+        "column_default": null
+      },
+      {
+        "table_name": "ingest_rejects",
+        "ordinal_position": 10,
+        "column_name": "last_seen_at",
+        "udt_name": "timestamptz",
+        "is_nullable": "NO",
+        "column_default": null
+      },
+      {
+        "table_name": "ingest_rejects",
+        "ordinal_position": 11,
+        "column_name": "occurrences",
+        "udt_name": "int8",
+        "is_nullable": "NO",
+        "column_default": "1"
+      },
+      {
+        "table_name": "ingest_rejects",
+        "ordinal_position": 12,
+        "column_name": "repair_status",
+        "udt_name": "text",
+        "is_nullable": "NO",
+        "column_default": "'open'::text"
+      },
+      {
+        "table_name": "outbox",
+        "ordinal_position": 1,
+        "column_name": "sequence",
+        "udt_name": "int8",
+        "is_nullable": "NO",
+        "column_default": null
+      },
+      {
+        "table_name": "outbox",
+        "ordinal_position": 2,
+        "column_name": "message_id",
+        "udt_name": "text",
+        "is_nullable": "NO",
+        "column_default": null
+      },
+      {
+        "table_name": "outbox",
+        "ordinal_position": 3,
+        "column_name": "hazard_id",
+        "udt_name": "text",
+        "is_nullable": "NO",
+        "column_default": null
+      },
+      {
+        "table_name": "outbox",
+        "ordinal_position": 4,
+        "column_name": "revision",
+        "udt_name": "int8",
+        "is_nullable": "NO",
+        "column_default": null
+      },
+      {
+        "table_name": "outbox",
+        "ordinal_position": 5,
+        "column_name": "correlation_id",
+        "udt_name": "text",
+        "is_nullable": "NO",
+        "column_default": null
+      },
+      {
+        "table_name": "outbox",
+        "ordinal_position": 6,
+        "column_name": "payload",
+        "udt_name": "jsonb",
+        "is_nullable": "NO",
+        "column_default": null
+      },
+      {
+        "table_name": "outbox",
+        "ordinal_position": 7,
+        "column_name": "created_at",
+        "udt_name": "timestamptz",
+        "is_nullable": "NO",
+        "column_default": null
+      },
+      {
+        "table_name": "outbox",
+        "ordinal_position": 8,
+        "column_name": "attempts",
+        "udt_name": "int4",
+        "is_nullable": "NO",
+        "column_default": "0"
+      },
+      {
+        "table_name": "outbox",
+        "ordinal_position": 9,
+        "column_name": "next_attempt_at",
+        "udt_name": "timestamptz",
+        "is_nullable": "NO",
+        "column_default": null
+      },
+      {
+        "table_name": "outbox",
+        "ordinal_position": 10,
+        "column_name": "sent_at",
+        "udt_name": "timestamptz",
+        "is_nullable": "YES",
+        "column_default": null
+      },
+      {
+        "table_name": "poll_state",
+        "ordinal_position": 1,
+        "column_name": "endpoint",
+        "udt_name": "text",
+        "is_nullable": "NO",
+        "column_default": null
+      },
+      {
+        "table_name": "poll_state",
+        "ordinal_position": 2,
+        "column_name": "source",
+        "udt_name": "text",
+        "is_nullable": "NO",
+        "column_default": null
+      },
+      {
+        "table_name": "poll_state",
+        "ordinal_position": 3,
+        "column_name": "checkpoint",
+        "udt_name": "timestamptz",
+        "is_nullable": "YES",
+        "column_default": null
+      },
+      {
+        "table_name": "poll_state",
+        "ordinal_position": 4,
+        "column_name": "last_attempt_at",
+        "udt_name": "timestamptz",
+        "is_nullable": "YES",
+        "column_default": null
+      },
+      {
+        "table_name": "poll_state",
+        "ordinal_position": 5,
+        "column_name": "last_successful_poll",
+        "udt_name": "timestamptz",
+        "is_nullable": "YES",
+        "column_default": null
+      },
+      {
+        "table_name": "poll_state",
+        "ordinal_position": 6,
+        "column_name": "stale_since",
+        "udt_name": "timestamptz",
+        "is_nullable": "YES",
+        "column_default": null
+      },
+      {
+        "table_name": "poll_state",
+        "ordinal_position": 7,
+        "column_name": "error_category",
+        "udt_name": "text",
+        "is_nullable": "YES",
+        "column_default": null
+      },
+      {
+        "table_name": "schema_migrations",
+        "ordinal_position": 1,
+        "column_name": "version",
+        "udt_name": "int4",
+        "is_nullable": "NO",
+        "column_default": null
+      },
+      {
+        "table_name": "schema_migrations",
+        "ordinal_position": 2,
+        "column_name": "applied_at",
+        "udt_name": "timestamptz",
+        "is_nullable": "NO",
+        "column_default": "now()"
+      },
+      {
+        "table_name": "source_seismic",
+        "ordinal_position": 1,
+        "column_name": "event_id",
+        "udt_name": "text",
+        "is_nullable": "NO",
+        "column_default": null
+      },
+      {
+        "table_name": "source_seismic",
+        "ordinal_position": 2,
+        "column_name": "occurred_at",
+        "udt_name": "timestamptz",
+        "is_nullable": "NO",
+        "column_default": null
+      },
+      {
+        "table_name": "source_seismic",
+        "ordinal_position": 3,
+        "column_name": "payload",
+        "udt_name": "jsonb",
+        "is_nullable": "NO",
+        "column_default": null
+      },
+      {
+        "table_name": "source_warnings",
+        "ordinal_position": 1,
+        "column_name": "warning_id",
+        "udt_name": "text",
+        "is_nullable": "NO",
+        "column_default": null
+      },
+      {
+        "table_name": "source_warnings",
+        "ordinal_position": 2,
+        "column_name": "related_event_id",
+        "udt_name": "text",
+        "is_nullable": "NO",
+        "column_default": null
+      },
+      {
+        "table_name": "source_warnings",
+        "ordinal_position": 3,
+        "column_name": "issued_at",
+        "udt_name": "timestamptz",
+        "is_nullable": "NO",
+        "column_default": null
+      },
+      {
+        "table_name": "source_warnings",
+        "ordinal_position": 4,
+        "column_name": "payload",
+        "udt_name": "jsonb",
+        "is_nullable": "NO",
+        "column_default": null
+      },
+      {
+        "table_name": "volcano_reference",
+        "ordinal_position": 1,
+        "column_name": "volcano_id",
+        "udt_name": "text",
+        "is_nullable": "NO",
+        "column_default": null
+      },
+      {
+        "table_name": "volcano_reference",
+        "ordinal_position": 2,
+        "column_name": "name",
+        "udt_name": "text",
+        "is_nullable": "NO",
+        "column_default": null
+      },
+      {
+        "table_name": "volcano_reference",
+        "ordinal_position": 3,
+        "column_name": "latitude",
+        "udt_name": "float8",
+        "is_nullable": "NO",
+        "column_default": null
+      },
+      {
+        "table_name": "volcano_reference",
+        "ordinal_position": 4,
+        "column_name": "longitude",
+        "udt_name": "float8",
+        "is_nullable": "NO",
+        "column_default": null
+      },
+      {
+        "table_name": "volcano_reference",
+        "ordinal_position": 5,
+        "column_name": "provenance",
+        "udt_name": "jsonb",
+        "is_nullable": "NO",
+        "column_default": null
+      }
+    ],
+    "constraints": [
+      {
+        "relation": "hazard_events",
+        "conname": "hazard_events_area_name_check",
+        "definition": "CHECK ((area_name <> ''::text))"
+      },
+      {
+        "relation": "hazard_events",
+        "conname": "hazard_events_area_name_not_null",
+        "definition": "NOT NULL area_name"
+      },
+      {
+        "relation": "hazard_events",
+        "conname": "hazard_events_attributes_check",
+        "definition": "CHECK ((jsonb_typeof(attributes) = 'object'::text))"
+      },
+      {
+        "relation": "hazard_events",
+        "conname": "hazard_events_attributes_not_null",
+        "definition": "NOT NULL attributes"
+      },
+      {
+        "relation": "hazard_events",
+        "conname": "hazard_events_check",
+        "definition": "CHECK ((((source = 'BMKG'::text) AND (hazard_type = 'SEISMIC'::text)) OR ((source = 'PVMBG'::text) AND (hazard_type = 'VOLCANIC'::text))))"
+      },
+      {
+        "relation": "hazard_events",
+        "conname": "hazard_events_hazard_id_not_null",
+        "definition": "NOT NULL hazard_id"
+      },
+      {
+        "relation": "hazard_events",
+        "conname": "hazard_events_hazard_type_not_null",
+        "definition": "NOT NULL hazard_type"
+      },
+      {
+        "relation": "hazard_events",
+        "conname": "hazard_events_ingested_at_not_null",
+        "definition": "NOT NULL ingested_at"
+      },
+      {
+        "relation": "hazard_events",
+        "conname": "hazard_events_latitude_check",
+        "definition": "CHECK (((latitude >= ('-90'::integer)::double precision) AND (latitude <= (90)::double precision)))"
+      },
+      {
+        "relation": "hazard_events",
+        "conname": "hazard_events_latitude_not_null",
+        "definition": "NOT NULL latitude"
+      },
+      {
+        "relation": "hazard_events",
+        "conname": "hazard_events_longitude_check",
+        "definition": "CHECK (((longitude >= ('-180'::integer)::double precision) AND (longitude <= (180)::double precision)))"
+      },
+      {
+        "relation": "hazard_events",
+        "conname": "hazard_events_longitude_not_null",
+        "definition": "NOT NULL longitude"
+      },
+      {
+        "relation": "hazard_events",
+        "conname": "hazard_events_occurred_at_not_null",
+        "definition": "NOT NULL occurred_at"
+      },
+      {
+        "relation": "hazard_events",
+        "conname": "hazard_events_pkey",
+        "definition": "PRIMARY KEY (hazard_id)"
+      },
+      {
+        "relation": "hazard_events",
+        "conname": "hazard_events_revision_check",
+        "definition": "CHECK ((revision > 0))"
+      },
+      {
+        "relation": "hazard_events",
+        "conname": "hazard_events_revision_not_null",
+        "definition": "NOT NULL revision"
+      },
+      {
+        "relation": "hazard_events",
+        "conname": "hazard_events_severity_check",
+        "definition": "CHECK ((severity = ANY (ARRAY['NORMAL'::text, 'WASPADA'::text, 'SIAGA'::text, 'AWAS'::text])))"
+      },
+      {
+        "relation": "hazard_events",
+        "conname": "hazard_events_severity_not_null",
+        "definition": "NOT NULL severity"
+      },
+      {
+        "relation": "hazard_events",
+        "conname": "hazard_events_source_check",
+        "definition": "CHECK ((source = ANY (ARRAY['BMKG'::text, 'PVMBG'::text])))"
+      },
+      {
+        "relation": "hazard_events",
+        "conname": "hazard_events_source_not_null",
+        "definition": "NOT NULL source"
+      },
+      {
+        "relation": "hazard_events",
+        "conname": "hazard_events_source_ref_id_check",
+        "definition": "CHECK (((octet_length(source_ref_id) >= 1) AND (octet_length(source_ref_id) <= 2048)))"
+      },
+      {
+        "relation": "hazard_events",
+        "conname": "hazard_events_source_ref_id_not_null",
+        "definition": "NOT NULL source_ref_id"
+      },
+      {
+        "relation": "hazard_events",
+        "conname": "hazard_events_source_source_ref_id_key",
+        "definition": "UNIQUE (source, source_ref_id)"
+      },
+      {
+        "relation": "hazard_events",
+        "conname": "hazard_events_updated_at_not_null",
+        "definition": "NOT NULL updated_at"
+      },
+      {
+        "relation": "ingest_rejects",
+        "conname": "ingest_rejects_category_not_null",
+        "definition": "NOT NULL category"
+      },
+      {
+        "relation": "ingest_rejects",
+        "conname": "ingest_rejects_endpoint_fkey",
+        "definition": "FOREIGN KEY (endpoint) REFERENCES poll_state(endpoint)"
+      },
+      {
+        "relation": "ingest_rejects",
+        "conname": "ingest_rejects_endpoint_not_null",
+        "definition": "NOT NULL endpoint"
+      },
+      {
+        "relation": "ingest_rejects",
+        "conname": "ingest_rejects_endpoint_payload_sha256_category_field_key",
+        "definition": "UNIQUE (endpoint, payload_sha256, category, field)"
+      },
+      {
+        "relation": "ingest_rejects",
+        "conname": "ingest_rejects_field_not_null",
+        "definition": "NOT NULL field"
+      },
+      {
+        "relation": "ingest_rejects",
+        "conname": "ingest_rejects_first_seen_at_not_null",
+        "definition": "NOT NULL first_seen_at"
+      },
+      {
+        "relation": "ingest_rejects",
+        "conname": "ingest_rejects_last_seen_at_not_null",
+        "definition": "NOT NULL last_seen_at"
+      },
+      {
+        "relation": "ingest_rejects",
+        "conname": "ingest_rejects_occurrences_check",
+        "definition": "CHECK ((occurrences > 0))"
+      },
+      {
+        "relation": "ingest_rejects",
+        "conname": "ingest_rejects_occurrences_not_null",
+        "definition": "NOT NULL occurrences"
+      },
+      {
+        "relation": "ingest_rejects",
+        "conname": "ingest_rejects_payload_bytes_check",
+        "definition": "CHECK ((payload_bytes >= 0))"
+      },
+      {
+        "relation": "ingest_rejects",
+        "conname": "ingest_rejects_payload_bytes_not_null",
+        "definition": "NOT NULL payload_bytes"
+      },
+      {
+        "relation": "ingest_rejects",
+        "conname": "ingest_rejects_payload_sha256_check",
+        "definition": "CHECK ((length(payload_sha256) = 64))"
+      },
+      {
+        "relation": "ingest_rejects",
+        "conname": "ingest_rejects_payload_sha256_not_null",
+        "definition": "NOT NULL payload_sha256"
+      },
+      {
+        "relation": "ingest_rejects",
+        "conname": "ingest_rejects_pkey",
+        "definition": "PRIMARY KEY (reject_id)"
+      },
+      {
+        "relation": "ingest_rejects",
+        "conname": "ingest_rejects_reject_id_not_null",
+        "definition": "NOT NULL reject_id"
+      },
+      {
+        "relation": "ingest_rejects",
+        "conname": "ingest_rejects_repair_status_check",
+        "definition": "CHECK ((repair_status = ANY (ARRAY['open'::text, 'repaired'::text])))"
+      },
+      {
+        "relation": "ingest_rejects",
+        "conname": "ingest_rejects_repair_status_not_null",
+        "definition": "NOT NULL repair_status"
+      },
+      {
+        "relation": "ingest_rejects",
+        "conname": "ingest_rejects_source_ref_id_check",
+        "definition": "CHECK ((octet_length(source_ref_id) <= 2048))"
+      },
+      {
+        "relation": "outbox",
+        "conname": "outbox_attempts_check",
+        "definition": "CHECK ((attempts >= 0))"
+      },
+      {
+        "relation": "outbox",
+        "conname": "outbox_attempts_not_null",
+        "definition": "NOT NULL attempts"
+      },
+      {
+        "relation": "outbox",
+        "conname": "outbox_correlation_id_not_null",
+        "definition": "NOT NULL correlation_id"
+      },
+      {
+        "relation": "outbox",
+        "conname": "outbox_created_at_not_null",
+        "definition": "NOT NULL created_at"
+      },
+      {
+        "relation": "outbox",
+        "conname": "outbox_hazard_id_fkey",
+        "definition": "FOREIGN KEY (hazard_id) REFERENCES hazard_events(hazard_id)"
+      },
+      {
+        "relation": "outbox",
+        "conname": "outbox_hazard_id_not_null",
+        "definition": "NOT NULL hazard_id"
+      },
+      {
+        "relation": "outbox",
+        "conname": "outbox_hazard_id_revision_key",
+        "definition": "UNIQUE (hazard_id, revision)"
+      },
+      {
+        "relation": "outbox",
+        "conname": "outbox_message_id_key",
+        "definition": "UNIQUE (message_id)"
+      },
+      {
+        "relation": "outbox",
+        "conname": "outbox_message_id_not_null",
+        "definition": "NOT NULL message_id"
+      },
+      {
+        "relation": "outbox",
+        "conname": "outbox_next_attempt_at_not_null",
+        "definition": "NOT NULL next_attempt_at"
+      },
+      {
+        "relation": "outbox",
+        "conname": "outbox_notification_identity",
+        "definition": "CHECK (((((payload ->> 'message_id'::text) = message_id) AND ((payload ->> 'hazard_id'::text) = hazard_id) AND (((payload ->> 'revision'::text))::bigint = revision) AND ((payload ->> 'correlation_id'::text) = correlation_id)) IS TRUE))"
+      },
+      {
+        "relation": "outbox",
+        "conname": "outbox_payload_check",
+        "definition": "CHECK ((jsonb_typeof(payload) = 'object'::text))"
+      },
+      {
+        "relation": "outbox",
+        "conname": "outbox_payload_not_null",
+        "definition": "NOT NULL payload"
+      },
+      {
+        "relation": "outbox",
+        "conname": "outbox_pkey",
+        "definition": "PRIMARY KEY (sequence)"
+      },
+      {
+        "relation": "outbox",
+        "conname": "outbox_revision_check",
+        "definition": "CHECK ((revision > 0))"
+      },
+      {
+        "relation": "outbox",
+        "conname": "outbox_revision_not_null",
+        "definition": "NOT NULL revision"
+      },
+      {
+        "relation": "outbox",
+        "conname": "outbox_sequence_not_null",
+        "definition": "NOT NULL sequence"
+      },
+      {
+        "relation": "poll_state",
+        "conname": "poll_state_check",
+        "definition": "CHECK ((((source = 'BMKG'::text) AND (endpoint = ANY (ARRAY['seismic'::text, 'warnings'::text]))) OR ((source = 'PVMBG'::text) AND (endpoint = 'volcanic'::text))))"
+      },
+      {
+        "relation": "poll_state",
+        "conname": "poll_state_endpoint_check",
+        "definition": "CHECK ((endpoint = ANY (ARRAY['seismic'::text, 'warnings'::text, 'volcanic'::text])))"
+      },
+      {
+        "relation": "poll_state",
+        "conname": "poll_state_endpoint_not_null",
+        "definition": "NOT NULL endpoint"
+      },
+      {
+        "relation": "poll_state",
+        "conname": "poll_state_pkey",
+        "definition": "PRIMARY KEY (endpoint)"
+      },
+      {
+        "relation": "poll_state",
+        "conname": "poll_state_source_not_null",
+        "definition": "NOT NULL source"
+      },
+      {
+        "relation": "schema_migrations",
+        "conname": "schema_migrations_applied_at_not_null",
+        "definition": "NOT NULL applied_at"
+      },
+      {
+        "relation": "schema_migrations",
+        "conname": "schema_migrations_pkey",
+        "definition": "PRIMARY KEY (version)"
+      },
+      {
+        "relation": "schema_migrations",
+        "conname": "schema_migrations_version_not_null",
+        "definition": "NOT NULL version"
+      },
+      {
+        "relation": "source_seismic",
+        "conname": "source_seismic_event_id_check",
+        "definition": "CHECK (((octet_length(event_id) >= 1) AND (octet_length(event_id) <= 2048)))"
+      },
+      {
+        "relation": "source_seismic",
+        "conname": "source_seismic_event_id_not_null",
+        "definition": "NOT NULL event_id"
+      },
+      {
+        "relation": "source_seismic",
+        "conname": "source_seismic_occurred_at_not_null",
+        "definition": "NOT NULL occurred_at"
+      },
+      {
+        "relation": "source_seismic",
+        "conname": "source_seismic_payload_check",
+        "definition": "CHECK ((jsonb_typeof(payload) = 'object'::text))"
+      },
+      {
+        "relation": "source_seismic",
+        "conname": "source_seismic_payload_not_null",
+        "definition": "NOT NULL payload"
+      },
+      {
+        "relation": "source_seismic",
+        "conname": "source_seismic_pkey",
+        "definition": "PRIMARY KEY (event_id)"
+      },
+      {
+        "relation": "source_warnings",
+        "conname": "source_warnings_issued_at_not_null",
+        "definition": "NOT NULL issued_at"
+      },
+      {
+        "relation": "source_warnings",
+        "conname": "source_warnings_payload_check",
+        "definition": "CHECK ((jsonb_typeof(payload) = 'object'::text))"
+      },
+      {
+        "relation": "source_warnings",
+        "conname": "source_warnings_payload_not_null",
+        "definition": "NOT NULL payload"
+      },
+      {
+        "relation": "source_warnings",
+        "conname": "source_warnings_pkey",
+        "definition": "PRIMARY KEY (warning_id)"
+      },
+      {
+        "relation": "source_warnings",
+        "conname": "source_warnings_related_event_id_check",
+        "definition": "CHECK (((octet_length(related_event_id) >= 1) AND (octet_length(related_event_id) <= 2048)))"
+      },
+      {
+        "relation": "source_warnings",
+        "conname": "source_warnings_related_event_id_not_null",
+        "definition": "NOT NULL related_event_id"
+      },
+      {
+        "relation": "source_warnings",
+        "conname": "source_warnings_warning_id_check",
+        "definition": "CHECK (((octet_length(warning_id) >= 1) AND (octet_length(warning_id) <= 2048)))"
+      },
+      {
+        "relation": "source_warnings",
+        "conname": "source_warnings_warning_id_not_null",
+        "definition": "NOT NULL warning_id"
+      },
+      {
+        "relation": "volcano_reference",
+        "conname": "volcano_reference_latitude_check",
+        "definition": "CHECK (((latitude >= ('-90'::integer)::double precision) AND (latitude <= (90)::double precision)))"
+      },
+      {
+        "relation": "volcano_reference",
+        "conname": "volcano_reference_latitude_not_null",
+        "definition": "NOT NULL latitude"
+      },
+      {
+        "relation": "volcano_reference",
+        "conname": "volcano_reference_longitude_check",
+        "definition": "CHECK (((longitude >= ('-180'::integer)::double precision) AND (longitude <= (180)::double precision)))"
+      },
+      {
+        "relation": "volcano_reference",
+        "conname": "volcano_reference_longitude_not_null",
+        "definition": "NOT NULL longitude"
+      },
+      {
+        "relation": "volcano_reference",
+        "conname": "volcano_reference_name_not_null",
+        "definition": "NOT NULL name"
+      },
+      {
+        "relation": "volcano_reference",
+        "conname": "volcano_reference_pkey",
+        "definition": "PRIMARY KEY (volcano_id)"
+      },
+      {
+        "relation": "volcano_reference",
+        "conname": "volcano_reference_provenance_check",
+        "definition": "CHECK ((jsonb_typeof(provenance) = 'object'::text))"
+      },
+      {
+        "relation": "volcano_reference",
+        "conname": "volcano_reference_provenance_not_null",
+        "definition": "NOT NULL provenance"
+      },
+      {
+        "relation": "volcano_reference",
+        "conname": "volcano_reference_volcano_id_not_null",
+        "definition": "NOT NULL volcano_id"
+      }
+    ],
+    "indexes": [
+      {
+        "tablename": "hazard_events",
+        "indexname": "hazard_events_pkey",
+        "indexdef": "CREATE UNIQUE INDEX hazard_events_pkey ON public.hazard_events USING btree (hazard_id)"
+      },
+      {
+        "tablename": "hazard_events",
+        "indexname": "hazard_events_source_source_ref_id_key",
+        "indexdef": "CREATE UNIQUE INDEX hazard_events_source_source_ref_id_key ON public.hazard_events USING btree (source, source_ref_id)"
+      },
+      {
+        "tablename": "hazard_events",
+        "indexname": "hazard_page",
+        "indexdef": "CREATE INDEX hazard_page ON public.hazard_events USING btree (occurred_at DESC, hazard_id COLLATE \"C\" DESC)"
+      },
+      {
+        "tablename": "hazard_events",
+        "indexname": "hazard_source_page",
+        "indexdef": "CREATE INDEX hazard_source_page ON public.hazard_events USING btree (source, occurred_at DESC, hazard_id COLLATE \"C\" DESC)"
+      },
+      {
+        "tablename": "ingest_rejects",
+        "indexname": "ingest_rejects_endpoint_payload_sha256_category_field_key",
+        "indexdef": "CREATE UNIQUE INDEX ingest_rejects_endpoint_payload_sha256_category_field_key ON public.ingest_rejects USING btree (endpoint, payload_sha256, category, field)"
+      },
+      {
+        "tablename": "ingest_rejects",
+        "indexname": "ingest_rejects_pkey",
+        "indexdef": "CREATE UNIQUE INDEX ingest_rejects_pkey ON public.ingest_rejects USING btree (reject_id)"
+      },
+      {
+        "tablename": "outbox",
+        "indexname": "outbox_hazard_id_revision_key",
+        "indexdef": "CREATE UNIQUE INDEX outbox_hazard_id_revision_key ON public.outbox USING btree (hazard_id, revision)"
+      },
+      {
+        "tablename": "outbox",
+        "indexname": "outbox_message_id_key",
+        "indexdef": "CREATE UNIQUE INDEX outbox_message_id_key ON public.outbox USING btree (message_id)"
+      },
+      {
+        "tablename": "outbox",
+        "indexname": "outbox_pending",
+        "indexdef": "CREATE INDEX outbox_pending ON public.outbox USING btree (sequence) WHERE (sent_at IS NULL)"
+      },
+      {
+        "tablename": "outbox",
+        "indexname": "outbox_pkey",
+        "indexdef": "CREATE UNIQUE INDEX outbox_pkey ON public.outbox USING btree (sequence)"
+      },
+      {
+        "tablename": "poll_state",
+        "indexname": "poll_state_pkey",
+        "indexdef": "CREATE UNIQUE INDEX poll_state_pkey ON public.poll_state USING btree (endpoint)"
+      },
+      {
+        "tablename": "schema_migrations",
+        "indexname": "schema_migrations_pkey",
+        "indexdef": "CREATE UNIQUE INDEX schema_migrations_pkey ON public.schema_migrations USING btree (version)"
+      },
+      {
+        "tablename": "source_seismic",
+        "indexname": "source_seismic_pkey",
+        "indexdef": "CREATE UNIQUE INDEX source_seismic_pkey ON public.source_seismic USING btree (event_id)"
+      },
+      {
+        "tablename": "source_warnings",
+        "indexname": "source_warnings_pkey",
+        "indexdef": "CREATE UNIQUE INDEX source_warnings_pkey ON public.source_warnings USING btree (warning_id)"
+      },
+      {
+        "tablename": "source_warnings",
+        "indexname": "warning_related_event",
+        "indexdef": "CREATE INDEX warning_related_event ON public.source_warnings USING btree (related_event_id, issued_at, warning_id)"
+      },
+      {
+        "tablename": "volcano_reference",
+        "indexname": "volcano_reference_pkey",
+        "indexdef": "CREATE UNIQUE INDEX volcano_reference_pkey ON public.volcano_reference USING btree (volcano_id)"
+      }
+    ],
+    "triggers": [
+      {
+        "relation": "outbox",
+        "tgname": "outbox_immutable",
+        "definition": "CREATE TRIGGER outbox_immutable BEFORE UPDATE ON public.outbox FOR EACH ROW EXECUTE FUNCTION protect_outbox_notification()"
+      }
+    ],
+    "functions": [
+      {
+        "definition": "CREATE OR REPLACE FUNCTION public.protect_outbox_notification()\n RETURNS trigger\n LANGUAGE plpgsql\nAS $function$\r\nBEGIN\r\n    IF ROW(NEW.sequence, NEW.message_id, NEW.hazard_id, NEW.revision,\r\n           NEW.correlation_id, NEW.payload, NEW.created_at)\r\n       IS DISTINCT FROM\r\n       ROW(OLD.sequence, OLD.message_id, OLD.hazard_id, OLD.revision,\r\n           OLD.correlation_id, OLD.payload, OLD.created_at) THEN\r\n        RAISE EXCEPTION 'outbox notification is immutable' USING ERRCODE = '23514';\r\n    END IF;\r\n    RETURN NEW;\r\nEND;\r\n$function$\n"
+      }
+    ]
+  },
+  "containers_before": {
+    "aggregator": {
+      "id": "cb222e887be7d7b8363ed94a3fb7b560465469e0cb12dac9b3d6d0816870eb34",
+      "service": "aggregator",
+      "started_at": "2026-10-09T12:47:31.03784764Z",
+      "running": true,
+      "restart_count": 0,
+      "image": "sha256:075f910b94a953dbb26f78ddf022fd0a2072a4ac33117a92ccaec4a158c4c1f1"
+    },
+    "api": {
+      "id": "27f88fdef39f3cfa412d34bc8ad54bf161099ceadb19873b1a5eb3ff8380f6c1",
+      "service": "api",
+      "started_at": "2026-10-09T12:47:41.436091572Z",
+      "running": true,
+      "restart_count": 0,
+      "image": "sha256:b684cdd8e2a9bd6ac517f53afc2ff06fc9029db830e0b27d5f986919313cd7cc"
+    },
+    "auth": {
+      "id": "a2ea6502ea2982297d0991c331117b7f0119de4dd21491fd4ec4aeb77b51514f",
+      "service": "auth",
+      "started_at": "2026-10-09T12:46:52.151303341Z",
+      "running": true,
+      "restart_count": 0,
+      "image": "sha256:a85d4d9450fa58edd13603fdeb65c8e339a9ac00af39c3f7b6944b6439e1f93f"
+    },
+    "bmkg": {
+      "id": "a935f755a0e5445db9d502f266ee713186f7e26c384ecacbad8e9cc32db50b09",
+      "service": "bmkg",
+      "started_at": "2026-10-09T12:46:53.120604397Z",
+      "running": true,
+      "restart_count": 0,
+      "image": "sha256:a4880f4d39366080ddbb51e0baad8c08096cea8134d3985640c87555c435efd9"
+    },
+    "consumer-1": {
+      "id": "075c6f14fe96b8c4a8d7eab0615330e656285fee806c0732f94bbef2887c0be6",
+      "service": "consumer-1",
+      "started_at": "2026-10-09T12:48:18.216199039Z",
+      "running": true,
+      "restart_count": 0,
+      "image": "sha256:b8b976462ad7420e7d6aa14a27a80fafe776c5504ebaa788e00d6f8b2e292702"
+    },
+    "consumer-2": {
+      "id": "84e0716ca2422313a7555629d880eb1899fb386d4a115ed307ef3bd173658f29",
+      "service": "consumer-2",
+      "started_at": "2026-10-09T12:47:30.071237568Z",
+      "running": true,
+      "restart_count": 0,
+      "image": "sha256:f093085c8e1689e250bfc65e1eeb785a7c4b0d0e10aeb05161c48634649b1b1c"
+    },
+    "postgres": {
+      "id": "b7852c6df7a88df0a47e5a6d365e9078a8902b5fa1d90dfe3c9d83038a0f3e46",
+      "service": "postgres",
+      "started_at": "2026-10-09T12:46:54.740826188Z",
+      "running": true,
+      "restart_count": 0,
+      "image": "sha256:77f585114c32fbca283dc835b0596f4e52b51b4c6662d7810b2f4084f60a1873"
+    },
+    "pvmbg": {
+      "id": "6faba34068be16b8a9d3ad0a4bad22d652a4694deaec8386b51e00e195a26c52",
+      "service": "pvmbg",
+      "started_at": "2026-10-09T12:46:50.669349445Z",
+      "running": true,
+      "restart_count": 0,
+      "image": "sha256:b03983ba874726e6c8dff401a3339b8a4c5459a65de36396b92b8d2330622d09"
+    },
+    "rabbitmq": {
+      "id": "9706465bed21504e3748e98d27dcd7fdecd2c0fa47640d3a689699e4fb32aee3",
+      "service": "rabbitmq",
+      "started_at": "2026-10-09T12:46:55.80646729Z",
+      "running": true,
+      "restart_count": 0,
+      "image": "sha256:b3b8b7f95f5382a19f9ea33540e604f30aad081d37ad9aba72255135765373a1"
+    }
+  },
+  "source_fingerprints_before": {
+    "bnpb/internal/aggregator/app.go": "12f8027c880d83cb26c1ec5e10ebfc17f62b13d09d9c0a66c1c6f52c3ae37285",
+    "bnpb/internal/aggregator/comparison.go": "a7841554bf4d90a0267f270385cfe97bd48c464171d1b3f8b6f6817f123af7db",
+    "bnpb/internal/aggregator/config.go": "87c57b72e2934ff145ba9f3085e18b665923689317c1b9739dfba33078ebb3f0",
+    "bnpb/internal/aggregator/freshness.go": "38d5b7eef7e188dbe86f1f99dcdbf79f7360dcce8f2c97f4523dc62d16e4038a",
+    "bnpb/internal/aggregator/model.go": "18a8638eb8a78290026aa06dd424262ad0602c8699e4273f7e035170c923f398",
+    "bnpb/internal/aggregator/outbox.go": "d8537fd04c57e1f7264687e4d1c7c30c2aca798496b3e694259ceccb0624fe8e",
+    "bnpb/internal/aggregator/parsing.go": "fe4a293cfe1bf77d5cc7c47c9bde640940b49e0330f5c7fd553d51f1635376d6",
+    "bnpb/internal/aggregator/poll.go": "5368ca903ed00179ee728e7e23f22cc5c4edf0c86b350c2f503afb6b36229dc2",
+    "bnpb/internal/aggregator/publisher_amqp.go": "2ab46a3f09725646cb8226ac9f1506824a09b94d148df1f1f13e30c655c70ac6",
+    "bnpb/internal/aggregator/read.go": "96513178ed370ae14b33618c31519b8fcd62ff31e217acc0e866ea2cc82814a0",
+    "bnpb/internal/aggregator/read_query.go": "432647518aba0bf89e85dfdae2c05ae15a0990739391cfdcbb5371c466b3f5fd",
+    "bnpb/internal/aggregator/seismic.go": "dd0bb2a19cadc3ab5de44b3bcc15f2673ba470f635ab55638023365398f35736",
+    "bnpb/internal/aggregator/source.go": "82123d233647807097ac7f0fc50aad1d67a67b3505e05f9cd7d2aa7ac76cb925",
+    "bnpb/internal/aggregator/source_auth.go": "34af971f95be9814c8beb06ead6426acedca700a7168c17ea61a764b39c4b8d0",
+    "bnpb/internal/aggregator/store.go": "9a427c39fde91d3ae3908c018b10bb2d6749a9e786c8bc0eb2fb221b891f2eb8",
+    "bnpb/internal/aggregator/store_hazard.go": "fe8522beb0b3e19bf313eccae0f31b186a9acaee7297158b448fc812012cc5e6",
+    "bnpb/internal/aggregator/store_ingest.go": "3f5ab26c5ed110056829a1eaaf05418caba2e1447787e4dc6ca54c684b374d86",
+    "bnpb/internal/aggregator/store_outbox.go": "7d3e2f08cfcb31b729e8b9a5ca3ed44bb95a61391ea578a3802eae850fbe7368",
+    "bnpb/internal/aggregator/store_poll.go": "47c5438836f8a6a0ae81c86c88f9005f88fa3618e71bcf2eb12953febaadbeb8",
+    "bnpb/internal/aggregator/store_read.go": "e838580aea8da73f28c4263f5486f3d8e1a71ad9ef0b60959c40ef648345426b",
+    "bnpb/internal/aggregator/store_trace.go": "cd62f1a9d52da5a2ca61989776c997ef820ef962a0db2c2a99e2263de4a15996",
+    "bnpb/internal/aggregator/store_warnings.go": "b975c071d32a2eede955ea37aaded1b43d82bd6a7fdffb02d04c8faf58f102f9",
+    "bnpb/internal/aggregator/volcanic.go": "7383d1068fadcb3f1edc6e1cf111f371efd1243a3bed55a16bd94b6d1276e68b",
+    "bnpb/internal/aggregator/volcanoes.go": "e20d0f465f0a507110f49fe40a49c3fda1c29b98ae89fd3677a0b190aa568ae6",
+    "bnpb/internal/aggregator/warnings.go": "93832a8d57b7831eff7dba13d1fc34c9daac087a847d7bafe51b996913d7289b",
+    "bnpb/internal/api/.gitkeep": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+    "bnpb/internal/api/client_config.go": "96c108e70c7641496f4c0dfb4555aaae1831088cb267d8d9f13696111bca3a7d",
+    "bnpb/internal/api/client_service.go": "f57e5b7d5241c19e41b81e34177ffc915459bdde82364d3d359a82a9ca4baab1",
+    "bnpb/internal/api/handlers.go": "42994f4512e5e6e86798ec5f83c5442cc6511604aa4b4373d4861603372fa519",
+    "bnpb/internal/api/projection.go": "7acaf6a4ca9c1818e79a6ea2b139eeb9614beb0169562ad5b6348e6992e19652",
+    "bnpb/internal/api/query.go": "ca3cd1d7d7697b4c0da946a656239a7d95eb8fa2e7331b9e011ff231adb54a1d",
+    "bnpb/internal/api/readiness.go": "17d35ff03c79960551d210fd72df725b3af30d6471d3552e3927437cc3caa696",
+    "bnpb/internal/auth/config.go": "22b8d1dbd8d47e8427237c53fa6797f960f1b640ece582e59b600c275982c858",
+    "bnpb/internal/auth/handler.go": "b1ea42e109ae75ff22b9f942dbae9bf9174896d446bd83c4ffb81b956596a3e3",
+    "bnpb/internal/auth/tokens.go": "4d483ebadb783689fb1061060a6d3b718a6e2ccefc007ec4c0d5446fff394f6e",
+    "bnpb/internal/consumer-1/.gitkeep": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+    "bnpb/internal/consumer-1/config.go": "c0ab4f4bff0417513abf92af04957615d8d88e36941e7e6be06d4387ba740d7d",
+    "bnpb/internal/consumer-1/consume.go": "62bdc6348b2e7ed608d0f27140b12d3ebe13fcb18c07ffcc75e4d196d1b858ec",
+    "bnpb/internal/consumer-1/consumer.go": "aad89d6f20886c16df360841f0e973b76ef5eb9e94ce0201941eba46aa20868e",
+    "bnpb/internal/consumer-1/failed.go": "5337c87c2ce4337a73b174a47e49b02c5e7815191a54ca0cb20695a4522e9dc9",
+    "bnpb/internal/consumer-1/session.go": "9dde2fa9d31a13eff56f03f3cb823ec3fca8550d9eae2b60ccb61a79695f458a",
+    "bnpb/internal/consumer-1/store.go": "5e26385fce890d9edf5b79f9db77af9aec7d47f4ecb8a65ca95c7d201ae8b8bf",
+    "bnpb/internal/consumer-2/.gitkeep": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+    "bnpb/internal/consumer-2/config.go": "0c21fc2e88f4f54be6330f770292db632b7a057de3ac815f1b43fc976b66a713",
+    "bnpb/internal/consumer-2/consume.go": "ce6acbecf5122fc1f555ed203d5654ca6b81f1e2e7c010051ecb8405be96a770",
+    "bnpb/internal/consumer-2/consumer.go": "7aff25a4e316d1c045399ed66dc253e8f4afba6b4892bdc92940c53279c38ae8",
+    "bnpb/internal/consumer-2/failed.go": "3af5073e990a8ef979512a05da0d06bc507d0a84233068da939f4ccb948fdc61",
+    "bnpb/internal/consumer-2/session.go": "20395363e0d46c51d633bad4f273eb360e9ffb6713879a95ca892dbab1668212",
+    "bnpb/internal/consumer-2/store.go": "daf0f1aaebd19a82ecd05270dd8da830042c8d9ca676de82423df2af9968b022",
+    "bnpb/internal/consumer-3/.gitkeep": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+    "bnpb/internal/consumer-3/config.go": "35d1dbfae424bef09903bf7188ee93111b77f7442f2d0151a994d985c72174d3",
+    "bnpb/internal/consumer-3/consume.go": "676da58492d1098a743a8fe78137f8e9246309e55f9cab716b54238704bbeae4",
+    "bnpb/internal/consumer-3/consumer.go": "6b8d324db3ba9ea94c1e6c85f0ba22f7379f7c3127715d3887e65ec41ef97014",
+    "bnpb/internal/consumer-3/failed.go": "ee59c2352fc529161b3c941efb68f7281c2567bbfc4d7ce40e4fc2698cc19ba2",
+    "bnpb/internal/consumer-3/session.go": "880491009334ffd54e832929c196c393408ef9c5a5e415dd0f875de3301c9609",
+    "bnpb/internal/consumer-3/store.go": "98d92a1e458a0814516eb7bdb9fee8e0ef16274f894d0912b6450a0c731d96cb",
+    "bnpb/internal/platform/amqplog/amqplog.go": "b9e22722d369228a47c938913118b08e0e72c43dac24db8bf1bd8c462e6c8e46",
+    "bnpb/internal/platform/amqppublish/publish.go": "6a8bd1c3d1a7ab03c96e46e06b448fbe4098e1b41932c32823d24cce03f62c29",
+    "bnpb/internal/platform/config/config.go": "9833abf8fdecc9b4be056c0b784c09d5afed80effd3b22908abd9e8fd9e48941",
+    "bnpb/internal/platform/config/config_test.local.go": "112f7ccd38ce98100844b4f82da66554a7470b6d4e43765778550a478fdaee85",
+    "bnpb/internal/platform/correlation/correlation.go": "b5bc426727413aa49a2fc0ab06f3a3a9754777a48f78294038a7cd69c9ae2ab4",
+    "bnpb/internal/platform/httpclient/client.go": "d235d99362eb00a04a03623bf72cb047dee8499a1e0d47b052206c9b158426b0",
+    "bnpb/internal/platform/httpclient/client_test.local.go": "f3179e8fa9f2b351f59000aa34046a205e81e5272c9a36025accb074f5b8afd8",
+    "bnpb/internal/platform/httpserver/healthcheck.go": "587a476d8505fa32a7d0641a7b5c511be91e0d248f10a4187971c0957ab538e8",
+    "bnpb/internal/platform/httpserver/lifecycle.go": "8e5fd13c5b94dc3004e1de135cecae34ee0d787b396f07ede3ee5b36a2788e6a",
+    "bnpb/internal/platform/httpserver/lifecycle_test.local.go": "2d19c0ba7ce8984e77fdcd6cfc3d745e22f34fb6f1138d9e76d8d617c611f501",
+    "bnpb/internal/platform/httpserver/middleware.go": "8bd8a7a764680157bffc0509b6474e0d4ae2ed46ece5fe1cb993ab0b4fa23af8",
+    "bnpb/internal/platform/httpserver/middleware_test.local.go": "af82ce6ecf5178958de44e8ab109ac0060155b04f67d7195e6018f546eb773f1",
+    "bnpb/internal/platform/httpserver/server.go": "30809a8758ca42b0c645bbac24cc7d76fed6d72661245ab80708799f81bc0e08",
+    "bnpb/internal/platform/logging/logging.go": "1793987b587a117bde70206cdfd5aacd20ef07f5d615130592e9aa571f0caf8b",
+    "bnpb/internal/platform/logging/logging_test.local.go": "b2c66b9a9f2dd99ec2fdc12bbb1b0fea6fd3436bbf1a76061474cbda3103c097",
+    "bnpb/internal/platform/service/bootstrap.go": "532256b1d06a1c92ceab6d96510e6878681bb889a9814593e7edfa60b575245b",
+    "bnpb/internal/aggregator/migrations/001_initial.sql": "37c98c5190258cd570969e114803305bd20a4735088dc7904a1f323ae40532da",
+    "bnpb/internal/aggregator/migrations/002_outbox_identity.sql": "94b57290665612aa681709153cecc50626d57501da1e170898b64996af388729",
+    "bnpb/internal/aggregator/migrations/003_snapshot_indexes.sql": "5d58e82a8c5ca61e7148add2548493c752ac7185cbf6b4299f02b8fd23103247",
+    "bnpb/internal/aggregator/migrations/004_outbox_sequence.sql": "613a4048aceaeb2f83757cce9a7acef6265abc2d213b6f561b11efaae04f5b3a",
+    "bnpb/internal/aggregator/reference/volcanoes.json": "82b86d3742571bd5d890570ff7774626f76b2edba18306f25bfc6f7c3986f944",
+    "bnpb/internal/aggregator/testdata/mapping.json": "77b3305bdc1250e19b2320ed20da3d9071d1c6bddd77acfeb195cd8703fac38d",
+    "bmkg/src/main.rs": "a1d8ec1cea32dd471d999185049b386c23399d310b7943d2749f05ebc046135f",
+    "bmkg/src/test_support.rs": "f5d0b6bfbc24e4b044898ee7bd80ed083a239099f1a4bab5f2bb91fd93cbf711",
+    "bmkg/src/config/mod.rs": "d8f926ecf842d8c8a05a0e78a98d93e6870ee0cd0519fb48fe3023f2f296e2c3",
+    "bmkg/src/logging/mod.rs": "045d8aa68db0428d800399d6b6e8463b99681efe64c9893a041a5247081b6eb7",
+    "bmkg/src/models/mod.rs": "769b4a350bd1338a4eb14cb38f0d6908ae1ed97dcbda9183cd4e45ecf81d4502",
+    "bmkg/src/plugins/access_log.rs": "603e0b710ed435a6cdadafa688e6f44274596e5aa16a73d7fe21ba0e413e37e0",
+    "bmkg/src/plugins/auth.rs": "fea446c96c4bf7d3daf89e9ca812e4068910d24e368ba54e8c85d6f18f95e585",
+    "bmkg/src/plugins/correlation.rs": "bcae8fa31c0a56aa7d0c0c0bb9e31ff7b3fa1a21823c6bf8199441f9d2fcaba5",
+    "bmkg/src/plugins/delay.rs": "0a106a3d79a2916f4a9d3436465f0008b6e5a609caeaa844c69e46f4612c59e3",
+    "bmkg/src/plugins/errors.rs": "9ae5dc101a7dde49c0243a8df942b5f4a7f33f48e393d19c38837bc3695fa8ce",
+    "bmkg/src/plugins/mod.rs": "31e52f550ab3820a10512251679d71a25c69d79eb4cad96ba70f41ec3c881628",
+    "bmkg/src/routing/mod.rs": "9058d851a4545deb6eb1c5ca735450cca2d8faf2d5df83e1e4763717e21a1235",
+    "bmkg/src/seed/mod.rs": "412b479b1255950f1c56e46ecba63eacb61a6a703cb8a3c52cddae4d0249aa19",
+    "bmkg/src/state/mod.rs": "2aa6ebe68b9621f2f5d802b5817e005defc3d3992e9bbecfa573ee49b729f0e3",
+    "pvmbg/src/main/kotlin/main.kt": "6b6ad86826518c75f9dcc4d71b28fac864e444a63c36f2a638371c2629f28ebc",
+    "pvmbg/src/main/resources/application.yaml": "285afbaaa57730b57652b1d2d004f369970c95684e7567cd3843d8442f604cc1",
+    "pvmbg/src/main/resources/logback.xml": "4db27df76710d8cfe286561094269bc639004ee63634be68c29b6d83bd56f7e4",
+    "pvmbg/src/main/kotlin/config/AppConfig.kt": "fbdf2f45540bc4aa01dd7c64983f9eb09a47a32580ac5ae831a6cbfde455ca76",
+    "pvmbg/src/main/kotlin/enums/AlertLevel.kt": "68b59212c2ad2434c5779547fb451e17c32d20fadab776cc706b4e172b12f045",
+    "pvmbg/src/main/kotlin/enums/Scope.kt": "3f765aa0271a1cf66688473144398bdfdb3345c90a1e0b1574cb2722fab37f1c",
+    "pvmbg/src/main/kotlin/logging/Events.kt": "4b504be8600b133212eb6cfdb5507119a3b5506d196b51c5a57fe2455e6f43e9",
+    "pvmbg/src/main/kotlin/model/AuthModels.kt": "df7d40c11e5a96e1d1cb32d0969e5588a4f8e26fbb84db5db06b49cc060d7b67",
+    "pvmbg/src/main/kotlin/model/DelayRequest.kt": "73672951b77a40f455c763d53058ec56b9cf76c2ee0130c8eebefe1fbe896b49",
+    "pvmbg/src/main/kotlin/model/OutageRequest.kt": "d737f72f2086b25f9b4942da251d834de1a17085b342e64eb26ebbc25d1fd2f0",
+    "pvmbg/src/main/kotlin/model/SchemaVersionRequest.kt": "dcdc14ee2c180fa9ed060f0676d08575985713e897d0976011983206838a16f7",
+    "pvmbg/src/main/kotlin/model/VolcanicReportV1.kt": "a109cc44767c31f16e1648851c379d3c01f8b3671d003b380020ab141067d917",
+    "pvmbg/src/main/kotlin/model/VolcanicReportV2.kt": "d6bc5b6ed82ffb5e9368d93274668a278b6fffea0e5779bed878b6d31e0d048d",
+    "pvmbg/src/main/kotlin/plugins/AccessLog.kt": "d7d79737389aff7135d1dd001bf978452e02d7b33c6db745a83c3ff0e7ea53f9",
+    "pvmbg/src/main/kotlin/plugins/Auth.kt": "586c1eb77791fab1a3522ea061eea6fd9e0e0a962847ab1086da80e40ba8a79e",
+    "pvmbg/src/main/kotlin/plugins/CorrelationId.kt": "6ec6036ffeb9ef464c55f0f3f52b3cb7f5e39df9200bc609b2e43aaa58162f5c",
+    "pvmbg/src/main/kotlin/plugins/OutageGuard.kt": "60c3251a385ac2c57b882e966a427d87e8c903853adaf8805e54ff97cf389112",
+    "pvmbg/src/main/kotlin/plugins/ResponseDelay.kt": "f8571235b70025bb895e52777e3b17040685fd69308ea1862e4ebf9a2152d157",
+    "pvmbg/src/main/kotlin/plugins/StatusPages.kt": "c7063798cc1b7064110e14e865f01feda9aeac41be1e63a3ceef2d44157b66d0",
+    "pvmbg/src/main/kotlin/ratelimit/SlidingWindowLimiter.kt": "dcd265161e3057bf84f9e3a3256b3e87048f4db455b9cc1bc12f9a5bcdc3537c",
+    "pvmbg/src/main/kotlin/repository/VolcanicReportRepository.kt": "3b9045d417f20ca60bd1632bfa7ab70b614fffc02b7675a33e29a761d0173124",
+    "pvmbg/src/main/kotlin/routing/Routing.kt": "d7882f07ee862674e32c98c43c206e63aea1ef0cf5cd2f5896faaa05945db597",
+    "pvmbg/src/main/kotlin/seed/LiveReportGenerator.kt": "8508ee85c0510d176749a196a5910cd008f65dabe32893de606aed308fd6b024",
+    "pvmbg/src/main/kotlin/seed/ReportGenerator.kt": "90864ba4f0002e01da86f666ca4d77bff2fe1ab16d794bbd5f865d78e6c41d0e",
+    "pvmbg/src/main/kotlin/seed/ReportSeeder.kt": "02b9e88997fa96f19080124cea4a7908b940516a4187640e0a370127c03ca1a6",
+    "pvmbg/src/main/kotlin/service/AuthService.kt": "cb93b68ac33527d8d5e262f9fa7a4c68c9f61f59600c5afa87d0779c9decc905",
+    "pvmbg/src/main/kotlin/service/LoginRateLimiter.kt": "ddf2893d0e8712e3fdaeb9bf9ac4bf6d11c40d5dce1d3c9eddf33a761fca9a10",
+    "pvmbg/src/main/kotlin/service/VolcanicReportService.kt": "31f17fe16c3b3083f16cfb493243ce050657ea0924cf1fd06af7d6b12a308447",
+    "pvmbg/src/main/kotlin/state/AppState.kt": "c6ea734e50581a7422be82317f7cf13a195c396ccbcbdf045557a3cd3136e0b6",
+    "pvmbg/src/main/kotlin/state/DelayRange.kt": "7840bfdf3f9e82503b78fe472049fb49155a904c73a745cfc183a3075059dbe1",
+    "bnpb/contracts/v1/schemas/hazard-event.schema.json": "bf36bf90d6eb3ade51f2a6d5091f04ae0c65f16307a5b7547c0a71db62bd3457"
+  },
+  "schema_fingerprint_before": "bd3930702f060521c0532fa909145c863c255940c825daea8420afcef8582f93",
+  "original_schema_version": 1,
+  "v1_source": {
+    "report_id": "rpt-005658",
+    "volcano_id": "semeru",
+    "alert_level": "Awas",
+    "eruption_count_24h": 8,
+    "ash_column_height_m": 619.0,
+    "reported_at": "2026-10-09T12:50:39Z"
+  },
+  "before": {
+    "pvmbg": {
+      "report_id": "rpt-005658",
+      "volcano_id": "semeru",
+      "alert_level": "Awas",
+      "eruption_count_24h": 8,
+      "ash_column_height_m": 619.0,
+      "reported_at": "2026-10-09T12:50:39Z"
+    },
+    "volcanic_hazard": {
+      "hazard_id": "haz-YG33VSU3VSOGF3YHM63U63FHU7",
+      "source": "PVMBG",
+      "source_ref_id": "rpt-005658",
+      "hazard_type": "VOLCANIC",
+      "severity": "AWAS",
+      "area_name": "Semeru",
+      "latitude": -8.108,
+      "longitude": 112.922,
+      "occurred_at": "2026-10-09T12:50:39Z",
+      "ingested_at": "2026-10-09T12:50:41.633266Z",
+      "attributes": {
+        "ash_column_height_m": 619.0,
+        "eruption_count_24h": 8,
+        "volcano_id": "semeru"
+      }
+    },
+    "bmkg": {
+      "event_id": "evt-002277",
+      "magnitude": 4.0,
+      "depth_km": 283.81623222655776,
+      "epicenter_lat": 3.5569646269196813,
+      "epicenter_lon": 109.37488314622718,
+      "region_name": "Papua Barat",
+      "occurred_at": "2026-10-09T12:50:41.683716864Z",
+      "potential_tsunami": false
+    },
+    "related_warnings": [],
+    "seismic_hazard": {
+      "hazard_id": "haz-652FV3KVWLVRUFT6PWSCTBYMWC",
+      "source": "BMKG",
+      "source_ref_id": "evt-002277",
+      "hazard_type": "SEISMIC",
+      "severity": "NORMAL",
+      "area_name": "Papua Barat",
+      "latitude": 3.5569646269196813,
+      "longitude": 109.37488314622718,
+      "occurred_at": "2026-10-09T12:50:41.683716Z",
+      "ingested_at": "2026-10-09T12:50:42.830195Z",
+      "attributes": {
+        "depth_km": 283.81623222655776,
+        "magnitude": 4.0,
+        "potential_tsunami": false
+      }
+    }
+  },
+  "restored_schema_version": 1,
+  "containers_after_cleanup": {
+    "aggregator": {
+      "id": "cb222e887be7d7b8363ed94a3fb7b560465469e0cb12dac9b3d6d0816870eb34",
+      "service": "aggregator",
+      "started_at": "2026-10-09T12:47:31.03784764Z",
+      "running": true,
+      "restart_count": 0,
+      "image": "sha256:075f910b94a953dbb26f78ddf022fd0a2072a4ac33117a92ccaec4a158c4c1f1"
+    },
+    "api": {
+      "id": "27f88fdef39f3cfa412d34bc8ad54bf161099ceadb19873b1a5eb3ff8380f6c1",
+      "service": "api",
+      "started_at": "2026-10-09T12:47:41.436091572Z",
+      "running": true,
+      "restart_count": 0,
+      "image": "sha256:b684cdd8e2a9bd6ac517f53afc2ff06fc9029db830e0b27d5f986919313cd7cc"
+    },
+    "auth": {
+      "id": "a2ea6502ea2982297d0991c331117b7f0119de4dd21491fd4ec4aeb77b51514f",
+      "service": "auth",
+      "started_at": "2026-10-09T12:46:52.151303341Z",
+      "running": true,
+      "restart_count": 0,
+      "image": "sha256:a85d4d9450fa58edd13603fdeb65c8e339a9ac00af39c3f7b6944b6439e1f93f"
+    },
+    "bmkg": {
+      "id": "a935f755a0e5445db9d502f266ee713186f7e26c384ecacbad8e9cc32db50b09",
+      "service": "bmkg",
+      "started_at": "2026-10-09T12:46:53.120604397Z",
+      "running": true,
+      "restart_count": 0,
+      "image": "sha256:a4880f4d39366080ddbb51e0baad8c08096cea8134d3985640c87555c435efd9"
+    },
+    "consumer-1": {
+      "id": "075c6f14fe96b8c4a8d7eab0615330e656285fee806c0732f94bbef2887c0be6",
+      "service": "consumer-1",
+      "started_at": "2026-10-09T12:48:18.216199039Z",
+      "running": true,
+      "restart_count": 0,
+      "image": "sha256:b8b976462ad7420e7d6aa14a27a80fafe776c5504ebaa788e00d6f8b2e292702"
+    },
+    "consumer-2": {
+      "id": "84e0716ca2422313a7555629d880eb1899fb386d4a115ed307ef3bd173658f29",
+      "service": "consumer-2",
+      "started_at": "2026-10-09T12:47:30.071237568Z",
+      "running": true,
+      "restart_count": 0,
+      "image": "sha256:f093085c8e1689e250bfc65e1eeb785a7c4b0d0e10aeb05161c48634649b1b1c"
+    },
+    "postgres": {
+      "id": "b7852c6df7a88df0a47e5a6d365e9078a8902b5fa1d90dfe3c9d83038a0f3e46",
+      "service": "postgres",
+      "started_at": "2026-10-09T12:46:54.740826188Z",
+      "running": true,
+      "restart_count": 0,
+      "image": "sha256:77f585114c32fbca283dc835b0596f4e52b51b4c6662d7810b2f4084f60a1873"
+    },
+    "pvmbg": {
+      "id": "6faba34068be16b8a9d3ad0a4bad22d652a4694deaec8386b51e00e195a26c52",
+      "service": "pvmbg",
+      "started_at": "2026-10-09T12:46:50.669349445Z",
+      "running": true,
+      "restart_count": 0,
+      "image": "sha256:b03983ba874726e6c8dff401a3339b8a4c5459a65de36396b92b8d2330622d09"
+    },
+    "rabbitmq": {
+      "id": "9706465bed21504e3748e98d27dcd7fdecd2c0fa47640d3a689699e4fb32aee3",
+      "service": "rabbitmq",
+      "started_at": "2026-10-09T12:46:55.80646729Z",
+      "running": true,
+      "restart_count": 0,
+      "image": "sha256:b3b8b7f95f5382a19f9ea33540e604f30aad081d37ad9aba72255135765373a1"
+    }
+  },
+  "source_fingerprints_after": {
+    "bnpb/internal/aggregator/app.go": "12f8027c880d83cb26c1ec5e10ebfc17f62b13d09d9c0a66c1c6f52c3ae37285",
+    "bnpb/internal/aggregator/comparison.go": "a7841554bf4d90a0267f270385cfe97bd48c464171d1b3f8b6f6817f123af7db",
+    "bnpb/internal/aggregator/config.go": "87c57b72e2934ff145ba9f3085e18b665923689317c1b9739dfba33078ebb3f0",
+    "bnpb/internal/aggregator/freshness.go": "38d5b7eef7e188dbe86f1f99dcdbf79f7360dcce8f2c97f4523dc62d16e4038a",
+    "bnpb/internal/aggregator/model.go": "18a8638eb8a78290026aa06dd424262ad0602c8699e4273f7e035170c923f398",
+    "bnpb/internal/aggregator/outbox.go": "d8537fd04c57e1f7264687e4d1c7c30c2aca798496b3e694259ceccb0624fe8e",
+    "bnpb/internal/aggregator/parsing.go": "fe4a293cfe1bf77d5cc7c47c9bde640940b49e0330f5c7fd553d51f1635376d6",
+    "bnpb/internal/aggregator/poll.go": "5368ca903ed00179ee728e7e23f22cc5c4edf0c86b350c2f503afb6b36229dc2",
+    "bnpb/internal/aggregator/publisher_amqp.go": "2ab46a3f09725646cb8226ac9f1506824a09b94d148df1f1f13e30c655c70ac6",
+    "bnpb/internal/aggregator/read.go": "96513178ed370ae14b33618c31519b8fcd62ff31e217acc0e866ea2cc82814a0",
+    "bnpb/internal/aggregator/read_query.go": "432647518aba0bf89e85dfdae2c05ae15a0990739391cfdcbb5371c466b3f5fd",
+    "bnpb/internal/aggregator/seismic.go": "dd0bb2a19cadc3ab5de44b3bcc15f2673ba470f635ab55638023365398f35736",
+    "bnpb/internal/aggregator/source.go": "82123d233647807097ac7f0fc50aad1d67a67b3505e05f9cd7d2aa7ac76cb925",
+    "bnpb/internal/aggregator/source_auth.go": "34af971f95be9814c8beb06ead6426acedca700a7168c17ea61a764b39c4b8d0",
+    "bnpb/internal/aggregator/store.go": "9a427c39fde91d3ae3908c018b10bb2d6749a9e786c8bc0eb2fb221b891f2eb8",
+    "bnpb/internal/aggregator/store_hazard.go": "fe8522beb0b3e19bf313eccae0f31b186a9acaee7297158b448fc812012cc5e6",
+    "bnpb/internal/aggregator/store_ingest.go": "3f5ab26c5ed110056829a1eaaf05418caba2e1447787e4dc6ca54c684b374d86",
+    "bnpb/internal/aggregator/store_outbox.go": "7d3e2f08cfcb31b729e8b9a5ca3ed44bb95a61391ea578a3802eae850fbe7368",
+    "bnpb/internal/aggregator/store_poll.go": "47c5438836f8a6a0ae81c86c88f9005f88fa3618e71bcf2eb12953febaadbeb8",
+    "bnpb/internal/aggregator/store_read.go": "e838580aea8da73f28c4263f5486f3d8e1a71ad9ef0b60959c40ef648345426b",
+    "bnpb/internal/aggregator/store_trace.go": "cd62f1a9d52da5a2ca61989776c997ef820ef962a0db2c2a99e2263de4a15996",
+    "bnpb/internal/aggregator/store_warnings.go": "b975c071d32a2eede955ea37aaded1b43d82bd6a7fdffb02d04c8faf58f102f9",
+    "bnpb/internal/aggregator/volcanic.go": "7383d1068fadcb3f1edc6e1cf111f371efd1243a3bed55a16bd94b6d1276e68b",
+    "bnpb/internal/aggregator/volcanoes.go": "e20d0f465f0a507110f49fe40a49c3fda1c29b98ae89fd3677a0b190aa568ae6",
+    "bnpb/internal/aggregator/warnings.go": "93832a8d57b7831eff7dba13d1fc34c9daac087a847d7bafe51b996913d7289b",
+    "bnpb/internal/api/.gitkeep": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+    "bnpb/internal/api/client_config.go": "96c108e70c7641496f4c0dfb4555aaae1831088cb267d8d9f13696111bca3a7d",
+    "bnpb/internal/api/client_service.go": "f57e5b7d5241c19e41b81e34177ffc915459bdde82364d3d359a82a9ca4baab1",
+    "bnpb/internal/api/handlers.go": "42994f4512e5e6e86798ec5f83c5442cc6511604aa4b4373d4861603372fa519",
+    "bnpb/internal/api/projection.go": "7acaf6a4ca9c1818e79a6ea2b139eeb9614beb0169562ad5b6348e6992e19652",
+    "bnpb/internal/api/query.go": "ca3cd1d7d7697b4c0da946a656239a7d95eb8fa2e7331b9e011ff231adb54a1d",
+    "bnpb/internal/api/readiness.go": "17d35ff03c79960551d210fd72df725b3af30d6471d3552e3927437cc3caa696",
+    "bnpb/internal/auth/config.go": "22b8d1dbd8d47e8427237c53fa6797f960f1b640ece582e59b600c275982c858",
+    "bnpb/internal/auth/handler.go": "b1ea42e109ae75ff22b9f942dbae9bf9174896d446bd83c4ffb81b956596a3e3",
+    "bnpb/internal/auth/tokens.go": "4d483ebadb783689fb1061060a6d3b718a6e2ccefc007ec4c0d5446fff394f6e",
+    "bnpb/internal/consumer-1/.gitkeep": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+    "bnpb/internal/consumer-1/config.go": "c0ab4f4bff0417513abf92af04957615d8d88e36941e7e6be06d4387ba740d7d",
+    "bnpb/internal/consumer-1/consume.go": "62bdc6348b2e7ed608d0f27140b12d3ebe13fcb18c07ffcc75e4d196d1b858ec",
+    "bnpb/internal/consumer-1/consumer.go": "aad89d6f20886c16df360841f0e973b76ef5eb9e94ce0201941eba46aa20868e",
+    "bnpb/internal/consumer-1/failed.go": "5337c87c2ce4337a73b174a47e49b02c5e7815191a54ca0cb20695a4522e9dc9",
+    "bnpb/internal/consumer-1/session.go": "9dde2fa9d31a13eff56f03f3cb823ec3fca8550d9eae2b60ccb61a79695f458a",
+    "bnpb/internal/consumer-1/store.go": "5e26385fce890d9edf5b79f9db77af9aec7d47f4ecb8a65ca95c7d201ae8b8bf",
+    "bnpb/internal/consumer-2/.gitkeep": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+    "bnpb/internal/consumer-2/config.go": "0c21fc2e88f4f54be6330f770292db632b7a057de3ac815f1b43fc976b66a713",
+    "bnpb/internal/consumer-2/consume.go": "ce6acbecf5122fc1f555ed203d5654ca6b81f1e2e7c010051ecb8405be96a770",
+    "bnpb/internal/consumer-2/consumer.go": "7aff25a4e316d1c045399ed66dc253e8f4afba6b4892bdc92940c53279c38ae8",
+    "bnpb/internal/consumer-2/failed.go": "3af5073e990a8ef979512a05da0d06bc507d0a84233068da939f4ccb948fdc61",
+    "bnpb/internal/consumer-2/session.go": "20395363e0d46c51d633bad4f273eb360e9ffb6713879a95ca892dbab1668212",
+    "bnpb/internal/consumer-2/store.go": "daf0f1aaebd19a82ecd05270dd8da830042c8d9ca676de82423df2af9968b022",
+    "bnpb/internal/consumer-3/.gitkeep": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+    "bnpb/internal/consumer-3/config.go": "35d1dbfae424bef09903bf7188ee93111b77f7442f2d0151a994d985c72174d3",
+    "bnpb/internal/consumer-3/consume.go": "676da58492d1098a743a8fe78137f8e9246309e55f9cab716b54238704bbeae4",
+    "bnpb/internal/consumer-3/consumer.go": "6b8d324db3ba9ea94c1e6c85f0ba22f7379f7c3127715d3887e65ec41ef97014",
+    "bnpb/internal/consumer-3/failed.go": "ee59c2352fc529161b3c941efb68f7281c2567bbfc4d7ce40e4fc2698cc19ba2",
+    "bnpb/internal/consumer-3/session.go": "880491009334ffd54e832929c196c393408ef9c5a5e415dd0f875de3301c9609",
+    "bnpb/internal/consumer-3/store.go": "98d92a1e458a0814516eb7bdb9fee8e0ef16274f894d0912b6450a0c731d96cb",
+    "bnpb/internal/platform/amqplog/amqplog.go": "b9e22722d369228a47c938913118b08e0e72c43dac24db8bf1bd8c462e6c8e46",
+    "bnpb/internal/platform/amqppublish/publish.go": "6a8bd1c3d1a7ab03c96e46e06b448fbe4098e1b41932c32823d24cce03f62c29",
+    "bnpb/internal/platform/config/config.go": "9833abf8fdecc9b4be056c0b784c09d5afed80effd3b22908abd9e8fd9e48941",
+    "bnpb/internal/platform/config/config_test.local.go": "112f7ccd38ce98100844b4f82da66554a7470b6d4e43765778550a478fdaee85",
+    "bnpb/internal/platform/correlation/correlation.go": "b5bc426727413aa49a2fc0ab06f3a3a9754777a48f78294038a7cd69c9ae2ab4",
+    "bnpb/internal/platform/httpclient/client.go": "d235d99362eb00a04a03623bf72cb047dee8499a1e0d47b052206c9b158426b0",
+    "bnpb/internal/platform/httpclient/client_test.local.go": "f3179e8fa9f2b351f59000aa34046a205e81e5272c9a36025accb074f5b8afd8",
+    "bnpb/internal/platform/httpserver/healthcheck.go": "587a476d8505fa32a7d0641a7b5c511be91e0d248f10a4187971c0957ab538e8",
+    "bnpb/internal/platform/httpserver/lifecycle.go": "8e5fd13c5b94dc3004e1de135cecae34ee0d787b396f07ede3ee5b36a2788e6a",
+    "bnpb/internal/platform/httpserver/lifecycle_test.local.go": "2d19c0ba7ce8984e77fdcd6cfc3d745e22f34fb6f1138d9e76d8d617c611f501",
+    "bnpb/internal/platform/httpserver/middleware.go": "8bd8a7a764680157bffc0509b6474e0d4ae2ed46ece5fe1cb993ab0b4fa23af8",
+    "bnpb/internal/platform/httpserver/middleware_test.local.go": "af82ce6ecf5178958de44e8ab109ac0060155b04f67d7195e6018f546eb773f1",
+    "bnpb/internal/platform/httpserver/server.go": "30809a8758ca42b0c645bbac24cc7d76fed6d72661245ab80708799f81bc0e08",
+    "bnpb/internal/platform/logging/logging.go": "1793987b587a117bde70206cdfd5aacd20ef07f5d615130592e9aa571f0caf8b",
+    "bnpb/internal/platform/logging/logging_test.local.go": "b2c66b9a9f2dd99ec2fdc12bbb1b0fea6fd3436bbf1a76061474cbda3103c097",
+    "bnpb/internal/platform/service/bootstrap.go": "532256b1d06a1c92ceab6d96510e6878681bb889a9814593e7edfa60b575245b",
+    "bnpb/internal/aggregator/migrations/001_initial.sql": "37c98c5190258cd570969e114803305bd20a4735088dc7904a1f323ae40532da",
+    "bnpb/internal/aggregator/migrations/002_outbox_identity.sql": "94b57290665612aa681709153cecc50626d57501da1e170898b64996af388729",
+    "bnpb/internal/aggregator/migrations/003_snapshot_indexes.sql": "5d58e82a8c5ca61e7148add2548493c752ac7185cbf6b4299f02b8fd23103247",
+    "bnpb/internal/aggregator/migrations/004_outbox_sequence.sql": "613a4048aceaeb2f83757cce9a7acef6265abc2d213b6f561b11efaae04f5b3a",
+    "bnpb/internal/aggregator/reference/volcanoes.json": "82b86d3742571bd5d890570ff7774626f76b2edba18306f25bfc6f7c3986f944",
+    "bnpb/internal/aggregator/testdata/mapping.json": "77b3305bdc1250e19b2320ed20da3d9071d1c6bddd77acfeb195cd8703fac38d",
+    "bmkg/src/main.rs": "a1d8ec1cea32dd471d999185049b386c23399d310b7943d2749f05ebc046135f",
+    "bmkg/src/test_support.rs": "f5d0b6bfbc24e4b044898ee7bd80ed083a239099f1a4bab5f2bb91fd93cbf711",
+    "bmkg/src/config/mod.rs": "d8f926ecf842d8c8a05a0e78a98d93e6870ee0cd0519fb48fe3023f2f296e2c3",
+    "bmkg/src/logging/mod.rs": "045d8aa68db0428d800399d6b6e8463b99681efe64c9893a041a5247081b6eb7",
+    "bmkg/src/models/mod.rs": "769b4a350bd1338a4eb14cb38f0d6908ae1ed97dcbda9183cd4e45ecf81d4502",
+    "bmkg/src/plugins/access_log.rs": "603e0b710ed435a6cdadafa688e6f44274596e5aa16a73d7fe21ba0e413e37e0",
+    "bmkg/src/plugins/auth.rs": "fea446c96c4bf7d3daf89e9ca812e4068910d24e368ba54e8c85d6f18f95e585",
+    "bmkg/src/plugins/correlation.rs": "bcae8fa31c0a56aa7d0c0c0bb9e31ff7b3fa1a21823c6bf8199441f9d2fcaba5",
+    "bmkg/src/plugins/delay.rs": "0a106a3d79a2916f4a9d3436465f0008b6e5a609caeaa844c69e46f4612c59e3",
+    "bmkg/src/plugins/errors.rs": "9ae5dc101a7dde49c0243a8df942b5f4a7f33f48e393d19c38837bc3695fa8ce",
+    "bmkg/src/plugins/mod.rs": "31e52f550ab3820a10512251679d71a25c69d79eb4cad96ba70f41ec3c881628",
+    "bmkg/src/routing/mod.rs": "9058d851a4545deb6eb1c5ca735450cca2d8faf2d5df83e1e4763717e21a1235",
+    "bmkg/src/seed/mod.rs": "412b479b1255950f1c56e46ecba63eacb61a6a703cb8a3c52cddae4d0249aa19",
+    "bmkg/src/state/mod.rs": "2aa6ebe68b9621f2f5d802b5817e005defc3d3992e9bbecfa573ee49b729f0e3",
+    "pvmbg/src/main/kotlin/main.kt": "6b6ad86826518c75f9dcc4d71b28fac864e444a63c36f2a638371c2629f28ebc",
+    "pvmbg/src/main/resources/application.yaml": "285afbaaa57730b57652b1d2d004f369970c95684e7567cd3843d8442f604cc1",
+    "pvmbg/src/main/resources/logback.xml": "4db27df76710d8cfe286561094269bc639004ee63634be68c29b6d83bd56f7e4",
+    "pvmbg/src/main/kotlin/config/AppConfig.kt": "fbdf2f45540bc4aa01dd7c64983f9eb09a47a32580ac5ae831a6cbfde455ca76",
+    "pvmbg/src/main/kotlin/enums/AlertLevel.kt": "68b59212c2ad2434c5779547fb451e17c32d20fadab776cc706b4e172b12f045",
+    "pvmbg/src/main/kotlin/enums/Scope.kt": "3f765aa0271a1cf66688473144398bdfdb3345c90a1e0b1574cb2722fab37f1c",
+    "pvmbg/src/main/kotlin/logging/Events.kt": "4b504be8600b133212eb6cfdb5507119a3b5506d196b51c5a57fe2455e6f43e9",
+    "pvmbg/src/main/kotlin/model/AuthModels.kt": "df7d40c11e5a96e1d1cb32d0969e5588a4f8e26fbb84db5db06b49cc060d7b67",
+    "pvmbg/src/main/kotlin/model/DelayRequest.kt": "73672951b77a40f455c763d53058ec56b9cf76c2ee0130c8eebefe1fbe896b49",
+    "pvmbg/src/main/kotlin/model/OutageRequest.kt": "d737f72f2086b25f9b4942da251d834de1a17085b342e64eb26ebbc25d1fd2f0",
+    "pvmbg/src/main/kotlin/model/SchemaVersionRequest.kt": "dcdc14ee2c180fa9ed060f0676d08575985713e897d0976011983206838a16f7",
+    "pvmbg/src/main/kotlin/model/VolcanicReportV1.kt": "a109cc44767c31f16e1648851c379d3c01f8b3671d003b380020ab141067d917",
+    "pvmbg/src/main/kotlin/model/VolcanicReportV2.kt": "d6bc5b6ed82ffb5e9368d93274668a278b6fffea0e5779bed878b6d31e0d048d",
+    "pvmbg/src/main/kotlin/plugins/AccessLog.kt": "d7d79737389aff7135d1dd001bf978452e02d7b33c6db745a83c3ff0e7ea53f9",
+    "pvmbg/src/main/kotlin/plugins/Auth.kt": "586c1eb77791fab1a3522ea061eea6fd9e0e0a962847ab1086da80e40ba8a79e",
+    "pvmbg/src/main/kotlin/plugins/CorrelationId.kt": "6ec6036ffeb9ef464c55f0f3f52b3cb7f5e39df9200bc609b2e43aaa58162f5c",
+    "pvmbg/src/main/kotlin/plugins/OutageGuard.kt": "60c3251a385ac2c57b882e966a427d87e8c903853adaf8805e54ff97cf389112",
+    "pvmbg/src/main/kotlin/plugins/ResponseDelay.kt": "f8571235b70025bb895e52777e3b17040685fd69308ea1862e4ebf9a2152d157",
+    "pvmbg/src/main/kotlin/plugins/StatusPages.kt": "c7063798cc1b7064110e14e865f01feda9aeac41be1e63a3ceef2d44157b66d0",
+    "pvmbg/src/main/kotlin/ratelimit/SlidingWindowLimiter.kt": "dcd265161e3057bf84f9e3a3256b3e87048f4db455b9cc1bc12f9a5bcdc3537c",
+    "pvmbg/src/main/kotlin/repository/VolcanicReportRepository.kt": "3b9045d417f20ca60bd1632bfa7ab70b614fffc02b7675a33e29a761d0173124",
+    "pvmbg/src/main/kotlin/routing/Routing.kt": "d7882f07ee862674e32c98c43c206e63aea1ef0cf5cd2f5896faaa05945db597",
+    "pvmbg/src/main/kotlin/seed/LiveReportGenerator.kt": "8508ee85c0510d176749a196a5910cd008f65dabe32893de606aed308fd6b024",
+    "pvmbg/src/main/kotlin/seed/ReportGenerator.kt": "90864ba4f0002e01da86f666ca4d77bff2fe1ab16d794bbd5f865d78e6c41d0e",
+    "pvmbg/src/main/kotlin/seed/ReportSeeder.kt": "02b9e88997fa96f19080124cea4a7908b940516a4187640e0a370127c03ca1a6",
+    "pvmbg/src/main/kotlin/service/AuthService.kt": "cb93b68ac33527d8d5e262f9fa7a4c68c9f61f59600c5afa87d0779c9decc905",
+    "pvmbg/src/main/kotlin/service/LoginRateLimiter.kt": "ddf2893d0e8712e3fdaeb9bf9ac4bf6d11c40d5dce1d3c9eddf33a761fca9a10",
+    "pvmbg/src/main/kotlin/service/VolcanicReportService.kt": "31f17fe16c3b3083f16cfb493243ce050657ea0924cf1fd06af7d6b12a308447",
+    "pvmbg/src/main/kotlin/state/AppState.kt": "c6ea734e50581a7422be82317f7cf13a195c396ccbcbdf045557a3cd3136e0b6",
+    "pvmbg/src/main/kotlin/state/DelayRange.kt": "7840bfdf3f9e82503b78fe472049fb49155a904c73a745cfc183a3075059dbe1",
+    "bnpb/contracts/v1/schemas/hazard-event.schema.json": "bf36bf90d6eb3ade51f2a6d5091f04ae0c65f16307a5b7547c0a71db62bd3457"
+  },
+  "schema_fingerprint_after": "bd3930702f060521c0532fa909145c863c255940c825daea8420afcef8582f93",
+  "schema_after": {
+    "migrations": [
+      {
+        "version": 1,
+        "applied_at": "2026-10-09T12:47:32.282416+00:00"
+      },
+      {
+        "version": 2,
+        "applied_at": "2026-10-09T12:47:32.282416+00:00"
+      },
+      {
+        "version": 3,
+        "applied_at": "2026-10-09T12:47:32.282416+00:00"
+      },
+      {
+        "version": 4,
+        "applied_at": "2026-10-09T12:47:32.282416+00:00"
+      }
+    ],
+    "columns": [
+      {
+        "table_name": "hazard_events",
+        "ordinal_position": 1,
+        "column_name": "hazard_id",
+        "udt_name": "text",
+        "is_nullable": "NO",
+        "column_default": null
+      },
+      {
+        "table_name": "hazard_events",
+        "ordinal_position": 2,
+        "column_name": "source",
+        "udt_name": "text",
+        "is_nullable": "NO",
+        "column_default": null
+      },
+      {
+        "table_name": "hazard_events",
+        "ordinal_position": 3,
+        "column_name": "source_ref_id",
+        "udt_name": "text",
+        "is_nullable": "NO",
+        "column_default": null
+      },
+      {
+        "table_name": "hazard_events",
+        "ordinal_position": 4,
+        "column_name": "hazard_type",
+        "udt_name": "text",
+        "is_nullable": "NO",
+        "column_default": null
+      },
+      {
+        "table_name": "hazard_events",
+        "ordinal_position": 5,
+        "column_name": "severity",
+        "udt_name": "text",
+        "is_nullable": "NO",
+        "column_default": null
+      },
+      {
+        "table_name": "hazard_events",
+        "ordinal_position": 6,
+        "column_name": "area_name",
+        "udt_name": "text",
+        "is_nullable": "NO",
+        "column_default": null
+      },
+      {
+        "table_name": "hazard_events",
+        "ordinal_position": 7,
+        "column_name": "latitude",
+        "udt_name": "float8",
+        "is_nullable": "NO",
+        "column_default": null
+      },
+      {
+        "table_name": "hazard_events",
+        "ordinal_position": 8,
+        "column_name": "longitude",
+        "udt_name": "float8",
+        "is_nullable": "NO",
+        "column_default": null
+      },
+      {
+        "table_name": "hazard_events",
+        "ordinal_position": 9,
+        "column_name": "occurred_at",
+        "udt_name": "timestamptz",
+        "is_nullable": "NO",
+        "column_default": null
+      },
+      {
+        "table_name": "hazard_events",
+        "ordinal_position": 10,
+        "column_name": "ingested_at",
+        "udt_name": "timestamptz",
+        "is_nullable": "NO",
+        "column_default": null
+      },
+      {
+        "table_name": "hazard_events",
+        "ordinal_position": 11,
+        "column_name": "attributes",
+        "udt_name": "jsonb",
+        "is_nullable": "NO",
+        "column_default": null
+      },
+      {
+        "table_name": "hazard_events",
+        "ordinal_position": 12,
+        "column_name": "revision",
+        "udt_name": "int8",
+        "is_nullable": "NO",
+        "column_default": null
+      },
+      {
+        "table_name": "hazard_events",
+        "ordinal_position": 13,
+        "column_name": "updated_at",
+        "udt_name": "timestamptz",
+        "is_nullable": "NO",
+        "column_default": null
+      },
+      {
+        "table_name": "ingest_rejects",
+        "ordinal_position": 1,
+        "column_name": "reject_id",
+        "udt_name": "int8",
+        "is_nullable": "NO",
+        "column_default": null
+      },
+      {
+        "table_name": "ingest_rejects",
+        "ordinal_position": 2,
+        "column_name": "endpoint",
+        "udt_name": "text",
+        "is_nullable": "NO",
+        "column_default": null
+      },
+      {
+        "table_name": "ingest_rejects",
+        "ordinal_position": 3,
+        "column_name": "source_ref_id",
+        "udt_name": "text",
+        "is_nullable": "YES",
+        "column_default": null
+      },
+      {
+        "table_name": "ingest_rejects",
+        "ordinal_position": 4,
+        "column_name": "source_timestamp",
+        "udt_name": "timestamptz",
+        "is_nullable": "YES",
+        "column_default": null
+      },
+      {
+        "table_name": "ingest_rejects",
+        "ordinal_position": 5,
+        "column_name": "category",
+        "udt_name": "text",
+        "is_nullable": "NO",
+        "column_default": null
+      },
+      {
+        "table_name": "ingest_rejects",
+        "ordinal_position": 6,
+        "column_name": "field",
+        "udt_name": "text",
+        "is_nullable": "NO",
+        "column_default": null
+      },
+      {
+        "table_name": "ingest_rejects",
+        "ordinal_position": 7,
+        "column_name": "payload_sha256",
+        "udt_name": "text",
+        "is_nullable": "NO",
+        "column_default": null
+      },
+      {
+        "table_name": "ingest_rejects",
+        "ordinal_position": 8,
+        "column_name": "payload_bytes",
+        "udt_name": "int8",
+        "is_nullable": "NO",
+        "column_default": null
+      },
+      {
+        "table_name": "ingest_rejects",
+        "ordinal_position": 9,
+        "column_name": "first_seen_at",
+        "udt_name": "timestamptz",
+        "is_nullable": "NO",
+        "column_default": null
+      },
+      {
+        "table_name": "ingest_rejects",
+        "ordinal_position": 10,
+        "column_name": "last_seen_at",
+        "udt_name": "timestamptz",
+        "is_nullable": "NO",
+        "column_default": null
+      },
+      {
+        "table_name": "ingest_rejects",
+        "ordinal_position": 11,
+        "column_name": "occurrences",
+        "udt_name": "int8",
+        "is_nullable": "NO",
+        "column_default": "1"
+      },
+      {
+        "table_name": "ingest_rejects",
+        "ordinal_position": 12,
+        "column_name": "repair_status",
+        "udt_name": "text",
+        "is_nullable": "NO",
+        "column_default": "'open'::text"
+      },
+      {
+        "table_name": "outbox",
+        "ordinal_position": 1,
+        "column_name": "sequence",
+        "udt_name": "int8",
+        "is_nullable": "NO",
+        "column_default": null
+      },
+      {
+        "table_name": "outbox",
+        "ordinal_position": 2,
+        "column_name": "message_id",
+        "udt_name": "text",
+        "is_nullable": "NO",
+        "column_default": null
+      },
+      {
+        "table_name": "outbox",
+        "ordinal_position": 3,
+        "column_name": "hazard_id",
+        "udt_name": "text",
+        "is_nullable": "NO",
+        "column_default": null
+      },
+      {
+        "table_name": "outbox",
+        "ordinal_position": 4,
+        "column_name": "revision",
+        "udt_name": "int8",
+        "is_nullable": "NO",
+        "column_default": null
+      },
+      {
+        "table_name": "outbox",
+        "ordinal_position": 5,
+        "column_name": "correlation_id",
+        "udt_name": "text",
+        "is_nullable": "NO",
+        "column_default": null
+      },
+      {
+        "table_name": "outbox",
+        "ordinal_position": 6,
+        "column_name": "payload",
+        "udt_name": "jsonb",
+        "is_nullable": "NO",
+        "column_default": null
+      },
+      {
+        "table_name": "outbox",
+        "ordinal_position": 7,
+        "column_name": "created_at",
+        "udt_name": "timestamptz",
+        "is_nullable": "NO",
+        "column_default": null
+      },
+      {
+        "table_name": "outbox",
+        "ordinal_position": 8,
+        "column_name": "attempts",
+        "udt_name": "int4",
+        "is_nullable": "NO",
+        "column_default": "0"
+      },
+      {
+        "table_name": "outbox",
+        "ordinal_position": 9,
+        "column_name": "next_attempt_at",
+        "udt_name": "timestamptz",
+        "is_nullable": "NO",
+        "column_default": null
+      },
+      {
+        "table_name": "outbox",
+        "ordinal_position": 10,
+        "column_name": "sent_at",
+        "udt_name": "timestamptz",
+        "is_nullable": "YES",
+        "column_default": null
+      },
+      {
+        "table_name": "poll_state",
+        "ordinal_position": 1,
+        "column_name": "endpoint",
+        "udt_name": "text",
+        "is_nullable": "NO",
+        "column_default": null
+      },
+      {
+        "table_name": "poll_state",
+        "ordinal_position": 2,
+        "column_name": "source",
+        "udt_name": "text",
+        "is_nullable": "NO",
+        "column_default": null
+      },
+      {
+        "table_name": "poll_state",
+        "ordinal_position": 3,
+        "column_name": "checkpoint",
+        "udt_name": "timestamptz",
+        "is_nullable": "YES",
+        "column_default": null
+      },
+      {
+        "table_name": "poll_state",
+        "ordinal_position": 4,
+        "column_name": "last_attempt_at",
+        "udt_name": "timestamptz",
+        "is_nullable": "YES",
+        "column_default": null
+      },
+      {
+        "table_name": "poll_state",
+        "ordinal_position": 5,
+        "column_name": "last_successful_poll",
+        "udt_name": "timestamptz",
+        "is_nullable": "YES",
+        "column_default": null
+      },
+      {
+        "table_name": "poll_state",
+        "ordinal_position": 6,
+        "column_name": "stale_since",
+        "udt_name": "timestamptz",
+        "is_nullable": "YES",
+        "column_default": null
+      },
+      {
+        "table_name": "poll_state",
+        "ordinal_position": 7,
+        "column_name": "error_category",
+        "udt_name": "text",
+        "is_nullable": "YES",
+        "column_default": null
+      },
+      {
+        "table_name": "schema_migrations",
+        "ordinal_position": 1,
+        "column_name": "version",
+        "udt_name": "int4",
+        "is_nullable": "NO",
+        "column_default": null
+      },
+      {
+        "table_name": "schema_migrations",
+        "ordinal_position": 2,
+        "column_name": "applied_at",
+        "udt_name": "timestamptz",
+        "is_nullable": "NO",
+        "column_default": "now()"
+      },
+      {
+        "table_name": "source_seismic",
+        "ordinal_position": 1,
+        "column_name": "event_id",
+        "udt_name": "text",
+        "is_nullable": "NO",
+        "column_default": null
+      },
+      {
+        "table_name": "source_seismic",
+        "ordinal_position": 2,
+        "column_name": "occurred_at",
+        "udt_name": "timestamptz",
+        "is_nullable": "NO",
+        "column_default": null
+      },
+      {
+        "table_name": "source_seismic",
+        "ordinal_position": 3,
+        "column_name": "payload",
+        "udt_name": "jsonb",
+        "is_nullable": "NO",
+        "column_default": null
+      },
+      {
+        "table_name": "source_warnings",
+        "ordinal_position": 1,
+        "column_name": "warning_id",
+        "udt_name": "text",
+        "is_nullable": "NO",
+        "column_default": null
+      },
+      {
+        "table_name": "source_warnings",
+        "ordinal_position": 2,
+        "column_name": "related_event_id",
+        "udt_name": "text",
+        "is_nullable": "NO",
+        "column_default": null
+      },
+      {
+        "table_name": "source_warnings",
+        "ordinal_position": 3,
+        "column_name": "issued_at",
+        "udt_name": "timestamptz",
+        "is_nullable": "NO",
+        "column_default": null
+      },
+      {
+        "table_name": "source_warnings",
+        "ordinal_position": 4,
+        "column_name": "payload",
+        "udt_name": "jsonb",
+        "is_nullable": "NO",
+        "column_default": null
+      },
+      {
+        "table_name": "volcano_reference",
+        "ordinal_position": 1,
+        "column_name": "volcano_id",
+        "udt_name": "text",
+        "is_nullable": "NO",
+        "column_default": null
+      },
+      {
+        "table_name": "volcano_reference",
+        "ordinal_position": 2,
+        "column_name": "name",
+        "udt_name": "text",
+        "is_nullable": "NO",
+        "column_default": null
+      },
+      {
+        "table_name": "volcano_reference",
+        "ordinal_position": 3,
+        "column_name": "latitude",
+        "udt_name": "float8",
+        "is_nullable": "NO",
+        "column_default": null
+      },
+      {
+        "table_name": "volcano_reference",
+        "ordinal_position": 4,
+        "column_name": "longitude",
+        "udt_name": "float8",
+        "is_nullable": "NO",
+        "column_default": null
+      },
+      {
+        "table_name": "volcano_reference",
+        "ordinal_position": 5,
+        "column_name": "provenance",
+        "udt_name": "jsonb",
+        "is_nullable": "NO",
+        "column_default": null
+      }
+    ],
+    "constraints": [
+      {
+        "relation": "hazard_events",
+        "conname": "hazard_events_area_name_check",
+        "definition": "CHECK ((area_name <> ''::text))"
+      },
+      {
+        "relation": "hazard_events",
+        "conname": "hazard_events_area_name_not_null",
+        "definition": "NOT NULL area_name"
+      },
+      {
+        "relation": "hazard_events",
+        "conname": "hazard_events_attributes_check",
+        "definition": "CHECK ((jsonb_typeof(attributes) = 'object'::text))"
+      },
+      {
+        "relation": "hazard_events",
+        "conname": "hazard_events_attributes_not_null",
+        "definition": "NOT NULL attributes"
+      },
+      {
+        "relation": "hazard_events",
+        "conname": "hazard_events_check",
+        "definition": "CHECK ((((source = 'BMKG'::text) AND (hazard_type = 'SEISMIC'::text)) OR ((source = 'PVMBG'::text) AND (hazard_type = 'VOLCANIC'::text))))"
+      },
+      {
+        "relation": "hazard_events",
+        "conname": "hazard_events_hazard_id_not_null",
+        "definition": "NOT NULL hazard_id"
+      },
+      {
+        "relation": "hazard_events",
+        "conname": "hazard_events_hazard_type_not_null",
+        "definition": "NOT NULL hazard_type"
+      },
+      {
+        "relation": "hazard_events",
+        "conname": "hazard_events_ingested_at_not_null",
+        "definition": "NOT NULL ingested_at"
+      },
+      {
+        "relation": "hazard_events",
+        "conname": "hazard_events_latitude_check",
+        "definition": "CHECK (((latitude >= ('-90'::integer)::double precision) AND (latitude <= (90)::double precision)))"
+      },
+      {
+        "relation": "hazard_events",
+        "conname": "hazard_events_latitude_not_null",
+        "definition": "NOT NULL latitude"
+      },
+      {
+        "relation": "hazard_events",
+        "conname": "hazard_events_longitude_check",
+        "definition": "CHECK (((longitude >= ('-180'::integer)::double precision) AND (longitude <= (180)::double precision)))"
+      },
+      {
+        "relation": "hazard_events",
+        "conname": "hazard_events_longitude_not_null",
+        "definition": "NOT NULL longitude"
+      },
+      {
+        "relation": "hazard_events",
+        "conname": "hazard_events_occurred_at_not_null",
+        "definition": "NOT NULL occurred_at"
+      },
+      {
+        "relation": "hazard_events",
+        "conname": "hazard_events_pkey",
+        "definition": "PRIMARY KEY (hazard_id)"
+      },
+      {
+        "relation": "hazard_events",
+        "conname": "hazard_events_revision_check",
+        "definition": "CHECK ((revision > 0))"
+      },
+      {
+        "relation": "hazard_events",
+        "conname": "hazard_events_revision_not_null",
+        "definition": "NOT NULL revision"
+      },
+      {
+        "relation": "hazard_events",
+        "conname": "hazard_events_severity_check",
+        "definition": "CHECK ((severity = ANY (ARRAY['NORMAL'::text, 'WASPADA'::text, 'SIAGA'::text, 'AWAS'::text])))"
+      },
+      {
+        "relation": "hazard_events",
+        "conname": "hazard_events_severity_not_null",
+        "definition": "NOT NULL severity"
+      },
+      {
+        "relation": "hazard_events",
+        "conname": "hazard_events_source_check",
+        "definition": "CHECK ((source = ANY (ARRAY['BMKG'::text, 'PVMBG'::text])))"
+      },
+      {
+        "relation": "hazard_events",
+        "conname": "hazard_events_source_not_null",
+        "definition": "NOT NULL source"
+      },
+      {
+        "relation": "hazard_events",
+        "conname": "hazard_events_source_ref_id_check",
+        "definition": "CHECK (((octet_length(source_ref_id) >= 1) AND (octet_length(source_ref_id) <= 2048)))"
+      },
+      {
+        "relation": "hazard_events",
+        "conname": "hazard_events_source_ref_id_not_null",
+        "definition": "NOT NULL source_ref_id"
+      },
+      {
+        "relation": "hazard_events",
+        "conname": "hazard_events_source_source_ref_id_key",
+        "definition": "UNIQUE (source, source_ref_id)"
+      },
+      {
+        "relation": "hazard_events",
+        "conname": "hazard_events_updated_at_not_null",
+        "definition": "NOT NULL updated_at"
+      },
+      {
+        "relation": "ingest_rejects",
+        "conname": "ingest_rejects_category_not_null",
+        "definition": "NOT NULL category"
+      },
+      {
+        "relation": "ingest_rejects",
+        "conname": "ingest_rejects_endpoint_fkey",
+        "definition": "FOREIGN KEY (endpoint) REFERENCES poll_state(endpoint)"
+      },
+      {
+        "relation": "ingest_rejects",
+        "conname": "ingest_rejects_endpoint_not_null",
+        "definition": "NOT NULL endpoint"
+      },
+      {
+        "relation": "ingest_rejects",
+        "conname": "ingest_rejects_endpoint_payload_sha256_category_field_key",
+        "definition": "UNIQUE (endpoint, payload_sha256, category, field)"
+      },
+      {
+        "relation": "ingest_rejects",
+        "conname": "ingest_rejects_field_not_null",
+        "definition": "NOT NULL field"
+      },
+      {
+        "relation": "ingest_rejects",
+        "conname": "ingest_rejects_first_seen_at_not_null",
+        "definition": "NOT NULL first_seen_at"
+      },
+      {
+        "relation": "ingest_rejects",
+        "conname": "ingest_rejects_last_seen_at_not_null",
+        "definition": "NOT NULL last_seen_at"
+      },
+      {
+        "relation": "ingest_rejects",
+        "conname": "ingest_rejects_occurrences_check",
+        "definition": "CHECK ((occurrences > 0))"
+      },
+      {
+        "relation": "ingest_rejects",
+        "conname": "ingest_rejects_occurrences_not_null",
+        "definition": "NOT NULL occurrences"
+      },
+      {
+        "relation": "ingest_rejects",
+        "conname": "ingest_rejects_payload_bytes_check",
+        "definition": "CHECK ((payload_bytes >= 0))"
+      },
+      {
+        "relation": "ingest_rejects",
+        "conname": "ingest_rejects_payload_bytes_not_null",
+        "definition": "NOT NULL payload_bytes"
+      },
+      {
+        "relation": "ingest_rejects",
+        "conname": "ingest_rejects_payload_sha256_check",
+        "definition": "CHECK ((length(payload_sha256) = 64))"
+      },
+      {
+        "relation": "ingest_rejects",
+        "conname": "ingest_rejects_payload_sha256_not_null",
+        "definition": "NOT NULL payload_sha256"
+      },
+      {
+        "relation": "ingest_rejects",
+        "conname": "ingest_rejects_pkey",
+        "definition": "PRIMARY KEY (reject_id)"
+      },
+      {
+        "relation": "ingest_rejects",
+        "conname": "ingest_rejects_reject_id_not_null",
+        "definition": "NOT NULL reject_id"
+      },
+      {
+        "relation": "ingest_rejects",
+        "conname": "ingest_rejects_repair_status_check",
+        "definition": "CHECK ((repair_status = ANY (ARRAY['open'::text, 'repaired'::text])))"
+      },
+      {
+        "relation": "ingest_rejects",
+        "conname": "ingest_rejects_repair_status_not_null",
+        "definition": "NOT NULL repair_status"
+      },
+      {
+        "relation": "ingest_rejects",
+        "conname": "ingest_rejects_source_ref_id_check",
+        "definition": "CHECK ((octet_length(source_ref_id) <= 2048))"
+      },
+      {
+        "relation": "outbox",
+        "conname": "outbox_attempts_check",
+        "definition": "CHECK ((attempts >= 0))"
+      },
+      {
+        "relation": "outbox",
+        "conname": "outbox_attempts_not_null",
+        "definition": "NOT NULL attempts"
+      },
+      {
+        "relation": "outbox",
+        "conname": "outbox_correlation_id_not_null",
+        "definition": "NOT NULL correlation_id"
+      },
+      {
+        "relation": "outbox",
+        "conname": "outbox_created_at_not_null",
+        "definition": "NOT NULL created_at"
+      },
+      {
+        "relation": "outbox",
+        "conname": "outbox_hazard_id_fkey",
+        "definition": "FOREIGN KEY (hazard_id) REFERENCES hazard_events(hazard_id)"
+      },
+      {
+        "relation": "outbox",
+        "conname": "outbox_hazard_id_not_null",
+        "definition": "NOT NULL hazard_id"
+      },
+      {
+        "relation": "outbox",
+        "conname": "outbox_hazard_id_revision_key",
+        "definition": "UNIQUE (hazard_id, revision)"
+      },
+      {
+        "relation": "outbox",
+        "conname": "outbox_message_id_key",
+        "definition": "UNIQUE (message_id)"
+      },
+      {
+        "relation": "outbox",
+        "conname": "outbox_message_id_not_null",
+        "definition": "NOT NULL message_id"
+      },
+      {
+        "relation": "outbox",
+        "conname": "outbox_next_attempt_at_not_null",
+        "definition": "NOT NULL next_attempt_at"
+      },
+      {
+        "relation": "outbox",
+        "conname": "outbox_notification_identity",
+        "definition": "CHECK (((((payload ->> 'message_id'::text) = message_id) AND ((payload ->> 'hazard_id'::text) = hazard_id) AND (((payload ->> 'revision'::text))::bigint = revision) AND ((payload ->> 'correlation_id'::text) = correlation_id)) IS TRUE))"
+      },
+      {
+        "relation": "outbox",
+        "conname": "outbox_payload_check",
+        "definition": "CHECK ((jsonb_typeof(payload) = 'object'::text))"
+      },
+      {
+        "relation": "outbox",
+        "conname": "outbox_payload_not_null",
+        "definition": "NOT NULL payload"
+      },
+      {
+        "relation": "outbox",
+        "conname": "outbox_pkey",
+        "definition": "PRIMARY KEY (sequence)"
+      },
+      {
+        "relation": "outbox",
+        "conname": "outbox_revision_check",
+        "definition": "CHECK ((revision > 0))"
+      },
+      {
+        "relation": "outbox",
+        "conname": "outbox_revision_not_null",
+        "definition": "NOT NULL revision"
+      },
+      {
+        "relation": "outbox",
+        "conname": "outbox_sequence_not_null",
+        "definition": "NOT NULL sequence"
+      },
+      {
+        "relation": "poll_state",
+        "conname": "poll_state_check",
+        "definition": "CHECK ((((source = 'BMKG'::text) AND (endpoint = ANY (ARRAY['seismic'::text, 'warnings'::text]))) OR ((source = 'PVMBG'::text) AND (endpoint = 'volcanic'::text))))"
+      },
+      {
+        "relation": "poll_state",
+        "conname": "poll_state_endpoint_check",
+        "definition": "CHECK ((endpoint = ANY (ARRAY['seismic'::text, 'warnings'::text, 'volcanic'::text])))"
+      },
+      {
+        "relation": "poll_state",
+        "conname": "poll_state_endpoint_not_null",
+        "definition": "NOT NULL endpoint"
+      },
+      {
+        "relation": "poll_state",
+        "conname": "poll_state_pkey",
+        "definition": "PRIMARY KEY (endpoint)"
+      },
+      {
+        "relation": "poll_state",
+        "conname": "poll_state_source_not_null",
+        "definition": "NOT NULL source"
+      },
+      {
+        "relation": "schema_migrations",
+        "conname": "schema_migrations_applied_at_not_null",
+        "definition": "NOT NULL applied_at"
+      },
+      {
+        "relation": "schema_migrations",
+        "conname": "schema_migrations_pkey",
+        "definition": "PRIMARY KEY (version)"
+      },
+      {
+        "relation": "schema_migrations",
+        "conname": "schema_migrations_version_not_null",
+        "definition": "NOT NULL version"
+      },
+      {
+        "relation": "source_seismic",
+        "conname": "source_seismic_event_id_check",
+        "definition": "CHECK (((octet_length(event_id) >= 1) AND (octet_length(event_id) <= 2048)))"
+      },
+      {
+        "relation": "source_seismic",
+        "conname": "source_seismic_event_id_not_null",
+        "definition": "NOT NULL event_id"
+      },
+      {
+        "relation": "source_seismic",
+        "conname": "source_seismic_occurred_at_not_null",
+        "definition": "NOT NULL occurred_at"
+      },
+      {
+        "relation": "source_seismic",
+        "conname": "source_seismic_payload_check",
+        "definition": "CHECK ((jsonb_typeof(payload) = 'object'::text))"
+      },
+      {
+        "relation": "source_seismic",
+        "conname": "source_seismic_payload_not_null",
+        "definition": "NOT NULL payload"
+      },
+      {
+        "relation": "source_seismic",
+        "conname": "source_seismic_pkey",
+        "definition": "PRIMARY KEY (event_id)"
+      },
+      {
+        "relation": "source_warnings",
+        "conname": "source_warnings_issued_at_not_null",
+        "definition": "NOT NULL issued_at"
+      },
+      {
+        "relation": "source_warnings",
+        "conname": "source_warnings_payload_check",
+        "definition": "CHECK ((jsonb_typeof(payload) = 'object'::text))"
+      },
+      {
+        "relation": "source_warnings",
+        "conname": "source_warnings_payload_not_null",
+        "definition": "NOT NULL payload"
+      },
+      {
+        "relation": "source_warnings",
+        "conname": "source_warnings_pkey",
+        "definition": "PRIMARY KEY (warning_id)"
+      },
+      {
+        "relation": "source_warnings",
+        "conname": "source_warnings_related_event_id_check",
+        "definition": "CHECK (((octet_length(related_event_id) >= 1) AND (octet_length(related_event_id) <= 2048)))"
+      },
+      {
+        "relation": "source_warnings",
+        "conname": "source_warnings_related_event_id_not_null",
+        "definition": "NOT NULL related_event_id"
+      },
+      {
+        "relation": "source_warnings",
+        "conname": "source_warnings_warning_id_check",
+        "definition": "CHECK (((octet_length(warning_id) >= 1) AND (octet_length(warning_id) <= 2048)))"
+      },
+      {
+        "relation": "source_warnings",
+        "conname": "source_warnings_warning_id_not_null",
+        "definition": "NOT NULL warning_id"
+      },
+      {
+        "relation": "volcano_reference",
+        "conname": "volcano_reference_latitude_check",
+        "definition": "CHECK (((latitude >= ('-90'::integer)::double precision) AND (latitude <= (90)::double precision)))"
+      },
+      {
+        "relation": "volcano_reference",
+        "conname": "volcano_reference_latitude_not_null",
+        "definition": "NOT NULL latitude"
+      },
+      {
+        "relation": "volcano_reference",
+        "conname": "volcano_reference_longitude_check",
+        "definition": "CHECK (((longitude >= ('-180'::integer)::double precision) AND (longitude <= (180)::double precision)))"
+      },
+      {
+        "relation": "volcano_reference",
+        "conname": "volcano_reference_longitude_not_null",
+        "definition": "NOT NULL longitude"
+      },
+      {
+        "relation": "volcano_reference",
+        "conname": "volcano_reference_name_not_null",
+        "definition": "NOT NULL name"
+      },
+      {
+        "relation": "volcano_reference",
+        "conname": "volcano_reference_pkey",
+        "definition": "PRIMARY KEY (volcano_id)"
+      },
+      {
+        "relation": "volcano_reference",
+        "conname": "volcano_reference_provenance_check",
+        "definition": "CHECK ((jsonb_typeof(provenance) = 'object'::text))"
+      },
+      {
+        "relation": "volcano_reference",
+        "conname": "volcano_reference_provenance_not_null",
+        "definition": "NOT NULL provenance"
+      },
+      {
+        "relation": "volcano_reference",
+        "conname": "volcano_reference_volcano_id_not_null",
+        "definition": "NOT NULL volcano_id"
+      }
+    ],
+    "indexes": [
+      {
+        "tablename": "hazard_events",
+        "indexname": "hazard_events_pkey",
+        "indexdef": "CREATE UNIQUE INDEX hazard_events_pkey ON public.hazard_events USING btree (hazard_id)"
+      },
+      {
+        "tablename": "hazard_events",
+        "indexname": "hazard_events_source_source_ref_id_key",
+        "indexdef": "CREATE UNIQUE INDEX hazard_events_source_source_ref_id_key ON public.hazard_events USING btree (source, source_ref_id)"
+      },
+      {
+        "tablename": "hazard_events",
+        "indexname": "hazard_page",
+        "indexdef": "CREATE INDEX hazard_page ON public.hazard_events USING btree (occurred_at DESC, hazard_id COLLATE \"C\" DESC)"
+      },
+      {
+        "tablename": "hazard_events",
+        "indexname": "hazard_source_page",
+        "indexdef": "CREATE INDEX hazard_source_page ON public.hazard_events USING btree (source, occurred_at DESC, hazard_id COLLATE \"C\" DESC)"
+      },
+      {
+        "tablename": "ingest_rejects",
+        "indexname": "ingest_rejects_endpoint_payload_sha256_category_field_key",
+        "indexdef": "CREATE UNIQUE INDEX ingest_rejects_endpoint_payload_sha256_category_field_key ON public.ingest_rejects USING btree (endpoint, payload_sha256, category, field)"
+      },
+      {
+        "tablename": "ingest_rejects",
+        "indexname": "ingest_rejects_pkey",
+        "indexdef": "CREATE UNIQUE INDEX ingest_rejects_pkey ON public.ingest_rejects USING btree (reject_id)"
+      },
+      {
+        "tablename": "outbox",
+        "indexname": "outbox_hazard_id_revision_key",
+        "indexdef": "CREATE UNIQUE INDEX outbox_hazard_id_revision_key ON public.outbox USING btree (hazard_id, revision)"
+      },
+      {
+        "tablename": "outbox",
+        "indexname": "outbox_message_id_key",
+        "indexdef": "CREATE UNIQUE INDEX outbox_message_id_key ON public.outbox USING btree (message_id)"
+      },
+      {
+        "tablename": "outbox",
+        "indexname": "outbox_pending",
+        "indexdef": "CREATE INDEX outbox_pending ON public.outbox USING btree (sequence) WHERE (sent_at IS NULL)"
+      },
+      {
+        "tablename": "outbox",
+        "indexname": "outbox_pkey",
+        "indexdef": "CREATE UNIQUE INDEX outbox_pkey ON public.outbox USING btree (sequence)"
+      },
+      {
+        "tablename": "poll_state",
+        "indexname": "poll_state_pkey",
+        "indexdef": "CREATE UNIQUE INDEX poll_state_pkey ON public.poll_state USING btree (endpoint)"
+      },
+      {
+        "tablename": "schema_migrations",
+        "indexname": "schema_migrations_pkey",
+        "indexdef": "CREATE UNIQUE INDEX schema_migrations_pkey ON public.schema_migrations USING btree (version)"
+      },
+      {
+        "tablename": "source_seismic",
+        "indexname": "source_seismic_pkey",
+        "indexdef": "CREATE UNIQUE INDEX source_seismic_pkey ON public.source_seismic USING btree (event_id)"
+      },
+      {
+        "tablename": "source_warnings",
+        "indexname": "source_warnings_pkey",
+        "indexdef": "CREATE UNIQUE INDEX source_warnings_pkey ON public.source_warnings USING btree (warning_id)"
+      },
+      {
+        "tablename": "source_warnings",
+        "indexname": "warning_related_event",
+        "indexdef": "CREATE INDEX warning_related_event ON public.source_warnings USING btree (related_event_id, issued_at, warning_id)"
+      },
+      {
+        "tablename": "volcano_reference",
+        "indexname": "volcano_reference_pkey",
+        "indexdef": "CREATE UNIQUE INDEX volcano_reference_pkey ON public.volcano_reference USING btree (volcano_id)"
+      }
+    ],
+    "triggers": [
+      {
+        "relation": "outbox",
+        "tgname": "outbox_immutable",
+        "definition": "CREATE TRIGGER outbox_immutable BEFORE UPDATE ON public.outbox FOR EACH ROW EXECUTE FUNCTION protect_outbox_notification()"
+      }
+    ],
+    "functions": [
+      {
+        "definition": "CREATE OR REPLACE FUNCTION public.protect_outbox_notification()\n RETURNS trigger\n LANGUAGE plpgsql\nAS $function$\r\nBEGIN\r\n    IF ROW(NEW.sequence, NEW.message_id, NEW.hazard_id, NEW.revision,\r\n           NEW.correlation_id, NEW.payload, NEW.created_at)\r\n       IS DISTINCT FROM\r\n       ROW(OLD.sequence, OLD.message_id, OLD.hazard_id, OLD.revision,\r\n           OLD.correlation_id, OLD.payload, OLD.created_at) THEN\r\n        RAISE EXCEPTION 'outbox notification is immutable' USING ERRCODE = '23514';\r\n    END IF;\r\n    RETURN NEW;\r\nEND;\r\n$function$\n"
+      }
+    ]
+  },
+  "schema_sha256": "8d59c934a0c5f1364660c7f4a0d7ae15044e1e43baa2f6670d6cafd6232c523b",
+  "failure": "Receipt timestamp is in the future",
+  "finished_at": "2026-10-09T19:50:58+07:00"
+}

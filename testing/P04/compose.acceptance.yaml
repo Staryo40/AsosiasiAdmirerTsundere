@@ -1,0 +1,29 @@
+services:
+  bmkg:
+    image: ${COMPOSE_PROJECT_NAME:?P4 requires an isolated project}-bmkg
+    ports: !override ["127.0.0.1::8081"]
+  pvmbg:
+    image: ${COMPOSE_PROJECT_NAME:?P4 requires an isolated project}-pvmbg
+    ports: !override ["127.0.0.1::8082"]
+  api:
+    ports: !override ["127.0.0.1::8080"]
+
+networks:
+  bmkg-source:
+    ipam:
+      config: [{subnet: "10.251.240.0/24"}]
+  pvmbg-source:
+    ipam:
+      config: [{subnet: "10.251.241.0/24"}]
+  backend:
+    ipam:
+      config: [{subnet: "10.251.242.0/24"}]
+  canonical-store:
+    ipam:
+      config: [{subnet: "10.251.243.0/24"}]
+  events:
+    ipam:
+      config: [{subnet: "10.251.244.0/24"}]
+  test-store:
+    ipam:
+      config: [{subnet: "10.251.245.0/24"}]
