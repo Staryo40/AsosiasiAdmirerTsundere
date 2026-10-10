@@ -10,6 +10,7 @@ This repository is the Milestone 1 submission for IF4031 Arsitektur Aplikasi Ter
 - [Program Structure](#program-structure)
 - [Program Requirements](#program-requirements)
 - [Running the Application](#running-the-application)
+- [Acceptance Testing (P01–P05)](#acceptance-testing-p01p05)
 - [Endpoints](#endpoints)
 - [Creators](#creators)
 
@@ -138,14 +139,17 @@ docker compose up -d --build <service-name>
 Preserve all data (PostgreSQL, RabbitMQ, each consumer's SQLite) for next time:
 
 ```bash
-docker compose down
+docker compose --profile demo down
 ```
 
 Wipe all data and start fresh next time:
 
 ```bash
-docker compose down -v
+docker compose --profile demo down -v
 ```
+
+The `demo` profile is included so these commands also remove `consumer-3` if it
+was started during the live-consumer demonstration.
 
 ### Other useful commands
 
@@ -170,6 +174,162 @@ docker compose ps                        # status of every service
 docker compose logs -f <service-name>     # follow one service's logs
 docker compose logs -f api auth aggregator bmkg pvmbg   # follow the main data-flow path
 ```
+
+## Acceptance Testing (P01–P05)
+
+Run all commands below from the repository root in PowerShell. P01 and P04
+create isolated Compose projects; P02, P03, and P05 use the main stack. Make
+sure Docker Compose, Python 3.9+, and `bmkg/.env`, `pvmbg/.env`, and
+`bnpb/.env` are available.
+
+### Prerequisites
+
+```powershell
+Set-Location 'D:\Coding\localrepositories\AsosiasiAdmirerTsundere'
+
+python --version
+docker compose version
+python -m pip install -r testing/P04/requirements.txt
+```
+
+`testing/P04/requirements.txt` installs the validator also required by P01.
+
+### Problem 1 — P01
+
+Run the complete P01 acceptance suite in the same PowerShell session so the
+Compose variables and endpoints target the same stack:
+
+```powershell
+$env:COMPOSE_PROJECT_NAME = 'aat-p1-' + (Get-Date -Format 'yyyyMMddHHmmss')
+$env:COMPOSE_PATH_SEPARATOR = ';'
+$env:COMPOSE_FILE = 'compose.yaml;testing/P01/compose.acceptance.yaml'
+$env:API_BASE = 'http://localhost:18080'
+$env:BMKG_BASE = 'http://localhost:18081'
+$env:PVMBG_BASE = 'http://localhost:18082'
+
+docker compose config --quiet
+docker compose up -d --build --wait
+python testing/P01/run_all.py
+docker compose --profile tests down
+```
+
+With the P01 stack running, run individual scenarios with:
+
+```powershell
+python testing/P01/run_all.py --only T01
+python testing/P01/run_all.py --only T02
+python testing/P01/T02-runtime-schema-evolution/run.py --deadline 120
+python -m unittest discover -s testing/P01 -p test_acceptance.py -v
+```
+
+T01 covers mapping and boundary cases; T02 triggers PVMBG schema evolution at
+runtime without restarting any container.
+
+### Problem 4 — P04
+
+The P04 runner creates and cleans up an isolated stack for every execution:
+
+```powershell
+python -m unittest discover -s testing/P04 -p test_checks.py -v
+python testing/P04/run_all.py
+```
+
+To run each scenario separately:
+
+```powershell
+python testing/P04/run_all.py --only T10
+python testing/P04/run_all.py --only T11
+python testing/P04/run_all.py --only T12 --deadline 120
+```
+
+T10 tests independent rebuilds, T11 Canonical Store isolation, and T12
+flexible storage/schema evolution.
+
+### Clean Up the P01/P04 Environment
+
+Run this after P01/P04, especially if a runner stops before its cleanup step:
+
+```powershell
+Remove-Item Env:COMPOSE_PROJECT_NAME -ErrorAction SilentlyContinue
+Remove-Item Env:COMPOSE_PATH_SEPARATOR -ErrorAction SilentlyContinue
+Remove-Item Env:COMPOSE_FILE -ErrorAction SilentlyContinue
+Remove-Item Env:COMPOSE_PROFILES -ErrorAction SilentlyContinue
+Remove-Item Env:API_BASE -ErrorAction SilentlyContinue
+Remove-Item Env:BMKG_BASE -ErrorAction SilentlyContinue
+Remove-Item Env:PVMBG_BASE -ErrorAction SilentlyContinue
+Remove-Item Env:TEST_RESULTS_ROOT -ErrorAction SilentlyContinue
+```
+
+### Main Stack
+
+Before P02, P03, or P05, start the main stack:
+
+```powershell
+docker compose config --quiet
+docker compose up -d --build
+docker compose ps --all
+```
+
+Continue only after `broker-init` shows `Exited (0)`.
+
+### Problem 2 — P02
+
+```powershell
+python testing/P02/run_all.py
+```
+
+To run an individual scenario:
+
+```powershell
+python testing/P02/T03-head-of-line/run.py
+python testing/P02/T04-sustained-load/run.py
+python testing/P02/T05-outage-recovery/run.py
+```
+
+T03 tests head-of-line blocking, T04 sustained load, and T05 PVMBG
+outage/recovery.
+
+### Problem 3 — P03
+
+```powershell
+python testing/P03/run_all.py
+```
+
+To run an individual scenario:
+
+```powershell
+python testing/P03/T06-cross-domain-credentials/run.py
+python testing/P03/T07-media-field-authorization/run.py
+python testing/P03/T08-token-expiry-refresh/run.py
+python testing/P03/T09-secret-hygiene/run.py
+```
+
+T06 tests credential separation, T07 Media field authorization, T08 token
+expiry/refresh, and T09 secret hygiene.
+
+### Problem 5 — P05
+
+The P05 demo stops and restarts `consumer-2` and adds `consumer-3` live. Save
+the transcript as evidence:
+
+```powershell
+$log = "testing/P05/evidence-{0}.log" -f (Get-Date -Format 'yyyyMMdd-HHmmss')
+python testing/P05/p5_demo.py 2>&1 | Tee-Object -FilePath $log
+```
+
+After all tests finish, shut down the main stack:
+
+```powershell
+docker compose --profile demo down
+```
+
+The `--profile demo` flag is required here because P5.4 creates `consumer-3`
+with that profile. Without it, Compose excludes the profiled service from the
+teardown and the `aat_events` network can remain attached.
+
+Runtime evidence is written under `testing/results/P01`–`testing/results/P04`
+or to the P05 log file. An exit code of `0` only means that the selected
+automated scenario passed. 
 
 ## Endpoints
 
