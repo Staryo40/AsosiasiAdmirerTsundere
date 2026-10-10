@@ -110,9 +110,9 @@ def timestamp() -> str:
     return datetime.now().astimezone().isoformat(timespec="seconds")
 
 
-def results_directory() -> Path:
+def results_directory(suite: str = "P03") -> Path:
     configured = os.getenv("TEST_RESULTS_ROOT")
-    path = Path(configured) if configured else repository_root() / "testing" / "results" / "P03" / datetime.now().strftime("%Y%m%d-%H%M%S")
+    path = Path(configured) if configured else repository_root() / "testing" / "results" / suite / datetime.now().strftime("%Y%m%d-%H%M%S-%f")
     path.mkdir(parents=True, exist_ok=True)
     return path.resolve()
 

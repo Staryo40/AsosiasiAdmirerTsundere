@@ -7,6 +7,7 @@ Folder ini berisi pengujian penerimaan yang dapat diulang. Unit dan integration 
 ```text
 testing/
 |-- common/                         # Modul Python bersama
+|-- P02/                            # T03, T04, T05: konkurensi/ketersediaan
 |-- P03/
 |   |-- run_all.py                  # Orchestrator seluruh pengujian P3
 |   |-- T06-cross-domain-credentials/
@@ -46,3 +47,7 @@ sedikitnya sekitar satu menit pada TTL default 60 detik.
 
 Runner hanya membutuhkan Python 3.9+ dan Git. Library HTTP dan JSON memakai
 Python standard library sehingga tidak membutuhkan `requests`, Bash, atau jq.
+
+Untuk P02 jalankan `python testing/P02/run_all.py`. Suite ini juga membutuhkan
+Docker CLI untuk memeriksa container dan versi tooling. Panduan metode load,
+injeksi outage/delay, cleanup, dan evidence tersedia di [P02/README.md](P02/README.md).
