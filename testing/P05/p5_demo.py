@@ -35,19 +35,19 @@ def load_env(path):
     return env
 
 
-def mgmt_get(path, user, password):
+def mgmt_get(path, user, password, timeout=10):
     request = urllib.request.Request(MGMT_URL + path)
     auth = base64.b64encode(f"{user}:{password}".encode()).decode()
     request.add_header("Authorization", f"Basic {auth}")
-    with urllib.request.urlopen(request, timeout=10) as response:
+    with urllib.request.urlopen(request, timeout=timeout) as response:
         return json.loads(response.read())
 
 
-def container_stats(project, service, port, path="/stats"):
+def container_stats(project, service, port, path="/stats", timeout=30):
     result = subprocess.run(
         ["docker", "run", "--rm", "--network", f"{project}_events",
          "curlimages/curl", "-s", f"http://{service}:{port}{path}"],
-        capture_output=True, text=True, timeout=30,
+        capture_output=True, text=True, timeout=timeout,
     )
     if not result.stdout.strip():
         raise RuntimeError(f"no response from {service}:{port}{path} (stderr: {result.stderr.strip()})")
@@ -106,6 +106,40 @@ def show_logs(label, raw):
             print(line)
 
 
+def wait_for_catchup(project, user, password, expected_seen, timeout=30):
+    """Wait for processing and sampled broker metrics to reflect recovery."""
+    deadline = time.monotonic() + timeout
+    stats, queue = {}, {}
+    print(f"Waiting up to {timeout}s for messages_seen >= {expected_seen} and an empty queue...")
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        try:
+            queue = mgmt_get("/queues/%2F/hazard.events.notifications", user, password,
+                             timeout=min(10, remaining))
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            stats = container_stats(project, "consumer-2", 8086, timeout=remaining)
+            print("P5.3 recovery: " + json.dumps({
+                "messages_seen": stats.get("messages_seen"),
+                **{key: queue.get(key) for key in
+                   ("messages", "messages_ready", "messages_unacknowledged", "consumers")},
+            }))
+            if (time.monotonic() <= deadline
+                    and stats.get("messages_seen", -1) >= expected_seen
+                    and (queue.get("consumers") or 0) >= 1
+                    and all(queue.get(key) == 0 for key in
+                            ("messages", "messages_ready", "messages_unacknowledged"))):
+                return stats, queue, True
+        except (urllib.error.URLError, TimeoutError, subprocess.TimeoutExpired, RuntimeError) as error:
+            print(f"P5.3 recovery observation unavailable: {error}")
+        time.sleep(min(1, max(0, deadline - time.monotonic())))
+    print(f"Timed out waiting for P5.3 recovery after {timeout}s (expected messages_seen >= {expected_seen}).")
+    return stats, queue, False
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--project", default="aat")
@@ -151,6 +185,8 @@ def main():
     show_logs("Recent consumer-2 log lines", docker_logs_tail(container_name(project, "consumer-2"), 3))
 
     section("P5.3 -- stop consumer-2 (notifier)")
+    c2_before_stop = container_stats(project, "consumer-2", 8086)
+    show("consumer-2 /stats immediately before stop", c2_before_stop)
     compose(["stop", "consumer-2"], repo_dir, project)
     print(f"consumer-2 stopped. Waiting {args.wait_down}s for organic traffic to accumulate while it's down...")
     time.sleep(args.wait_down)
@@ -175,22 +211,24 @@ def main():
 
     section("P5.3 -- restart consumer-2, show catch-up")
     compose(["start", "consumer-2"], repo_dir, project)
-    time.sleep(5)
-    c2_after_restart = container_stats(project, "consumer-2", 8086)
+    expected_seen = c2_before_stop["messages_seen"] + max(depth_during["messages"] or 0, 1)
+    c2_after_restart, queue_after, recovered = wait_for_catchup(
+        project, admin_user, admin_pass, expected_seen)
     show("consumer-2 /stats after restart", c2_after_restart)
     results.append(check(
         "P5.3: downtime backlog was caught up, not lost",
-        c2_after_restart["messages_seen"] > c2_after["messages_seen"]))
+        c2_after_restart.get("messages_seen", -1) >= expected_seen))
 
     print()
     show_logs("Drained backlog log lines", docker_logs_tail(container_name(project, "consumer-2"), max(depth_during["messages"] or 5, 5) + 2))
 
-    queue_after = mgmt_get("/queues/%2F/hazard.events.notifications", admin_user, admin_pass)
     print()
-    show("hazard.events.notifications after catch-up", {"messages": queue_after.get("messages")})
+    show("hazard.events.notifications after catch-up", {
+        key: queue_after.get(key) for key in
+        ("messages", "messages_ready", "messages_unacknowledged", "consumers")})
     results.append(check(
         "P5.3: queue fully drained after catch-up",
-        queue_after.get("messages") == 0))
+        recovered))
 
     section("P5.4 -- add consumer-3 live, no restart of 1/2, no producer change")
     c1_name, c2_name = container_name(project, "consumer-1"), container_name(project, "consumer-2")
