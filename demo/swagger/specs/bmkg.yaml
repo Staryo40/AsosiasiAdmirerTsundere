@@ -1,0 +1,260 @@
+openapi: 3.0.3
+info:
+  title: BMKG Source API
+  version: 1.0.0
+  description: >-
+    Direct read-only contract for the BMKG mock source. It has one shared
+    X-BMKG-Key credential and no login, refresh, runtime delay setter, or
+    outage setter. Responses are source arrays rather than BNPB canonical
+    hazard records.
+servers:
+  - url: /api/bmkg
+    description: Same-origin local demo gateway
+tags:
+  - name: Source Data
+    description: Seismic events and separately issued tsunami warnings.
+  - name: Health
+    description: Public source liveness.
+paths:
+  /seismic-events:
+    get:
+      operationId: bmkgListSeismicEvents
+      tags: [Source Data]
+      summary: Read seismic events
+      description: >-
+        For P1, use a safe time filter to select a manageable source record and
+        compare it with the public BNPB projection. The since filter is
+        exclusive: only occurred_at values strictly after since are returned.
+        For P2, a quick browser response is context only; the existing load
+        runner measures the acceptance percentile.
+      security:
+        - BmkgApiKey: []
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+        - name: since
+          in: query
+          required: false
+          description: ISO-8601 timestamp; returns events with occurred_at strictly after this instant.
+          schema:
+            type: string
+            format: date-time
+          example: '2026-10-21T10:00:00Z'
+      responses:
+        '200':
+          description: Current seismic event array; an empty array is a valid result.
+          headers:
+            X-Correlation-ID:
+              $ref: '#/components/headers/CorrelationId'
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SeismicEvent'
+        '400':
+          description: since is not a valid ISO-8601 timestamp.
+          headers:
+            X-Correlation-ID:
+              $ref: '#/components/headers/CorrelationId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+        '401':
+          description: X-BMKG-Key is missing or invalid.
+          headers:
+            X-Correlation-ID:
+              $ref: '#/components/headers/CorrelationId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+        '429':
+          $ref: '#/components/responses/PlatformRateLimit'
+        '500':
+          $ref: '#/components/responses/PlatformError'
+  /tsunami-warnings:
+    get:
+      operationId: bmkgListTsunamiWarnings
+      tags: [Source Data]
+      summary: Read tsunami warnings
+      description: >-
+        Warnings are a separate endpoint and are linked to seismic events by
+        related_event_id. Its exclusive since filter uses issued_at, not
+        estimated_arrival, which is a future prediction. P1 mapping evidence
+        should correlate the warning and event identities in the terminal
+        tools; this request does not claim a single ingestion trace.
+      security:
+        - BmkgApiKey: []
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+        - name: since
+          in: query
+          required: false
+          description: ISO-8601 timestamp; returns warnings with issued_at strictly after this instant.
+          schema:
+            type: string
+            format: date-time
+          example: '2026-10-21T10:00:00Z'
+      responses:
+        '200':
+          description: Current tsunami warning array; an empty array is a valid result.
+          headers:
+            X-Correlation-ID:
+              $ref: '#/components/headers/CorrelationId'
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/TsunamiWarning'
+        '400':
+          description: since is not a valid ISO-8601 timestamp.
+          headers:
+            X-Correlation-ID:
+              $ref: '#/components/headers/CorrelationId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+        '401':
+          description: X-BMKG-Key is missing or invalid.
+          headers:
+            X-Correlation-ID:
+              $ref: '#/components/headers/CorrelationId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+        '429':
+          $ref: '#/components/responses/PlatformRateLimit'
+        '500':
+          $ref: '#/components/responses/PlatformError'
+  /health:
+    get:
+      operationId: bmkgHealth
+      tags: [Health]
+      summary: Check BMKG source liveness
+      description: >-
+        Public plain-text liveness response. The configured source delay can
+        also affect this route. No runtime delay or outage admin route exists.
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: BMKG source process is alive.
+          headers:
+            X-Correlation-ID:
+              $ref: '#/components/headers/CorrelationId'
+          content:
+            text/plain:
+              schema:
+                type: string
+              example: OK
+components:
+  parameters:
+    CorrelationId:
+      name: X-Correlation-ID
+      in: header
+      required: false
+      description: Optional request correlation value, 1-64 characters from letters, digits, dot, underscore, or hyphen.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 64
+        pattern: '^[A-Za-z0-9._-]+$'
+      example: demo-p1-bmkg-01
+  headers:
+    CorrelationId:
+      description: Echoed request identifier, or a generated identifier when absent or invalid.
+      schema:
+        type: string
+  responses:
+    PlatformRateLimit:
+      description: Shared concurrency limit; this flat platform response differs from the source error body.
+      headers:
+        X-Correlation-ID:
+          $ref: '#/components/headers/CorrelationId'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorBody'
+          example:
+            error: too many requests
+    PlatformError:
+      description: Recovered unexpected panic.
+      headers:
+        X-Correlation-ID:
+          $ref: '#/components/headers/CorrelationId'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorBody'
+          example:
+            error: internal server error
+  securitySchemes:
+    BmkgApiKey:
+      type: apiKey
+      in: header
+      name: X-BMKG-Key
+      description: >-
+        Enter the BMKG key privately. This credential is independent from
+        BNPB and PVMBG bearer tokens; the backend returns 401 when it is
+        missing or wrong.
+  schemas:
+    ErrorBody:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+    SeismicEvent:
+      type: object
+      required: [event_id, magnitude, depth_km, epicenter_lat, epicenter_lon, region_name, occurred_at, potential_tsunami]
+      properties:
+        event_id:
+          type: string
+        magnitude:
+          type: number
+          format: double
+        depth_km:
+          type: number
+          format: double
+        epicenter_lat:
+          type: number
+          format: double
+        epicenter_lon:
+          type: number
+          format: double
+        region_name:
+          type: string
+        occurred_at:
+          type: string
+          format: date-time
+        potential_tsunami:
+          type: boolean
+    TsunamiWarning:
+      type: object
+      required: [warning_id, related_event_id, threat_level, affected_zones, estimated_arrival, issued_at]
+      properties:
+        warning_id:
+          type: string
+        related_event_id:
+          type: string
+          description: Event identity used to correlate this separate warning with a seismic event.
+        threat_level:
+          type: string
+          enum: [Waspada, Siaga, Awas]
+        affected_zones:
+          type: array
+          items:
+            type: string
+        estimated_arrival:
+          type: string
+          format: date-time
+          description: Predicted arrival time; not the since cursor.
+        issued_at:
+          type: string
+          format: date-time
+          description: Warning issuance time used by the exclusive since filter.

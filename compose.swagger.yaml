@@ -1,0 +1,29 @@
+# Optional team-operated Swagger UI and fixed same-origin gateway.
+# Load after compose.yaml and compose.override.yaml from the repository root.
+services:
+  swagger-demo:
+    build:
+      context: ./demo/swagger
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8089:8080"
+    networks:
+      - backend
+      - bmkg-source
+      - pvmbg-source
+    user: "101:101"
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m,mode=1777
+      - /var/cache/nginx:rw,noexec,nosuid,size=32m,uid=101,gid=101,mode=700
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: [CMD, wget, -q, -O, /dev/null, http://127.0.0.1:8080/healthz]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 5s

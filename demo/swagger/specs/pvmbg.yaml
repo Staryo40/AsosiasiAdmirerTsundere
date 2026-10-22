@@ -1,0 +1,439 @@
+openapi: 3.0.3
+info:
+  title: PVMBG Source and Admin API
+  version: 1.0.0
+  description: >-
+    Direct contract for the PVMBG mock. Reader and admin identities are
+    separate; admin also has read permission. Tokens are JWTs and default to
+    300 seconds. Setters mutate in-memory state. No GET endpoint reports the
+    current schema, outage flag, or delay range.
+servers:
+  - url: /api/pvmbg
+    description: Same-origin local demo gateway
+tags:
+  - name: Authentication
+    description: Exchange reader/admin credentials for a short-lived JWT.
+  - name: Source Data
+    description: Read the current volcanic report array.
+  - name: PVMBG Admin
+    description: Record a baseline and recovery plan before changing source state.
+  - name: Health
+    description: Public source health.
+paths:
+  /auth/login:
+    post:
+      operationId: pvmbgLogin
+      tags: [Authentication]
+      summary: Exchange credentials for a JWT
+      description: >-
+        Use the reader identity for reports and the separately configured
+        admin identity for setters. Every attempt counts toward that client
+        id's per-minute rate limit; 429 includes Retry-After. During simulated
+        outage, admin login remains available while reader login can return
+        503. Pause screen sharing when handling credentials or tokens.
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+            example:
+              client_id: READER_CLIENT_ID
+              client_secret: ENTER_PRIVATELY
+      responses:
+        '200':
+          description: JWT issued.
+          headers:
+            X-Correlation-ID:
+              $ref: '#/components/headers/CorrelationId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          description: Per-client or per-IP login limit reached; wait for Retry-After seconds.
+          headers:
+            X-Correlation-ID:
+              $ref: '#/components/headers/CorrelationId'
+            Retry-After:
+              $ref: '#/components/headers/RetryAfter'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+        '503':
+          description: Simulated outage blocks reader login; admin login remains available.
+          headers:
+            X-Correlation-ID:
+              $ref: '#/components/headers/CorrelationId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+  /volcanic-reports:
+    get:
+      operationId: pvmbgListVolcanicReports
+      tags: [Source Data]
+      summary: Read volcanic reports
+      description: >-
+        Response is an array under in-memory schema version 1 or 2. The
+        exclusive since filter compares reported_at. Timestamps have
+        one-second precision; use an inclusive margin and de-duplicate by
+        report_id when polling. A 503 is the configured source outage, not a
+        stopped-container gateway failure.
+      security:
+        - PvmbgAccessToken: []
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+        - name: since
+          in: query
+          required: false
+          description: Return reports whose reported_at is strictly after this ISO-8601 timestamp.
+          schema:
+            type: string
+            format: date-time
+          example: '2026-10-21T10:00:00Z'
+      responses:
+        '200':
+          description: Current report array; empty is valid.
+          headers:
+            X-Correlation-ID:
+              $ref: '#/components/headers/CorrelationId'
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  oneOf:
+                    - $ref: '#/components/schemas/VolcanicReportV1'
+                    - $ref: '#/components/schemas/VolcanicReportV2'
+              example:
+                - report_id: report-demo-001
+                  volcano_id: merapi
+                  alert_level: Siaga
+                  eruption_count_24h: 1
+                  ash_column_height_m: 850.5
+                  reported_at: '2026-10-21T10:00:00Z'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '503':
+          description: Simulated outage is enabled.
+          headers:
+            X-Correlation-ID:
+              $ref: '#/components/headers/CorrelationId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+  /admin/schema-version:
+    post:
+      operationId: pvmbgSetSchemaVersion
+      tags: [PVMBG Admin]
+      summary: Select report schema version
+      description: >-
+        Version 1 omits confidence_level; version 2 adds it. This changes live
+        in-memory output without a restart. For P1, capture a report before
+        the change, observe newly ingested canonical attributes with terminal
+        tools, then restore the agreed state. The empty 204 acknowledges the
+        setter and does not independently report the current setting.
+      security:
+        - PvmbgAccessToken: []
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SchemaVersionRequest'
+            example:
+              version: 2
+      responses:
+        '204':
+          description: Setting accepted; no response body.
+          headers:
+            X-Correlation-ID:
+              $ref: '#/components/headers/CorrelationId'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /admin/outage:
+    post:
+      operationId: pvmbgSetOutage
+      tags: [PVMBG Admin]
+      summary: Enable or disable the simulated outage
+      description: >-
+        Affects health and reader report requests while the container remains
+        alive; admin login and admin routes remain reachable. For P2, record
+        the intended baseline, observe the actual 503, disable the outage, and
+        confirm recovery. There is no GET operation for the previous setting.
+      security:
+        - PvmbgAccessToken: []
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OutageRequest'
+            example:
+              enabled: true
+      responses:
+        '204':
+          description: Setting accepted; no response body.
+          headers:
+            X-Correlation-ID:
+              $ref: '#/components/headers/CorrelationId'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /admin/response-delay:
+    post:
+      operationId: pvmbgSetResponseDelay
+      tags: [PVMBG Admin]
+      summary: Set the response delay range
+      description: >-
+        Values are nonnegative milliseconds and min_ms must not exceed max_ms.
+        For P2 slow-source isolation, set both to 3000. The setter returns an
+        empty 204 and releases requests already waiting under the previous
+        delay. Restore recorded bounds afterward; this response does not
+        report the current range.
+      security:
+        - PvmbgAccessToken: []
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DelayRequest'
+            example:
+              min_ms: 3000
+              max_ms: 3000
+      responses:
+        '204':
+          description: Delay range accepted; no response body.
+          headers:
+            X-Correlation-ID:
+              $ref: '#/components/headers/CorrelationId'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /health:
+    get:
+      operationId: pvmbgHealth
+      tags: [Health]
+      summary: Check PVMBG source health
+      description: Public plain-text health returns 503 during simulated outage; this differs from gateway 502/504 transport errors.
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: Source is available.
+          headers:
+            X-Correlation-ID:
+              $ref: '#/components/headers/CorrelationId'
+          content:
+            text/plain:
+              schema:
+                type: string
+              example: OK
+        '503':
+          description: Simulated source outage is enabled.
+          headers:
+            X-Correlation-ID:
+              $ref: '#/components/headers/CorrelationId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+components:
+  parameters:
+    CorrelationId:
+      name: X-Correlation-ID
+      in: header
+      required: false
+      description: Optional request correlation value, 1-64 characters from letters, digits, dot, underscore, or hyphen.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 64
+        pattern: '^[A-Za-z0-9._-]+$'
+      example: demo-p1-pvmbg-01
+  headers:
+    CorrelationId:
+      description: Echoed request identifier, or a generated identifier when absent or invalid.
+      schema:
+        type: string
+    RetryAfter:
+      description: Seconds to wait before another login attempt.
+      schema:
+        type: string
+      example: '30'
+  responses:
+    BadRequest:
+      description: Request body or timestamp is invalid.
+      headers:
+        X-Correlation-ID:
+          $ref: '#/components/headers/CorrelationId'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorBody'
+    Unauthorized:
+      description: Credentials are invalid or bearer JWT is missing, malformed, invalid, or expired.
+      headers:
+        X-Correlation-ID:
+          $ref: '#/components/headers/CorrelationId'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorBody'
+    Forbidden:
+      description: Token is valid but does not have admin scope.
+      headers:
+        X-Correlation-ID:
+          $ref: '#/components/headers/CorrelationId'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorBody'
+  securitySchemes:
+    PvmbgAccessToken:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: >-
+        Paste only access_token; Swagger adds Bearer. Reader tokens can read
+        reports; admin tokens also have read permission and can use setters.
+        A wrong valid-scope token gets 403; an invalid token gets 401.
+  schemas:
+    LoginRequest:
+      type: object
+      additionalProperties: false
+      required: [client_id, client_secret]
+      properties:
+        client_id:
+          type: string
+          minLength: 1
+          description: Use the locally configured reader or admin identity.
+        client_secret:
+          type: string
+          minLength: 1
+          writeOnly: true
+          description: Enter privately; Swagger's raw JSON editor does not mask this value.
+    TokenResponse:
+      type: object
+      required: [access_token, token_type, expires_in]
+      properties:
+        access_token:
+          type: string
+          description: Short-lived JWT; treat as a secret.
+        token_type:
+          type: string
+          enum: [Bearer]
+        expires_in:
+          type: integer
+          format: int64
+          description: Token lifetime in seconds; defaults to 300.
+    ErrorBody:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+    VolcanicReportV1:
+      type: object
+      required: [report_id, volcano_id, alert_level, eruption_count_24h, ash_column_height_m, reported_at]
+      additionalProperties: false
+      properties:
+        report_id:
+          type: string
+        volcano_id:
+          type: string
+        alert_level:
+          type: string
+          enum: [Normal, Waspada, Siaga, Awas]
+        eruption_count_24h:
+          type: integer
+        ash_column_height_m:
+          type: number
+          format: float
+        reported_at:
+          type: string
+          format: date-time
+    VolcanicReportV2:
+      type: object
+      required: [report_id, volcano_id, alert_level, eruption_count_24h, ash_column_height_m, reported_at, confidence_level]
+      additionalProperties: false
+      properties:
+        report_id:
+          type: string
+        volcano_id:
+          type: string
+        alert_level:
+          type: string
+          enum: [Normal, Waspada, Siaga, Awas]
+        eruption_count_24h:
+          type: integer
+        ash_column_height_m:
+          type: number
+          format: float
+        reported_at:
+          type: string
+          format: date-time
+        confidence_level:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 1
+          description: Present only when schema version 2 is selected.
+    SchemaVersionRequest:
+      type: object
+      additionalProperties: false
+      required: [version]
+      properties:
+        version:
+          type: integer
+          enum: [1, 2]
+    OutageRequest:
+      type: object
+      additionalProperties: false
+      required: [enabled]
+      properties:
+        enabled:
+          type: boolean
+    DelayRequest:
+      type: object
+      additionalProperties: false
+      required: [min_ms, max_ms]
+      properties:
+        min_ms:
+          type: integer
+          format: int64
+          minimum: 0
+        max_ms:
+          type: integer
+          format: int64
+          minimum: 0

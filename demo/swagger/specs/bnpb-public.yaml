@@ -1,0 +1,776 @@
+openapi: 3.0.3
+info:
+  title: BNPB Public Client-Facing API
+  version: 1.0.0
+  description: >-
+    Public API served by the BNPB Client-Facing API on port 8080. This is not
+    the internal Aggregator contract. Access tokens are opaque bearer strings,
+    not JWTs. The operator enters credentials through the normal login flow.
+servers:
+  - url: /api/bnpb
+    description: Same-origin local demo gateway
+tags:
+  - name: Authentication
+    description: Login and manually initiated refresh. Swagger does not refresh tokens automatically.
+  - name: Hazards
+    description: Authenticated public hazard reads and response projections.
+  - name: Health
+    description: Public liveness and dependency readiness.
+paths:
+  /auth/login:
+    post:
+      operationId: bnpbPublicLogin
+      tags: [Authentication]
+      summary: Exchange client credentials for a token pair
+      description: >-
+        Credentials are assigned to Media, Field Team, or Internal Ops by the
+        backend. Access tokens default to a 60-second lifetime. Login returns
+        real credentials in the request and real tokens in the response; pause
+        screen sharing before entering or showing either.
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+            example:
+              client_id: media
+              client_secret: ENTER_PRIVATELY
+      responses:
+        '200':
+          description: Token pair issued.
+          headers:
+            X-Correlation-ID:
+              $ref: '#/components/headers/CorrelationId'
+            Cache-Control:
+              schema:
+                type: string
+              example: no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenResponse'
+        '400':
+          description: Invalid JSON, missing required field, or trailing request data.
+          headers:
+            X-Correlation-ID:
+              $ref: '#/components/headers/CorrelationId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PublicError'
+        '401':
+          description: Client ID or secret is invalid.
+          headers:
+            X-Correlation-ID:
+              $ref: '#/components/headers/CorrelationId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PublicError'
+        '415':
+          description: Content-Type must be application/json.
+          headers:
+            X-Correlation-ID:
+              $ref: '#/components/headers/CorrelationId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PublicError'
+        '429':
+          $ref: '#/components/responses/PlatformRateLimit'
+        '500':
+          $ref: '#/components/responses/PlatformError'
+        '503':
+          description: Authentication service is unavailable.
+          headers:
+            X-Correlation-ID:
+              $ref: '#/components/headers/CorrelationId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PublicError'
+  /auth/refresh:
+    post:
+      operationId: bnpbPublicRefresh
+      tags: [Authentication]
+      summary: Rotate a refresh token manually
+      description: >-
+        Submitting a valid refresh token returns a new access and refresh
+        token pair and revokes the previous refresh token. Swagger does not
+        automatically call this operation or retry a failed request. Keep
+        screen sharing paused while handling the request or response.
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RefreshRequest'
+            example:
+              refresh_token: ENTER_PRIVATELY
+      responses:
+        '200':
+          description: Rotated token pair issued.
+          headers:
+            X-Correlation-ID:
+              $ref: '#/components/headers/CorrelationId'
+            Cache-Control:
+              schema:
+                type: string
+              example: no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenResponse'
+        '400':
+          description: Invalid JSON or refresh_token is missing.
+          headers:
+            X-Correlation-ID:
+              $ref: '#/components/headers/CorrelationId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PublicError'
+        '401':
+          description: Refresh token is invalid or expired.
+          headers:
+            X-Correlation-ID:
+              $ref: '#/components/headers/CorrelationId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PublicError'
+        '415':
+          description: Content-Type must be application/json.
+          headers:
+            X-Correlation-ID:
+              $ref: '#/components/headers/CorrelationId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PublicError'
+        '429':
+          $ref: '#/components/responses/PlatformRateLimit'
+        '500':
+          $ref: '#/components/responses/PlatformError'
+        '503':
+          description: Authentication service is unavailable.
+          headers:
+            X-Correlation-ID:
+              $ref: '#/components/headers/CorrelationId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PublicError'
+  /v1/hazards:
+    get:
+      operationId: bnpbPublicListHazards
+      tags: [Hazards]
+      summary: List filtered hazards
+      description: >-
+        The default view is summary. Media is allowed the seven summary fields
+        and receives 403 for view=full; Field Team and Internal Ops may request
+        full records. Use a small limit such as 10 when exploring large source
+        arrays. For P1, capture a public record before and after the separately
+        performed PVMBG schema change, then inspect canonical attributes with
+        the owner-aware terminal tools. This read does not trigger ingestion.
+      security:
+        - BnpbAccessToken: []
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+        - name: source
+          in: query
+          required: false
+          description: Optional source filter.
+          schema:
+            type: string
+            enum: [BMKG, PVMBG]
+        - name: hazard_type
+          in: query
+          required: false
+          description: Optional type filter; must agree with source when both are supplied.
+          schema:
+            type: string
+            enum: [SEISMIC, VOLCANIC]
+        - name: severity
+          in: query
+          required: false
+          description: Optional canonical severity filter.
+          schema:
+            type: string
+            enum: [NORMAL, WASPADA, SIAGA, AWAS]
+        - name: occurred_from
+          in: query
+          required: false
+          description: Inclusive lower event-time bound in RFC 3339 format.
+          schema:
+            type: string
+            format: date-time
+          example: '2026-10-01T00:00:00Z'
+        - name: occurred_to
+          in: query
+          required: false
+          description: Inclusive upper event-time bound in RFC 3339 format; must not precede occurred_from.
+          schema:
+            type: string
+            format: date-time
+          example: '2026-10-22T00:00:00Z'
+        - name: limit
+          in: query
+          required: false
+          description: >-
+            Number of results, from 1 to 500. The service default is 100;
+            specify a small value such as 10 for interactive exploration.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 500
+          example: 10
+        - name: cursor
+          in: query
+          required: false
+          description: Opaque cursor returned by the previous list response; it is bound to its filters.
+          schema:
+            type: string
+            maxLength: 2048
+            pattern: '^[A-Za-z0-9_-]+$'
+          example: sample_cursor_01
+        - name: view
+          in: query
+          required: false
+          description: Summary is the default. Media must not request full.
+          schema:
+            type: string
+            enum: [summary, full]
+            default: summary
+      responses:
+        '200':
+          description: List envelope with the selected projection and source freshness metadata.
+          headers:
+            X-Correlation-ID:
+              $ref: '#/components/headers/CorrelationId'
+          content:
+            application/json:
+              schema:
+                anyOf:
+                  - $ref: '#/components/schemas/HazardListSummary'
+                  - $ref: '#/components/schemas/HazardListFull'
+              example:
+                items:
+                  - hazard_id: demo-hazard-001
+                    source: BMKG
+                    hazard_type: SEISMIC
+                    severity: WASPADA
+                    area_name: Selat Sunda
+                    occurred_at: '2026-10-21T10:12:00Z'
+                    ingested_at: '2026-10-21T10:12:03Z'
+                next_cursor: null
+                sources:
+                  BMKG:
+                    status: healthy
+                    last_successful_poll: '2026-10-21T10:12:01Z'
+                    stale_since: null
+                    last_attempt_at: '2026-10-21T10:12:01Z'
+                    error_category: null
+                    has_cached_data: true
+                    endpoints: {}
+                as_of: '2026-10-21T10:12:05Z'
+        '400':
+          description: Unknown, duplicate, empty, or invalid query parameter.
+          headers:
+            X-Correlation-ID:
+              $ref: '#/components/headers/CorrelationId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PublicError'
+        '401':
+          description: Missing, malformed, expired, or invalid bearer token.
+          headers:
+            X-Correlation-ID:
+              $ref: '#/components/headers/CorrelationId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PublicError'
+        '403':
+          description: Media identity requested view=full.
+          headers:
+            X-Correlation-ID:
+              $ref: '#/components/headers/CorrelationId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PublicError'
+        '429':
+          $ref: '#/components/responses/PlatformRateLimit'
+        '500':
+          $ref: '#/components/responses/PlatformError'
+        '503':
+          description: Aggregator or authentication dependency is unavailable.
+          headers:
+            X-Correlation-ID:
+              $ref: '#/components/headers/CorrelationId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PublicError'
+  /v1/hazards/{hazard_id}:
+    get:
+      operationId: bnpbPublicGetHazard
+      tags: [Hazards]
+      summary: Read one hazard
+      description: >-
+        Use view=summary by default; Media receives 403 for view=full. A 404 is
+        the actual API response when the requested hazard_id is not present.
+        For P1/P3, compare safe fields and access outcomes with the list view.
+      security:
+        - BnpbAccessToken: []
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+        - name: hazard_id
+          in: path
+          required: true
+          description: Canonical hazard identifier.
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 256
+        - name: view
+          in: query
+          required: false
+          description: Summary is the default. Media must not request full.
+          schema:
+            type: string
+            enum: [summary, full]
+            default: summary
+      responses:
+        '200':
+          description: Detail envelope with item projection and source freshness metadata.
+          headers:
+            X-Correlation-ID:
+              $ref: '#/components/headers/CorrelationId'
+          content:
+            application/json:
+              schema:
+                anyOf:
+                  - $ref: '#/components/schemas/HazardDetailSummary'
+                  - $ref: '#/components/schemas/HazardDetailFull'
+              example:
+                item:
+                  hazard_id: demo-hazard-001
+                  source: BMKG
+                  hazard_type: SEISMIC
+                  severity: WASPADA
+                  area_name: Selat Sunda
+                  occurred_at: '2026-10-21T10:12:00Z'
+                  ingested_at: '2026-10-21T10:12:03Z'
+                sources: {}
+                as_of: '2026-10-21T10:12:05Z'
+        '400':
+          description: Invalid hazard_id or unsupported query parameter.
+          headers:
+            X-Correlation-ID:
+              $ref: '#/components/headers/CorrelationId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PublicError'
+        '401':
+          description: Missing, malformed, expired, or invalid bearer token.
+          headers:
+            X-Correlation-ID:
+              $ref: '#/components/headers/CorrelationId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PublicError'
+        '403':
+          description: Media identity requested view=full.
+          headers:
+            X-Correlation-ID:
+              $ref: '#/components/headers/CorrelationId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PublicError'
+        '404':
+          description: Hazard identifier was not found.
+          headers:
+            X-Correlation-ID:
+              $ref: '#/components/headers/CorrelationId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PublicError'
+        '429':
+          $ref: '#/components/responses/PlatformRateLimit'
+        '500':
+          $ref: '#/components/responses/PlatformError'
+        '503':
+          description: Aggregator or authentication dependency is unavailable.
+          headers:
+            X-Correlation-ID:
+              $ref: '#/components/headers/CorrelationId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PublicError'
+  /health:
+    get:
+      operationId: bnpbPublicHealth
+      tags: [Health]
+      summary: Check API liveness
+      description: Public liveness only; a 200 response does not establish source freshness.
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: API process is alive.
+          headers:
+            X-Correlation-ID:
+              $ref: '#/components/headers/CorrelationId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Health'
+              example:
+                service: api
+                status: ok
+  /ready:
+    get:
+      operationId: bnpbPublicReadiness
+      tags: [Health]
+      summary: Check API dependency readiness
+      description: >-
+        Checks the Aggregator readiness and Auth liveness. Readiness does not
+        mean that source data is current; inspect the sources object on a
+        hazard response for per-source freshness.
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: Required API dependencies reported ready; response body is empty.
+          headers:
+            X-Correlation-ID:
+              $ref: '#/components/headers/CorrelationId'
+        '503':
+          description: A required API dependency is unavailable; plain-text response body.
+          headers:
+            X-Correlation-ID:
+              $ref: '#/components/headers/CorrelationId'
+          content:
+            text/plain:
+              schema:
+                type: string
+              example: API dependency is unavailable
+components:
+  parameters:
+    CorrelationId:
+      name: X-Correlation-ID
+      in: header
+      required: false
+      description: Optional request correlation value, 1-64 characters from letters, digits, dot, underscore, or hyphen.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 64
+        pattern: '^[A-Za-z0-9._-]+$'
+      example: demo-p1-v2-01
+  headers:
+    CorrelationId:
+      description: Echoed request identifier, or a generated identifier when absent or invalid.
+      schema:
+        type: string
+  responses:
+    PlatformRateLimit:
+      description: Shared concurrency limit; this flat platform response differs from the API error envelope.
+      headers:
+        X-Correlation-ID:
+          $ref: '#/components/headers/CorrelationId'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/PlatformError'
+          example:
+            error: too many requests
+    PlatformError:
+      description: Recovered unexpected panic; response is a flat platform error.
+      headers:
+        X-Correlation-ID:
+          $ref: '#/components/headers/CorrelationId'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/PlatformError'
+          example:
+            error: internal server error
+  securitySchemes:
+    BnpbAccessToken:
+      type: http
+      scheme: bearer
+      bearerFormat: Opaque access token
+      description: >-
+        Paste only the access_token string from BNPB login. Swagger adds the
+        Bearer prefix. This is an opaque token, not a JWT. Media is restricted
+        to summary projection by backend authorization.
+  schemas:
+    LoginRequest:
+      type: object
+      additionalProperties: false
+      required: [client_id, client_secret]
+      properties:
+        client_id:
+          type: string
+          minLength: 1
+          description: Backend-configured identity, such as media, field-team, or internal-ops.
+        client_secret:
+          type: string
+          minLength: 1
+          writeOnly: true
+          description: Enter privately; Swagger's raw JSON editor does not mask this value.
+    RefreshRequest:
+      type: object
+      additionalProperties: false
+      required: [refresh_token]
+      properties:
+        refresh_token:
+          type: string
+          minLength: 1
+          writeOnly: true
+          description: Enter privately; do not save or export the request.
+    TokenResponse:
+      type: object
+      required: [access_token, token_type, expires_in, refresh_token, refresh_expires_in]
+      properties:
+        access_token:
+          type: string
+          description: Opaque bearer access token.
+        token_type:
+          type: string
+          enum: [Bearer]
+        expires_in:
+          type: integer
+          format: int64
+          description: Access-token lifetime in seconds; defaults to 60.
+        refresh_token:
+          type: string
+          description: Rotating refresh token. Treat as a secret.
+        refresh_expires_in:
+          type: integer
+          format: int64
+          description: Remaining refresh-session lifetime in seconds.
+    PublicError:
+      description: Public errors plus the Aggregator's passthrough read errors. Aggregator errors may include source freshness metadata.
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message, correlation_id]
+          properties:
+            code:
+              type: string
+              enum: [invalid_request, invalid_query, missing_token, invalid_token, invalid_credentials, invalid_refresh_token, forbidden, dependency_unavailable, not_found, source_unavailable, store_unavailable]
+            message:
+              type: string
+            correlation_id:
+              type: string
+        sources:
+          $ref: '#/components/schemas/Sources'
+        as_of:
+          type: string
+          format: date-time
+          nullable: true
+    PlatformError:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+    Health:
+      type: object
+      required: [service, status]
+      properties:
+        service:
+          type: string
+          example: api
+        status:
+          type: string
+          enum: [ok]
+    HazardSummary:
+      type: object
+      required: [hazard_id, source, hazard_type, severity, area_name, occurred_at, ingested_at]
+      additionalProperties: false
+      properties:
+        hazard_id:
+          type: string
+        source:
+          type: string
+          enum: [BMKG, PVMBG]
+        hazard_type:
+          type: string
+          enum: [SEISMIC, VOLCANIC]
+        severity:
+          type: string
+          enum: [NORMAL, WASPADA, SIAGA, AWAS]
+        area_name:
+          type: string
+        occurred_at:
+          type: string
+          format: date-time
+          pattern: 'Z$'
+        ingested_at:
+          type: string
+          format: date-time
+          pattern: 'Z$'
+    HazardFull:
+      type: object
+      required: [hazard_id, source, hazard_type, severity, area_name, occurred_at, ingested_at, source_ref_id, latitude, longitude, attributes]
+      additionalProperties: false
+      properties:
+        hazard_id:
+          type: string
+        source:
+          type: string
+          enum: [BMKG, PVMBG]
+        hazard_type:
+          type: string
+          enum: [SEISMIC, VOLCANIC]
+        severity:
+          type: string
+          enum: [NORMAL, WASPADA, SIAGA, AWAS]
+        area_name:
+          type: string
+        occurred_at:
+          type: string
+          format: date-time
+          pattern: 'Z$'
+        ingested_at:
+          type: string
+          format: date-time
+          pattern: 'Z$'
+        source_ref_id:
+          type: string
+        latitude:
+          type: number
+          minimum: -90
+          maximum: 90
+        longitude:
+          type: number
+          minimum: -180
+          maximum: 180
+        attributes:
+          type: object
+          additionalProperties: true
+          description: Source-specific fields. Shape can evolve additively.
+    SourceObservation:
+      type: object
+      required: [status, last_successful_poll, stale_since, last_attempt_at, error_category]
+      properties:
+        status:
+          type: string
+          enum: [healthy, unavailable, stale]
+        last_successful_poll:
+          type: string
+          format: date-time
+          nullable: true
+        stale_since:
+          type: string
+          format: date-time
+          nullable: true
+        last_attempt_at:
+          type: string
+          format: date-time
+          nullable: true
+        error_category:
+          type: string
+          enum: [outage, auth, rate_limited, timeout, network, invalid_response, store, null]
+          nullable: true
+    SourceFreshness:
+      allOf:
+        - $ref: '#/components/schemas/SourceObservation'
+        - type: object
+          required: [has_cached_data, endpoints]
+          properties:
+            has_cached_data:
+              type: boolean
+            endpoints:
+              type: object
+              additionalProperties:
+                $ref: '#/components/schemas/SourceObservation'
+    Sources:
+      type: object
+      description: Per-source state; BMKG may include seismic_events and tsunami_warnings endpoint entries.
+      properties:
+        BMKG:
+          $ref: '#/components/schemas/SourceFreshness'
+        PVMBG:
+          $ref: '#/components/schemas/SourceFreshness'
+      additionalProperties: false
+    HazardListSummary:
+      type: object
+      required: [items, next_cursor, sources, as_of]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/HazardSummary'
+        next_cursor:
+          type: string
+          nullable: true
+        sources:
+          $ref: '#/components/schemas/Sources'
+        as_of:
+          type: string
+          format: date-time
+          pattern: 'Z$'
+    HazardListFull:
+      type: object
+      required: [items, next_cursor, sources, as_of]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/HazardFull'
+        next_cursor:
+          type: string
+          nullable: true
+        sources:
+          $ref: '#/components/schemas/Sources'
+        as_of:
+          type: string
+          format: date-time
+          pattern: 'Z$'
+    HazardDetailSummary:
+      type: object
+      required: [item, sources, as_of]
+      properties:
+        item:
+          $ref: '#/components/schemas/HazardSummary'
+        sources:
+          $ref: '#/components/schemas/Sources'
+        as_of:
+          type: string
+          format: date-time
+          pattern: 'Z$'
+    HazardDetailFull:
+      type: object
+      required: [item, sources, as_of]
+      properties:
+        item:
+          $ref: '#/components/schemas/HazardFull'
+        sources:
+          $ref: '#/components/schemas/Sources'
+        as_of:
+          type: string
+          format: date-time
+          pattern: 'Z$'

@@ -712,6 +712,8 @@ This contract covers the **internal** read API (`GET /internal/hazards`, `GET /i
 
 There is no graphical interface anywhere in this system — every component, including the three broker consumers, is a headless API driven by `curl`, a script, or the Swagger UI above.
 
+The implemented M1 Swagger demo setupadds an optional local, same-origin interface for the public BNPB and mock-source APIs, with database inspection, load tests, and container operations remaining in terminal tools. See [the operator runbook](demo/swagger/README.md); the standalone example above still covers only the internal Aggregator contract.
+
 ## Creators
 
 <table>
