@@ -12,6 +12,7 @@ labels:
 resources:
   - namespace.yaml
   - serviceaccount.yaml
+  - mocks.yaml
 
 configMapGenerator:
   - name: bnpb-common
@@ -35,3 +36,13 @@ configMapGenerator:
 secretGenerator:
   - name: bnpb-secrets
     envs: [secrets.env]
+
+# Built by .github/workflows/images.yml. newTag is the branch name with "/"
+# replaced by "-" (e.g. feat-k8s-platform) or "main".
+images:
+  - name: aat/bmkg
+    newName: ghcr.io/staryo40/asosiasiadmirertsundere/bmkg
+    newTag: main
+  - name: aat/pvmbg
+    newName: ghcr.io/staryo40/asosiasiadmirertsundere/pvmbg
+    newTag: main
