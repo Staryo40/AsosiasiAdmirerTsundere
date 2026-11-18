@@ -111,7 +111,7 @@ spec:
       containers:
         - name: broker-init
           image: aat/broker-init
-          imagePullPolicy: Always
+          imagePullPolicy: IfNotPresent
           envFrom:
             - configMapRef:
                 name: bnpb-identities

@@ -16,7 +16,7 @@ spec:
       containers:
         - name: bmkg
           image: aat/bmkg
-          imagePullPolicy: Always
+          imagePullPolicy: IfNotPresent
           ports:
             - name: http
               containerPort: 8081
@@ -68,7 +68,7 @@ spec:
       containers:
         - name: pvmbg
           image: aat/pvmbg
-          imagePullPolicy: Always
+          imagePullPolicy: IfNotPresent
           # The image default (75% heap) leaves no room for metaspace and threads
           # under the 128Mi mock limit from Lampiran B.
           command:

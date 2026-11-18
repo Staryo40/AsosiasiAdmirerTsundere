@@ -30,7 +30,7 @@ spec:
       containers:
         - name: aggregator
           image: aat/bnpb-aggregator
-          imagePullPolicy: Always
+          imagePullPolicy: IfNotPresent
           ports:
             - name: http
               containerPort: 8083
