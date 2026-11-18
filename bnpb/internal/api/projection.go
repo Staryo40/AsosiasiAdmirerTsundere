@@ -101,10 +101,13 @@ func validateHazard(event hazardEvent) error {
 	if event.HazardID == "" || event.SourceRefID == "" || event.AreaName == "" {
 		return errors.New("hazard identity or area is empty")
 	}
-	if event.Source != "BMKG" && event.Source != "PVMBG" {
+	if !validSource(event.Source) {
 		return errors.New("hazard source is invalid")
 	}
-	if event.Source == "BMKG" && event.HazardType != "SEISMIC" || event.Source == "PVMBG" && event.HazardType != "VOLCANIC" {
+	if !validHazardType(event.HazardType) {
+		return errors.New("hazard type is invalid")
+	}
+	if !validSourceType(event.Source, event.HazardType) {
 		return errors.New("hazard source and type are inconsistent")
 	}
 	if event.Severity != "NORMAL" && event.Severity != "WASPADA" && event.Severity != "SIAGA" && event.Severity != "AWAS" {

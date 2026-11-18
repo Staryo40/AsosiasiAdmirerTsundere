@@ -103,18 +103,38 @@ func aggregatorDependency(t *testing.T, calls *atomic.Int32) http.Handler {
 		if request.URL.Query().Has("view") {
 			t.Error("public view parameter leaked to Aggregator")
 		}
+		event := sampleEvent()
+		source := request.URL.Query().Get("source")
+		if source == "" {
+			switch {
+			case strings.HasSuffix(request.URL.Path, "haz-satelit"):
+				source = "SATELIT"
+			case strings.HasSuffix(request.URL.Path, "haz-coastal"):
+				source = "SENSOR_PANTAI"
+			}
+		}
+		hazardTypes := map[string]string{"BMKG": "SEISMIC", "PVMBG": "VOLCANIC", "SATELIT": "WILDFIRE", "SENSOR_PANTAI": "COASTAL"}
+		if hazardType, ok := hazardTypes[source]; ok {
+			event["source"] = source
+			event["hazard_type"] = hazardType
+			if strings.HasSuffix(request.URL.Path, "haz-satelit") || strings.HasSuffix(request.URL.Path, "haz-coastal") {
+				event["hazard_id"] = request.URL.Path[strings.LastIndex(request.URL.Path, "/")+1:]
+			}
+		} else {
+			source = "BMKG"
+		}
 		w.Header().Set("Content-Type", "application/json")
-		metadata := map[string]any{"BMKG": map[string]any{"status": "healthy"}}
+		metadata := map[string]any{source: map[string]any{"status": "healthy"}}
 		if request.URL.Path == "/internal/hazards" {
 			_ = json.NewEncoder(w).Encode(map[string]any{
-				"items": []any{sampleEvent()}, "next_cursor": nil,
+				"items": []any{event}, "next_cursor": nil,
 				"sources": metadata, "as_of": "2026-10-07T12:00:01Z",
 			})
 			return
 		}
-		if request.URL.Path == "/internal/hazards/haz-1" {
+		if request.URL.Path == "/internal/hazards/haz-1" || request.URL.Path == "/internal/hazards/haz-satelit" || request.URL.Path == "/internal/hazards/haz-coastal" {
 			_ = json.NewEncoder(w).Encode(map[string]any{
-				"item": sampleEvent(), "sources": metadata, "as_of": "2026-10-07T12:00:01Z",
+				"item": event, "sources": metadata, "as_of": "2026-10-07T12:00:01Z",
 			})
 			return
 		}
@@ -212,6 +232,7 @@ func TestInvalidQueriesAreRejectedBeforeAggregator(t *testing.T) {
 	handler := testPublicHandler(t, authDependency(t), aggregatorDependency(t, &calls))
 	for _, query := range []string{
 		"unknown=x", "view=summary&view=full", "source=BMKG&hazard_type=VOLCANIC",
+		"severity=UNKNOWN",
 		"limit=0", "occurred_from=2026-10-08T00:00:00Z&occurred_to=2026-10-07T00:00:00Z",
 	} {
 		response := publicRequest(handler, http.MethodGet, "/v1/hazards?"+query, "field-token", "")
@@ -221,6 +242,124 @@ func TestInvalidQueriesAreRejectedBeforeAggregator(t *testing.T) {
 	}
 	if calls.Load() != 0 {
 		t.Fatalf("invalid query reached Aggregator; calls=%d", calls.Load())
+	}
+}
+func TestNewSourcePairsAreAvailableThroughPublicAPI(t *testing.T) {
+	for _, test := range []struct {
+		name, source, hazardType, detailID string
+	}{
+		{name: "satellite", source: "SATELIT", hazardType: "WILDFIRE", detailID: "haz-satelit"},
+		{name: "coastal sensor", source: "SENSOR_PANTAI", hazardType: "COASTAL", detailID: "haz-coastal"},
+	} {
+		for _, role := range []string{roleField, roleOps} {
+			t.Run(test.name+"/"+role, func(t *testing.T) {
+				var calls atomic.Int32
+				handler := testPublicHandler(t, authDependency(t), aggregatorDependency(t, &calls))
+				query := "?source=" + test.source + "&hazard_type=" + test.hazardType
+				for _, target := range []string{"/v1/hazards" + query, "/v1/hazards" + query + "&view=full", "/v1/hazards/" + test.detailID + "?view=full"} {
+					response := publicRequest(handler, http.MethodGet, target, role+"-token", "")
+					if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"`+test.source+`"`) || !strings.Contains(response.Body.String(), `"`+test.hazardType+`"`) {
+						t.Fatalf("new source request %q returned %d: %s", target, response.Code, response.Body.String())
+					}
+					if strings.Contains(target, "view=full") {
+						for _, field := range []string{"source_ref_id", "latitude", "longitude", "attributes"} {
+							if !strings.Contains(response.Body.String(), `"`+field+`"`) {
+								t.Fatalf("full response lacks %s: %s", field, response.Body.String())
+							}
+						}
+					}
+				}
+				if calls.Load() != 3 {
+					t.Fatalf("new source requests reached Aggregator %d times, want 3", calls.Load())
+				}
+			})
+		}
+	}
+}
+
+func TestMediaGetsOnlySummaryForNewSources(t *testing.T) {
+	for _, source := range []string{"SATELIT", "SENSOR_PANTAI"} {
+		t.Run(source, func(t *testing.T) {
+			var calls atomic.Int32
+			handler := testPublicHandler(t, authDependency(t), aggregatorDependency(t, &calls))
+			summary := publicRequest(handler, http.MethodGet, "/v1/hazards?source="+source, "media-token", "")
+			if summary.Code != http.StatusOK {
+				t.Fatalf("summary returned %d: %s", summary.Code, summary.Body.String())
+			}
+			var body struct {
+				Items []map[string]json.RawMessage `json:"items"`
+			}
+			if err := json.Unmarshal(summary.Body.Bytes(), &body); err != nil || len(body.Items) != 1 {
+				t.Fatalf("invalid summary response: %v", err)
+			}
+			for field := range body.Items[0] {
+				switch field {
+				case "hazard_id", "source", "hazard_type", "severity", "area_name", "occurred_at", "ingested_at":
+				default:
+					t.Errorf("Media summary contains unexpected field %q", field)
+				}
+			}
+			for _, forbidden := range []string{"source_ref_id", "latitude", "longitude", "attributes"} {
+				if strings.Contains(summary.Body.String(), `"`+forbidden+`"`) {
+					t.Fatalf("raw field %s leaked to Media: %s", forbidden, summary.Body.String())
+				}
+			}
+			full := publicRequest(handler, http.MethodGet, "/v1/hazards?source="+source+"&view=full", "media-token", "")
+			if full.Code != http.StatusForbidden || calls.Load() != 1 {
+				t.Fatalf("Media full request returned %d and reached Aggregator %d times", full.Code, calls.Load())
+			}
+		})
+	}
+}
+
+func TestEveryInvalidSourceTypePairIsRejectedBeforeAggregator(t *testing.T) {
+	var calls atomic.Int32
+	handler := testPublicHandler(t, authDependency(t), aggregatorDependency(t, &calls))
+	pairs := []struct{ source, hazardType string }{
+		{"BMKG", "VOLCANIC"}, {"BMKG", "WILDFIRE"}, {"BMKG", "COASTAL"},
+		{"PVMBG", "SEISMIC"}, {"PVMBG", "WILDFIRE"}, {"PVMBG", "COASTAL"},
+		{"SATELIT", "SEISMIC"}, {"SATELIT", "VOLCANIC"}, {"SATELIT", "COASTAL"},
+		{"SENSOR_PANTAI", "SEISMIC"}, {"SENSOR_PANTAI", "VOLCANIC"}, {"SENSOR_PANTAI", "WILDFIRE"},
+	}
+	for _, pair := range pairs {
+		response := publicRequest(handler, http.MethodGet, "/v1/hazards?source="+pair.source+"&hazard_type="+pair.hazardType, "field-token", "")
+		if response.Code != http.StatusBadRequest {
+			t.Errorf("pair %s/%s returned %d, want 400", pair.source, pair.hazardType, response.Code)
+		}
+	}
+	for _, query := range []string{"source=UNKNOWN", "hazard_type=UNKNOWN"} {
+		response := publicRequest(handler, http.MethodGet, "/v1/hazards?"+query, "field-token", "")
+		if response.Code != http.StatusBadRequest {
+			t.Errorf("query %q returned %d, want 400", query, response.Code)
+		}
+	}
+	if calls.Load() != 0 {
+		t.Fatalf("invalid filters reached Aggregator %d times", calls.Load())
+	}
+}
+
+func TestResponseRejectsUnknownSourceAndHazardType(t *testing.T) {
+	for _, test := range []struct {
+		name, source, hazardType string
+	}{
+		{name: "unknown source", source: "UNKNOWN", hazardType: "SEISMIC"},
+		{name: "unknown hazard type", source: "BMKG", hazardType: "UNKNOWN"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			event := sampleEvent()
+			event["source"], event["hazard_type"] = test.source, test.hazardType
+			payload, err := json.Marshal(map[string]any{
+				"items": []any{event}, "next_cursor": nil,
+				"sources": map[string]any{"BMKG": map[string]any{"status": "healthy"}},
+				"as_of":   "2026-10-07T12:00:01Z",
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := projectList(payload, viewSummary); err == nil {
+				t.Fatal("response with unknown source/type was accepted")
+			}
+		})
 	}
 }
 

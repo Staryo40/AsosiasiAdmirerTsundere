@@ -25,6 +25,7 @@ var reconnectBackoff = []time.Duration{time.Second, 2 * time.Second, 5 * time.Se
 
 // envelope is the consumer side of contracts/v1/schemas/hazard-notification.schema.json.
 type envelope struct {
+	SchemaVersion int    `json:"schema_version"`
 	MessageID     string `json:"message_id"`
 	HazardID      string `json:"hazard_id"`
 	Revision      int64  `json:"revision"`
@@ -161,7 +162,36 @@ func waitBackoff(ctx context.Context, delay time.Duration) error {
 	}
 }
 
+func validSourceType(source, hazardType string) bool {
+	switch source {
+	case "BMKG":
+		return hazardType == "SEISMIC"
+	case "PVMBG":
+		return hazardType == "VOLCANIC"
+	case "SATELIT":
+		return hazardType == "WILDFIRE"
+	case "SENSOR_PANTAI":
+		return hazardType == "COASTAL"
+	default:
+		return false
+	}
+}
+
+func (env envelope) supportedNotification() bool {
+	if env.SchemaVersion != 1 {
+		return false
+	}
+	return env.Revision == 1 && env.EventType == "hazard.created" ||
+		env.Revision > 1 && env.EventType == "hazard.updated"
+}
+
 func (worker *consumer) applyEnvelope(ctx context.Context, messageID string, env envelope) (ApplyResult, error) {
+	if !env.supportedNotification() {
+		return ApplyResult{}, errors.New("unsupported notification version or lifecycle")
+	}
+	if !validSourceType(env.HazardEvent.Source, env.HazardEvent.HazardType) {
+		return ApplyResult{}, errors.New("invalid source/hazard_type pair")
+	}
 	return worker.store.Apply(ctx, HazardUpdate{
 		MessageID:  messageID,
 		HazardID:   env.HazardID,
