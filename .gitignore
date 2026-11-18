@@ -2,6 +2,8 @@
 .env
 .env.*
 !.env.example
+k8s/secrets.env
+kubeconfig*.yaml
 
 # OS
 .DS_Store

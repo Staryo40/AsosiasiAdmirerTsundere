@@ -1,0 +1,37 @@
+# Whole BNPB system: kubectl apply -k k8s (setup steps in KUBERNETES-DEPLOYMENT.md).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: sistem-informasi-kebencanaan-bnpb
+
+labels:
+  - pairs:
+      app.kubernetes.io/part-of: bnpb
+    includeSelectors: false
+
+resources:
+  - namespace.yaml
+  - serviceaccount.yaml
+
+configMapGenerator:
+  - name: bnpb-common
+    envs: [config/bnpb-common.env]
+  - name: bnpb-identities
+    envs: [config/identities.env]
+  - name: bmkg-config
+    envs: [config/bmkg.env]
+  - name: pvmbg-config
+    envs: [config/pvmbg.env]
+  - name: aggregator-config
+    envs: [config/aggregator.env]
+  - name: auth-config
+    envs: [config/auth.env]
+  - name: api-config
+    envs: [config/api.env]
+  - name: consumer-config
+    envs: [config/consumer.env]
+
+# k8s/secrets.env is git-ignored; generate it from secrets.env.example.
+secretGenerator:
+  - name: bnpb-secrets
+    envs: [secrets.env]
