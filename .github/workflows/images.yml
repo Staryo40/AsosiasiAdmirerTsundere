@@ -1,13 +1,9 @@
 name: Images
 
+# Manual only: the cluster deploys images pushed to Docker Hub from a laptop
+# (KUBERNETES-DEPLOYMENT.md). This GHCR build stays available for when the
+# repository owner's Actions billing allows it.
 on:
-  push:
-    branches: [main, "feat/**", "fix/**"]
-    paths:
-      - bmkg/**
-      - pvmbg/**
-      - bnpb/**
-      - .github/workflows/images.yml
   workflow_dispatch:
 
 permissions:
