@@ -44,33 +44,32 @@ secretGenerator:
   - name: bnpb-secrets
     envs: [secrets.env]
 
-# Built by .github/workflows/images.yml. newTag is the branch name with "/"
-# replaced by "-" (e.g. feat-k8s-platform) or "main".
+# One private Docker Hub repository; the tag names the component.
 images:
   - name: aat/bmkg
-    newName: ghcr.io/staryo40/asosiasiadmirertsundere/bmkg
-    newTag: main
+    newName: docker.io/salmaanhaniif11/aat-bnpb
+    newTag: bmkg
   - name: aat/pvmbg
-    newName: ghcr.io/staryo40/asosiasiadmirertsundere/pvmbg
-    newTag: main
+    newName: docker.io/salmaanhaniif11/aat-bnpb
+    newTag: pvmbg
   - name: aat/bnpb-aggregator
-    newName: ghcr.io/staryo40/asosiasiadmirertsundere/bnpb-aggregator
-    newTag: main
+    newName: docker.io/salmaanhaniif11/aat-bnpb
+    newTag: aggregator
   - name: aat/bnpb-api
-    newName: ghcr.io/staryo40/asosiasiadmirertsundere/bnpb-api
-    newTag: main
+    newName: docker.io/salmaanhaniif11/aat-bnpb
+    newTag: api
   - name: aat/bnpb-auth
-    newName: ghcr.io/staryo40/asosiasiadmirertsundere/bnpb-auth
-    newTag: main
+    newName: docker.io/salmaanhaniif11/aat-bnpb
+    newTag: auth
   - name: aat/bnpb-consumer-1
-    newName: ghcr.io/staryo40/asosiasiadmirertsundere/bnpb-consumer-1
-    newTag: main
+    newName: docker.io/salmaanhaniif11/aat-bnpb
+    newTag: consumer-1
   - name: aat/bnpb-consumer-2
-    newName: ghcr.io/staryo40/asosiasiadmirertsundere/bnpb-consumer-2
-    newTag: main
+    newName: docker.io/salmaanhaniif11/aat-bnpb
+    newTag: consumer-2
   - name: aat/bnpb-consumer-3
-    newName: ghcr.io/staryo40/asosiasiadmirertsundere/bnpb-consumer-3
-    newTag: main
+    newName: docker.io/salmaanhaniif11/aat-bnpb
+    newTag: consumer-3
   - name: aat/broker-init
-    newName: ghcr.io/staryo40/asosiasiadmirertsundere/broker-init
-    newTag: main
+    newName: docker.io/salmaanhaniif11/aat-bnpb
+    newTag: broker-init
