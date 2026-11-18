@@ -19,6 +19,7 @@ resources:
   - auth.yaml
   - api.yaml
   - consumers.yaml
+  - network-policies.yaml
 
 configMapGenerator:
   - name: bnpb-common
