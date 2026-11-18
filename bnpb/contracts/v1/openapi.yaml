@@ -6,6 +6,9 @@ info:
     A1 snapshot API for the authenticated A2 service. Only Aggregator accesses
     Canonical Store. Reads do not wait for agency or broker calls. Mapping,
     freshness rollups, authorization and cursor semantics are specified in README.md.
+    M2 accepts BMKG/SEISMIC, PVMBG/VOLCANIC, SATELIT/WILDFIRE and
+    SENSOR_PANTAI/COASTAL only. New-source cached reads report source_not_configured
+    until their owning ingest adapters are activated; no TSUNAMI enum is defined.
 security:
   - InternalKey: []
 paths:
@@ -214,7 +217,7 @@ components:
           $ref: '#/components/schemas/NullableTimestamp'
         error_category:
           type: [string, 'null']
-          enum: [outage, auth, rate_limited, timeout, network, invalid_response, store, null]
+          enum: [outage, auth, rate_limited, timeout, network, invalid_response, store, source_not_configured, null]
     SourceState:
       type: object
       description: Rollup formulas and hung-poll thresholds are specified in README.md.
@@ -239,7 +242,7 @@ components:
       type: object
       description: Only selected sources, or the detail record's source, are present.
       minProperties: 1
-      maxProperties: 2
+      maxProperties: 4
       additionalProperties: false
       properties:
         BMKG:
@@ -266,6 +269,21 @@ components:
                   properties:
                     volcanic_reports:
                       $ref: '#/components/schemas/Observation'
+        SATELIT:
+          $ref: '#/components/schemas/UnconfiguredSourceState'
+        SENSOR_PANTAI:
+          $ref: '#/components/schemas/UnconfiguredSourceState'
+    UnconfiguredSourceState:
+      allOf:
+        - $ref: '#/components/schemas/SourceState'
+        - properties:
+            status:
+              enum: [stale, unavailable]
+            error_category:
+              const: source_not_configured
+            endpoints:
+              type: object
+              maxProperties: 0
     HazardList:
       type: object
       required: [items, next_cursor, sources, as_of]
