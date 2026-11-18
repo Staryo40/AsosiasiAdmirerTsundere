@@ -167,15 +167,15 @@ Platform-wide conventions apply to every service below (see [Shared platform beh
 
 | Param | Rule |
 | --- | --- |
-| `source` | `BMKG` or `PVMBG` |
-| `hazard_type` | `SEISMIC` or `VOLCANIC` |
+| `source` | `BMKG`, `PVMBG`, `SATELIT`, or `SENSOR_PANTAI` |
+| `hazard_type` | `SEISMIC`, `VOLCANIC`, `WILDFIRE`, or `COASTAL` |
 | `severity` | `NORMAL`, `WASPADA`, `SIAGA`, or `AWAS` |
 | `occurred_from`, `occurred_to` | RFC3339Nano; `from` must not be after `to` |
 | `limit` | integer, 1–500 |
 | `cursor` | opaque string, ≤2048 chars, `^[A-Za-z0-9_-]+$` — not decoded by the API, passed straight to the Aggregator |
 | `view` | `summary` (default) or `full`; stripped before forwarding upstream |
 
-`source`/`hazard_type` must be consistent (`BMKG`+`VOLCANIC` or `PVMBG`+`SEISMIC` → `400`). `role=media` requesting `view=full` → `403 forbidden`, on both list and detail.
+Only `BMKG/SEISMIC`, `PVMBG/VOLCANIC`, `SATELIT/WILDFIRE`, and `SENSOR_PANTAI/COASTAL` are valid pairs; every cross-pair returns `400`. There is no `TSUNAMI` enum. `role=media` requesting `view=full` → `403 forbidden`, on both list and detail.
 
 **`GET /v1/hazards/{hazard_id}`** — only `view` is accepted (same enum/role rules as list). `hazard_id` empty or >256 chars → `400`. Not-found and most upstream errors are passed through verbatim from the Aggregator (see below); if the Aggregator's response body isn't valid JSON, the API answers `503 dependency_unavailable` instead of passing a broken body through.
 
@@ -280,3 +280,21 @@ Each consumer exposes only two routes, both unauthenticated (internal network on
 - **Concurrency limiting (429)** — every service's whole mux is wrapped by a semaphore sized `BNPB_MAX_IN_FLIGHT` (default 64). Once full, excess requests get `429 {"error":"too many requests"}` immediately — note this is a **flatter** shape than the API's own `publicError` (no `code`/`correlation_id` keys). `/health` is exempt.
 - **Panic recovery (500)** — any unhandled panic anywhere becomes a clean `500 {"error":"internal server error"}`, never a crash or a leaked stack trace to the client.
 - **No business-logic sharing** — every `internal/<service>` package only ever imports `internal/platform`, enforced by CI lint (`depguard`). Each consumer's AMQP/SQLite code is its own copy by design (KI.1), not a shared library.
+
+## M2 Member 1 Step 1–4 boundary
+
+Canonical enums, consumer/API validation, migration 005, fixed `sha256-32be-v1` logical IDs, migration 006 placement metadata and migration 007 storage guards are implemented here. The [contract and handoffs](contracts/v1/README.md#kontrak-implementasi-member-1--step-14) distinguish proposed lifecycle/fencing/read contracts from runtime. Existing ingestion still uses the configured single M1 database: **no Step 5 routed per-shard writer, HA deployment, fencing, wildfire/retract processor, Audit or repair is claimed**.
+
+Migration preserves public records, revisions, outbox, poll state and rejects; generated shard columns backfill by source identity, warnings by `related_event_id`. Startup runs migrations atomically and can hold DDL locks/backfill time: coordinate binary/schema cutover rather than claiming zero-lock online migration. Old binaries reject schema version 7. Do not activate new-source ingestion until its writer/lifecycle/authority and consumer contracts are implemented.
+
+Placement starts empty unless configured through `BNPB_SHARD_PLACEMENT`, a bounded startup-only JSON environment value from an Aggregator-only ConfigMap. `OpenStore` atomically migrates and bootstraps it before readiness: first initialization requires RF2-ready metadata; identical configuration/reordering/restarts are no-ops; stale different content or future revisions fail startup. Omission preserves storage. Structured `placement_loaded` logs expose the actual revision/count for the next CAS update. No new admin endpoint, reader privilege, watcher or dependency is added. Copy identity/no-forgetting/no-full-node guards remain enforced; metadata does not provision physical replicas. See the [bootstrap and selected fencing contract](contracts/v1/README.md#placement-bootstrap). SATELIT/SENSOR_PANTAI freshness remains explicitly unconfigured until their adapters exist.
+
+Local verification from `bnpb/`:
+
+```text
+go test ./internal/aggregator ./internal/api ./internal/consumer-1 ./internal/consumer-2 ./internal/consumer-3
+```
+
+From application root: `python -B -m unittest discover -s testing -p test_canonical_contracts.py`.
+
+PostgreSQL integration fixtures are opt-in: start a **new disposable loopback PostgreSQL 18** server on a free port, create database `bnpb_m2_step4_test`, set `BNPB_M2_LOCAL_TEST_DATABASE_URL` to that server/database with an explicit port, then run `go test -tags=integration -run '^Test(M2|Placement)' ./internal/aggregator` from `bnpb/`. Each test creates/removes its own random schema; this environment variable must never point to a service/canonical database. These fixtures do not replace the separate `postgres-test/bnpb_test` M1 Compose scenarios or demonstrate distributed HA/fault acceptance.

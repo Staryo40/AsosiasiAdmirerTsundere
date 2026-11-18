@@ -226,6 +226,7 @@ defaults used by this repository.
 | `BNPB_PVMBG_READER_CLIENT_SECRET` | `required / match` | PVMBG reader secret; equal to `PVMBG_READER_CLIENT_SECRET`. |
 | `BNPB_AGGREGATOR_INTERNAL_KEY` | `required` | API ↔ Aggregator trust key; at least 32 bytes. |
 | `BNPB_CANONICAL_DATABASE_URL` | `required` | PostgreSQL DSN, e.g. `postgres://bnpb:<password>@postgres:5432/bnpb?sslmode=disable`. |
+| `BNPB_SHARD_PLACEMENT` | empty / preserve | Optional Aggregator startup-only JSON `{revision,copies}`; [bootstrap contract](bnpb/contracts/v1/README.md#placement-bootstrap). No admin API or live reload. |
 | `BNPB_AMQP_URL` | `required` | Publisher AMQP URL, e.g. `amqp://publisher:<password>@rabbitmq:5672`. |
 | `BNPB_HAZARD_EXCHANGE` | `hazard.events` | RabbitMQ fanout exchange. |
 | `BNPB_BMKG_POLL_INTERVAL` | `3s` | BMKG polling interval. |
