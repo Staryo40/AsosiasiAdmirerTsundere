@@ -13,6 +13,8 @@ resources:
   - namespace.yaml
   - serviceaccount.yaml
   - mocks.yaml
+  - store.yaml
+  - broker.yaml
 
 configMapGenerator:
   - name: bnpb-common
@@ -45,4 +47,7 @@ images:
     newTag: main
   - name: aat/pvmbg
     newName: ghcr.io/staryo40/asosiasiadmirertsundere/pvmbg
+    newTag: main
+  - name: aat/broker-init
+    newName: ghcr.io/staryo40/asosiasiadmirertsundere/broker-init
     newTag: main
