@@ -153,10 +153,13 @@ Semua pod harus `Running` dan `Ready`, kecuali `broker-init` yang berakhir `Comp
 otomatis dua menit kemudian dan berjalan lagi pada `apply` berikutnya, karena provisioning broker aman
 diulang.
 
-Setelah mem-push image baru dengan tag yang sama, jalankan ulang pod agar image baru ditarik:
+Pod memakai `imagePullPolicy: IfNotPresent`: node memakai image yang sudah ada dan hanya menarik dari
+registry jika belum ada, sehingga pod yang dipindahkan saat node mati tidak bergantung pada registry.
+Akibatnya, image baru dengan tag yang sama tidak ditarik otomatis. Untuk memperbarui satu komponen,
+muat image barunya ke setiap node (lihat [Tanpa registry](#tanpa-registry)), lalu jalankan ulang pod:
 
 ```text
-kubectl -n sistem-informasi-kebencanaan-bnpb rollout restart deployment,statefulset
+kubectl -n sistem-informasi-kebencanaan-bnpb rollout restart deployment/<nama>
 ```
 
 ### Endpoint
@@ -196,12 +199,12 @@ kubectl delete -k k8s
 
 ## Tanpa registry
 
-Jika registry atau internet tidak tersedia, salin image langsung ke **setiap** node lalu deploy tanpa
-menarik image:
+Image juga bisa dimuat langsung ke **setiap** node tanpa registry, misalnya saat registry membatasi
+permintaan (`429 Too Many Requests`) atau internet tidak tersedia. Sertakan image pihak ketiga agar
+node tidak perlu menariknya:
 
 ```text
-docker save -o images.tar <repo>
+docker save -o images.tar <repo> postgres:18.6-alpine rabbitmq:4.3.5-management-alpine
 scp images.tar <user>@<ip-node>:/tmp/
-ssh -t <user>@<ip-node> "sudo k3s ctr images import /tmp/images.tar"
-kubectl kustomize k8s | sed 's/imagePullPolicy: Always/imagePullPolicy: IfNotPresent/' | kubectl apply -f -
+ssh -t <user>@<ip-node> "sudo k3s ctr images import /tmp/images.tar && rm /tmp/images.tar"
 ```
