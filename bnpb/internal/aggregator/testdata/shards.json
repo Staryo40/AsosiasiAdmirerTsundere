@@ -1,0 +1,11 @@
+[
+  {"source":"BMKG","source_ref_id":"evt-1","shard":2},
+  {"source":"BMKG","source_ref_id":"evt-2","shard":1},
+  {"source":"PVMBG","source_ref_id":"rpt-1","shard":0},
+  {"source":"SATELIT","source_ref_id":"fire-0a41c7","shard":2},
+  {"source":"SENSOR_PANTAI","source_ref_id":"obs-000812","shard":0},
+  {"source":"BMKG","source_ref_id":"é","shard":0},
+  {"source":"BMKG","source_ref_id":"é","shard":2},
+  {"source":"SATELIT","source_ref_id":"a|b","shard":0},
+  {"source":"BMKG","source_ref_id":" x ","shard":0}
+]

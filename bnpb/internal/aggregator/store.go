@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/Staryo40/AsosiasiAdmirerTsundere/bnpb/internal/platform/logging"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -25,7 +26,16 @@ var snapshotIndexSchema string
 //go:embed migrations/004_outbox_sequence.sql
 var outboxSequenceSchema string
 
-const currentSchemaVersion = 4
+//go:embed migrations/005_canonical_enums.sql
+var m2EnumSchema string
+
+//go:embed migrations/006_shards.sql
+var shardSchema string
+
+//go:embed migrations/007_placement_guards.sql
+var placementGuardSchema string
+
+const currentSchemaVersion = 7
 
 const schemaHistoryQuery = `SELECT COALESCE(max(version), 0), count(*),
     COALESCE(min(version), 0) FROM schema_migrations`
@@ -40,16 +50,28 @@ type Store struct {
 }
 
 func OpenStore(ctx context.Context, cfg Config, logger *slog.Logger) (*Store, error) {
+	bootstrap, err := parsePlacementBootstrap(cfg.ShardPlacement)
+	if err != nil {
+		return nil, err
+	}
 	ctx, cancel := context.WithTimeout(ctx, cfg.DBWriteTimeout)
 	defer cancel()
 	store := &Store{readTimeout: cfg.DBReadTimeout, writeTimeout: cfg.DBWriteTimeout,
 		chunkRecords: cfg.IngestChunkRecords, maxBytes: cfg.MaxResponseBytes}
-	var err error
+	// Bootstrap and migration share the startup transaction and its bounded budget.
 	if store.write, err = openPool(ctx, cfg.DatabaseURL, cfg.DBWriteMaxConns, logger); err != nil {
 		return nil, storeError("open write pool", err)
 	}
-	if err = store.migrate(ctx); err == nil {
+	if err = store.migrate(ctx, bootstrap); err == nil {
 		store.read, err = openPool(ctx, cfg.DatabaseURL, cfg.DBReadMaxConns, logger)
+	}
+	if err == nil && bootstrap != nil {
+		var persisted placementSnapshot
+		persisted, err = store.placement(ctx)
+		if err == nil {
+			logging.Event(ctx, logger, logging.Record{Level: slog.LevelInfo, Event: "placement_loaded", Message: "configured placement is persisted"},
+				"placement_revision", persisted.Revision, "placement_copies", len(persisted.Copies))
+		}
 	}
 	if err != nil {
 		store.Close()
@@ -103,8 +125,8 @@ func (store *Store) Ready(ctx context.Context) error {
 	return storeError("canonical store readiness", err)
 }
 
-func (store *Store) migrate(ctx context.Context) (err error) {
-	tx, err := store.write.BeginTx(ctx, pgx.TxOptions{})
+func (store *Store) migrate(ctx context.Context, bootstrap *placementSnapshot) (err error) {
+	tx, err := store.write.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
 	if err != nil {
 		return err
 	}
@@ -115,6 +137,11 @@ func (store *Store) migrate(ctx context.Context) (err error) {
 	}()
 	if err = migrateSchema(ctx, tx); err != nil {
 		return err
+	}
+	if bootstrap != nil {
+		if err := bootstrapPlacement(ctx, tx, *bootstrap); err != nil {
+			return err
+		}
 	}
 	return tx.Commit(ctx)
 }
@@ -152,7 +179,8 @@ func applyPendingMigrations(ctx context.Context, tx pgx.Tx, version int) error {
 	for _, migration := range []struct {
 		version int
 		sql     string
-	}{{2, outboxIdentitySchema}, {3, snapshotIndexSchema}, {4, outboxSequenceSchema}} {
+	}{{2, outboxIdentitySchema}, {3, snapshotIndexSchema}, {4, outboxSequenceSchema},
+		{5, m2EnumSchema}, {6, shardSchema}, {7, placementGuardSchema}} {
 		if version < migration.version {
 			if _, err := tx.Exec(ctx, migration.sql); err != nil {
 				return err
@@ -192,6 +220,12 @@ func storeError(operation string, err error) error {
 	}
 	if errors.Is(err, errSchemaVersion) {
 		return fmt.Errorf("%s: %w", operation, errSchemaVersion)
+	}
+	if errors.Is(err, errPlacementChanged) {
+		return fmt.Errorf("%s: %w", operation, errPlacementChanged)
+	}
+	if errors.Is(err, errInvalidPlacement) {
+		return fmt.Errorf("%s: %w", operation, errInvalidPlacement)
 	}
 	if errors.Is(err, context.Canceled) {
 		return fmt.Errorf("%s: %w", operation, context.Canceled)

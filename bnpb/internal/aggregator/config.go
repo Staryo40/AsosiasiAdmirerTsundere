@@ -22,6 +22,7 @@ type Config struct {
 	BMKGAPIKey, PVMBGReaderClientID                 string
 	PVMBGReaderClientSecret, InternalKey            string
 	DatabaseURL, AMQPURL, HazardExchange            string
+	ShardPlacement                                  string
 	PVMBGCycleTimeout, PollOverlap, RetryMaxBackoff time.Duration
 	WarningReconcileInterval, SourceStaleAfter      time.Duration
 	DBReadTimeout, DBWriteTimeout, PublishTimeout   time.Duration
@@ -60,6 +61,7 @@ func loadConfig(lookup func(string) (string, bool)) (Config, error) {
 		}
 		*setting.target = configured
 	}
+	cfg.ShardPlacement, _ = lookup("BNPB_SHARD_PLACEMENT")
 	if err := loadBudgets(lookup, &cfg); err != nil {
 		return Config{}, err
 	}

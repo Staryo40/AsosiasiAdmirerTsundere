@@ -68,10 +68,10 @@ func validQueryKeys(query url.Values) bool {
 func parseHazardFilters(query url.Values) (hazardFilters, error) {
 	filters := hazardFilters{}
 	var err error
-	if filters.Source, err = enumFilter(query.Get("source"), []Source{BMKG, PVMBG}); err != nil {
+	if filters.Source, err = enumFilter(query.Get("source"), []Source{BMKG, PVMBG, Satelit, SensorPantai}); err != nil {
 		return filters, err
 	}
-	if filters.HazardType, err = enumFilter(query.Get("hazard_type"), []HazardType{Seismic, Volcanic}); err != nil {
+	if filters.HazardType, err = enumFilter(query.Get("hazard_type"), []HazardType{Seismic, Volcanic, Wildfire, Coastal}); err != nil {
 		return filters, err
 	}
 	if filters.Severity, err = enumFilter(query.Get("severity"), []Severity{Normal, Waspada, Siaga, Awas}); err != nil {
@@ -114,7 +114,7 @@ func timeFilter(text string) (*time.Time, error) {
 
 func (filters hazardFilters) consistent() bool {
 	if filters.Source != nil && filters.HazardType != nil &&
-		((*filters.Source == BMKG) != (*filters.HazardType == Seismic)) {
+		hazardTypeForSource(*filters.Source) != *filters.HazardType {
 		return false
 	}
 	return filters.OccurredFrom == nil || filters.OccurredTo == nil || !filters.OccurredFrom.After(*filters.OccurredTo)
@@ -124,13 +124,13 @@ func (filters hazardFilters) selectedSources() []Source {
 	if filters.Source != nil {
 		return []Source{*filters.Source}
 	}
-	if filters.HazardType != nil {
-		if *filters.HazardType == Seismic {
-			return []Source{BMKG}
+	selected := make([]Source, 0, 4)
+	for _, source := range []Source{BMKG, PVMBG, Satelit, SensorPantai} {
+		if filters.HazardType == nil || hazardTypeForSource(source) == *filters.HazardType {
+			selected = append(selected, source)
 		}
-		return []Source{PVMBG}
 	}
-	return []Source{BMKG, PVMBG}
+	return selected
 }
 
 func parseHazardCursor(token string, filters hazardFilters) (*hazardCursor, error) {

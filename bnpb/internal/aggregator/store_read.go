@@ -158,6 +158,14 @@ func readFreshness(ctx context.Context, tx pgx.Tx, selected []Source, cfg Config
 	}
 	sources := make(map[Source]sourceState, len(selected))
 	for _, source := range selected {
+		if source == Satelit || source == SensorPantai {
+			state, err := readUnconfiguredSource(ctx, tx, source)
+			if err != nil {
+				return nil, asOf, err
+			}
+			sources[source] = state
+			continue
+		}
 		if len(snapshots[source]) != len(sourceEndpoints(source)) {
 			return nil, asOf, storeError("read poll state", errors.New("incomplete endpoint state"))
 		}
@@ -195,10 +203,25 @@ func readEndpointSnapshots(ctx context.Context, tx pgx.Tx, selected []Source) (m
 }
 
 func sourceEndpoints(source Source) []Endpoint {
-	if source == BMKG {
+	switch source {
+	case BMKG:
 		return []Endpoint{SeismicEndpoint, WarningEndpoint}
+	case PVMBG:
+		return []Endpoint{VolcanicEndpoint}
+	default:
+		return nil
 	}
-	return []Endpoint{VolcanicEndpoint}
+}
+
+func readUnconfiguredSource(ctx context.Context, tx pgx.Tx, source Source) (sourceState, error) {
+	category := "source_not_configured"
+	state := sourceState{pollObservation: pollObservation{Status: "unavailable", ErrorCategory: &category},
+		Endpoints: make(map[string]pollObservation)}
+	err := tx.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM hazard_events WHERE source = $1)", string(source)).Scan(&state.HasCachedData)
+	if state.HasCachedData {
+		state.Status = "stale"
+	}
+	return state, storeError("read unconfigured source", err)
 }
 
 func utcTime(stamp *time.Time) *time.Time {
