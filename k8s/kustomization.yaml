@@ -18,6 +18,7 @@ resources:
   - aggregator.yaml
   - auth.yaml
   - api.yaml
+  - consumers.yaml
 
 configMapGenerator:
   - name: bnpb-common
@@ -59,6 +60,15 @@ images:
     newTag: main
   - name: aat/bnpb-auth
     newName: ghcr.io/staryo40/asosiasiadmirertsundere/bnpb-auth
+    newTag: main
+  - name: aat/bnpb-consumer-1
+    newName: ghcr.io/staryo40/asosiasiadmirertsundere/bnpb-consumer-1
+    newTag: main
+  - name: aat/bnpb-consumer-2
+    newName: ghcr.io/staryo40/asosiasiadmirertsundere/bnpb-consumer-2
+    newTag: main
+  - name: aat/bnpb-consumer-3
+    newName: ghcr.io/staryo40/asosiasiadmirertsundere/bnpb-consumer-3
     newTag: main
   - name: aat/broker-init
     newName: ghcr.io/staryo40/asosiasiadmirertsundere/broker-init
