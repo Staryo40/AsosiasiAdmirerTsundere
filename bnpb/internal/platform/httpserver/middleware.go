@@ -44,7 +44,7 @@ func correlate(next http.Handler) http.Handler {
 func limitRequests(next http.Handler, maximum int) http.Handler {
 	semaphore := make(chan struct{}, maximum)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/health" && (r.Method == http.MethodGet || r.Method == http.MethodHead) {
+		if isProbePath(r.URL.Path) && (r.Method == http.MethodGet || r.Method == http.MethodHead) {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -89,12 +89,18 @@ func logAccess(next http.Handler, logger *slog.Logger) http.Handler {
 
 func logRequest(request *http.Request, logger *slog.Logger, recorder *responseRecorder, start time.Time) {
 	status := recorder.Status()
+	duration := time.Since(start)
+	observeRequest(request, status, duration)
 	logging.Event(request.Context(), logger, logging.Record{Level: accessLevel(request.URL.Path, status), Event: "http_request", Message: "HTTP request completed"},
 		"method", request.Method,
 		"path", request.URL.Path,
 		"status", status,
-		"duration_ms", time.Since(start).Milliseconds(),
+		"duration_ms", duration.Milliseconds(),
 	)
+}
+
+func isProbePath(path string) bool {
+	return path == "/health" || path == "/metrics" || path == "/ready"
 }
 
 func accessLevel(path string, status int) slog.Level {
