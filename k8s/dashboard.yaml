@@ -1,0 +1,51 @@
+# Analytics browser UI (A2-06). Nginx serves static assets and proxies /auth and /v1 to api.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: analytics-dashboard
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: analytics-dashboard
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: analytics-dashboard
+        role: other
+    spec:
+      containers:
+        - name: dashboard
+          image: aat/analytics-dashboard
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+          readinessProbe:
+            httpGet: {path: /health, port: http}
+            initialDelaySeconds: 2
+          livenessProbe:
+            httpGet: {path: /health, port: http}
+            initialDelaySeconds: 5
+          resources:
+            requests: {memory: 64Mi}
+            limits: {memory: 128Mi}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: analytics-dashboard
+spec:
+  type: NodePort
+  selector:
+    app.kubernetes.io/name: analytics-dashboard
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+      nodePort: 30081
