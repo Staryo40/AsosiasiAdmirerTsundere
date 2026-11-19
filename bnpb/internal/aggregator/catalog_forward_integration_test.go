@@ -7,14 +7,18 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"slices"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/Staryo40/AsosiasiAdmirerTsundere/bnpb/internal/platform/correlation"
+	"github.com/Staryo40/AsosiasiAdmirerTsundere/bnpb/internal/platform/httpserver"
+	"github.com/Staryo40/AsosiasiAdmirerTsundere/bnpb/internal/platform/logging"
 )
 
 func TestCatalogFollowerForwardsOriginalReceiptAndChunksAtOwner(t *testing.T) {
@@ -28,16 +32,27 @@ func TestCatalogFollowerForwardsOriginalReceiptAndChunksAtOwner(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	var forwardedBody []byte
-	var forwardedHeaders http.Header
+	type forwardedReceipt struct {
+		body    []byte
+		headers http.Header
+		traceID string
+	}
+	forwarded := make(chan forwardedReceipt, 1)
+	logger := logging.New("catalog-forward-test", slog.LevelInfo, io.Discard)
 	ownerMux := http.NewServeMux()
 	registerCatalogRoutes(ownerMux, store, cfg, nil)
-	owner := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		forwardedHeaders = r.Header.Clone()
-		forwardedBody, _ = io.ReadAll(r.Body)
-		r.Body = io.NopCloser(bytes.NewReader(forwardedBody))
+	ownerHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Errorf("read forwarded receipt: %v", err)
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		forwarded <- forwardedReceipt{body: body, headers: r.Header.Clone(), traceID: correlation.TraceID(r.Context())}
+		r.Body = io.NopCloser(bytes.NewReader(body))
 		ownerMux.ServeHTTP(w, r)
-	}))
+	})
+	owner := httptest.NewServer(httpserver.Handler(ownerHandler, logger, 1))
 	defer owner.Close()
 
 	kube, _ := liveAuthorityFixture("catalog-owner", 1)
@@ -45,10 +60,7 @@ func TestCatalogFollowerForwardsOriginalReceiptAndChunksAtOwner(t *testing.T) {
 	followerAuthority := &PollAuthority{owner: "catalog-follower", kubernetes: kube}
 	followerMux := http.NewServeMux()
 	registerCatalogRoutes(followerMux, followerStore, cfg, followerAuthority)
-	follower := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ctx := correlation.WithID(r.Context(), r.Header.Get(correlation.Header))
-		followerMux.ServeHTTP(w, r.WithContext(ctx))
-	}))
+	follower := httptest.NewServer(httpserver.Handler(followerMux, logger, 1))
 	defer follower.Close()
 
 	const inputID = "catalog-forward-retry"
@@ -67,14 +79,26 @@ func TestCatalogFollowerForwardsOriginalReceiptAndChunksAtOwner(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for attempt := 0; attempt < 2; attempt++ {
+	payload = append(payload, '\n')
+	const traceID = "4bf92f3577b34da6a3ce929d0e0e4736"
+	const parent = "00-" + traceID + "-00f067aa0ba902b7-03"
+	for _, attempt := range []struct {
+		name, parent, wantTraceID string
+		wantParents               []string
+	}{
+		{name: "valid", parent: parent, wantTraceID: traceID, wantParents: []string{parent}},
+		{name: "invalid retry", parent: "00-" + traceID + "-0000000000000000-03"},
+	} {
 		request, err := http.NewRequestWithContext(t.Context(), http.MethodPost, follower.URL+"/internal/catalog/seismic", bytes.NewReader(payload))
 		if err != nil {
 			t.Fatal(err)
 		}
 		request.Header.Set("Authorization", "Bearer "+cfg.Catalog.Token)
 		request.Header.Set("Content-Type", "application/json")
-		request.Header.Set("X-Correlation-ID", "catalog-forward-test")
+		request.Header.Set(correlation.Header, "catalog-forward-test")
+		request.Header.Set("Traceparent", attempt.parent)
+		request.Header.Set("Tracestate", "vendor=untrusted")
+		request.Header.Set("Baggage", "key=untrusted")
 		response, err := follower.Client().Do(request)
 		if err != nil {
 			t.Fatal(err)
@@ -87,7 +111,29 @@ func TestCatalogFollowerForwardsOriginalReceiptAndChunksAtOwner(t *testing.T) {
 		decodeErr := json.NewDecoder(response.Body).Decode(&accepted)
 		_ = response.Body.Close()
 		if decodeErr != nil || response.StatusCode != http.StatusOK || accepted.Accepted != 3 || accepted.InputID != inputID || accepted.InputOffset != 40 {
-			t.Fatalf("attempt %d returned status=%d response=%+v decodeErr=%v", attempt, response.StatusCode, accepted, decodeErr)
+			t.Fatalf("%s attempt returned status=%d response=%+v decodeErr=%v", attempt.name, response.StatusCode, accepted, decodeErr)
+		}
+		var got forwardedReceipt
+		select {
+		case got = <-forwarded:
+		default:
+			t.Fatalf("%s attempt was accepted without reaching the owner", attempt.name)
+		}
+		if !bytes.Equal(got.body, payload) {
+			t.Fatalf("%s attempt did not preserve the original request bytes", attempt.name)
+		}
+		if got.headers.Get("Authorization") != "Bearer "+cfg.Catalog.Token ||
+			got.headers.Get("Content-Type") != "application/json" ||
+			got.headers.Get(correlation.Header) != "catalog-forward-test" ||
+			got.headers.Get(catalogForwardedHeader) != "1" {
+			t.Fatalf("%s attempt did not preserve forwarded headers: %v", attempt.name, got.headers)
+		}
+		if parents := got.headers.Values("Traceparent"); !slices.Equal(parents, attempt.wantParents) || got.traceID != attempt.wantTraceID {
+			t.Fatalf("%s attempt: owner traceparent=%q trace ID=%q, want %q and %q",
+				attempt.name, parents, got.traceID, attempt.wantParents, attempt.wantTraceID)
+		}
+		if len(got.headers.Values("Tracestate")) != 0 || len(got.headers.Values("Baggage")) != 0 {
+			t.Fatalf("%s attempt forwarded tracestate or baggage", attempt.name)
 		}
 	}
 	var count int
@@ -101,21 +147,12 @@ func TestCatalogFollowerForwardsOriginalReceiptAndChunksAtOwner(t *testing.T) {
 			t.Fatalf("durable count for %q = %d, err=%v; want exactly three", query, count, err)
 		}
 	}
-	if !bytes.Equal(forwardedBody, payload) {
-		t.Fatal("follower did not preserve the original request bytes")
-	}
-	if forwardedHeaders.Get("Authorization") != "Bearer "+cfg.Catalog.Token ||
-		forwardedHeaders.Get("Content-Type") != "application/json" ||
-		forwardedHeaders.Get("X-Correlation-ID") != "catalog-forward-test" ||
-		forwardedHeaders.Get(catalogForwardedHeader) != "1" {
-		t.Fatalf("forwarded headers were not preserved: %v", forwardedHeaders)
-	}
 	after, err := store.pollPosition(t.Context(), SeismicEndpoint)
 	if err != nil || !reflect.DeepEqual(after, before) {
 		t.Fatalf("catalog forwarding changed poll state: before=%+v after=%+v err=%v", before, after, err)
 	}
-
 }
+
 func TestCatalogForwardingStopsAfterOneHop(t *testing.T) {
 	cfg := Config{Catalog: CatalogConfig{Token: "catalog-loop-test-token"}}
 	kube, _ := liveAuthorityFixture("catalog-owner", 1)

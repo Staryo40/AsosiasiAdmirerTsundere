@@ -38,7 +38,10 @@ func correlate(next http.Handler) http.Handler {
 			correlationID = correlation.NewID()
 		}
 		w.Header().Set(correlation.Header, correlationID)
-		next.ServeHTTP(w, r.WithContext(correlation.WithID(r.Context(), correlationID)))
+		ctx := correlation.WithTrace(correlation.WithID(r.Context(), correlationID), r.Header)
+		correlated := r.WithContext(ctx)
+		next.ServeHTTP(w, correlated)
+		r.Pattern = correlated.Pattern
 	})
 }
 

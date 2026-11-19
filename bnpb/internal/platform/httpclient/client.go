@@ -81,6 +81,7 @@ func requestWithCorrelation(request *http.Request) *http.Request {
 		outbound = outbound.WithContext(correlation.WithID(outbound.Context(), correlationID))
 	}
 	outbound.Header.Set(correlation.Header, correlationID)
+	correlation.InjectTraceHeaders(outbound.Context(), outbound.Header)
 	return outbound
 }
 

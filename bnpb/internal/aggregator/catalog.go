@@ -174,6 +174,7 @@ func (api catalogAPI) forwardCatalog(w http.ResponseWriter, r *http.Request, end
 	request.Header.Set(catalogTokenHeader, r.Header.Get(catalogTokenHeader))
 	request.Header.Set("Content-Type", r.Header.Get("Content-Type"))
 	request.Header.Set(correlation.Header, correlation.ID(r.Context()))
+	correlation.InjectTraceHeaders(r.Context(), request.Header)
 	request.Header.Set(catalogForwardedHeader, "1")
 	api.relayCatalog(w, r, request)
 }

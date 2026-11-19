@@ -15,10 +15,13 @@ func New(service string, level slog.Level, output io.Writer) *slog.Logger {
 	return slog.New(handler).With("service", service)
 }
 
-// WithContext enriches logger with the correlation identifier in ctx.
+// WithContext enriches the logger with validated request identifiers.
 func WithContext(ctx context.Context, logger *slog.Logger) *slog.Logger {
 	if id := correlation.ID(ctx); id != "" {
-		return logger.With("correlation_id", id)
+		logger = logger.With("correlation_id", id)
+	}
+	if id := correlation.TraceID(ctx); id != "" {
+		logger = logger.With("trace_id", id)
 	}
 	return logger
 }
