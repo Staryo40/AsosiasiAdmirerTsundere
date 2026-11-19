@@ -34,7 +34,7 @@ func Bootstrap(service, addressVariable, defaultAddress string, register RouteRe
 }
 
 // BootstrapApplication runs probes before initialization.
-func BootstrapApplication(service, addressVariable, defaultAddress string, initialize Initializer) int {
+func BootstrapApplication(service, addressVariable, defaultAddress string, initialize Initializer, middleware ...func(http.Handler) http.Handler) int {
 	cfg, err := config.Load(addressVariable, defaultAddress)
 	if err != nil {
 		_, _ = fmt.Fprintln(os.Stderr, err)
@@ -50,14 +50,14 @@ func BootstrapApplication(service, addressVariable, defaultAddress string, initi
 		_, _ = fmt.Fprintln(os.Stderr, "usage: service [-healthcheck]")
 		return 2
 	}
-	return runService(service, cfg, initialize)
+	return runService(service, cfg, initialize, middleware)
 }
 
-func runService(service string, cfg config.Config, initialize Initializer) int {
+func runService(service string, cfg config.Config, initialize Initializer, middleware []func(http.Handler) http.Handler) int {
 	logger := logging.New(service, cfg.LogLevel, os.Stdout)
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	if err := runApplication(ctx, applicationOptions{service: service, cfg: cfg, logger: logger}, initialize); err != nil {
+	if err := runApplication(ctx, applicationOptions{service: service, cfg: cfg, logger: logger, middleware: middleware}, initialize); err != nil {
 		// Initializers may wrap driver errors containing credentials or DSNs.
 		logging.Event(context.Background(), logger, logging.Record{Level: slog.LevelError, Event: "service_failed", Message: "service initialization, serving or cleanup failed"})
 		return 1
@@ -82,10 +82,11 @@ func runApplication(ctx context.Context, options applicationOptions, initialize 
 }
 
 type applicationOptions struct {
-	service  string
-	cfg      config.Config
-	logger   *slog.Logger
-	shutdown Shutdown
+	service    string
+	cfg        config.Config
+	logger     *slog.Logger
+	shutdown   Shutdown
+	middleware []func(http.Handler) http.Handler
 }
 
 func serveApplication(ctx context.Context, cancel context.CancelFunc, mux *http.ServeMux, options applicationOptions) error {
@@ -104,13 +105,17 @@ func serveApplication(ctx context.Context, cancel context.CancelFunc, mux *http.
 
 func newApplicationServer(mux *http.ServeMux, options applicationOptions) *http.Server {
 	cfg, logger := options.cfg, options.logger
+	handler := httpserver.Handler(mux, logger, cfg.MaxInFlight)
+	for index := len(options.middleware) - 1; index >= 0; index-- {
+		handler = options.middleware[index](handler)
+	}
 	return httpserver.New(httpserver.Options{
 		Addr:              cfg.HTTPAddr,
 		ReadHeaderTimeout: cfg.ReadHeaderTimeout,
 		ReadTimeout:       cfg.ReadTimeout,
 		WriteTimeout:      cfg.WriteTimeout,
 		IdleTimeout:       cfg.IdleTimeout,
-	}, httpserver.Handler(mux, logger, cfg.MaxInFlight), logger)
+	}, handler, logger)
 }
 
 func shutdownApplication(ctx context.Context, shutdown Shutdown, cfg config.Config, serveErrors <-chan error) error {

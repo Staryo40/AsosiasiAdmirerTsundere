@@ -47,16 +47,34 @@ func correlate(next http.Handler) http.Handler {
 
 func limitRequests(next http.Handler, maximum int) http.Handler {
 	semaphore := make(chan struct{}, maximum)
+	diagnosticSlots := make(chan struct{}, 2)
+	readinessSlots := make(chan struct{}, 1)
+	metricsSlots := make(chan struct{}, 1)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/health" && (r.Method == http.MethodGet || r.Method == http.MethodHead) {
-			next.ServeHTTP(w, r)
-			return
+		slots := semaphore
+		if r.Method == http.MethodGet || r.Method == http.MethodHead {
+			switch r.URL.Path {
+			case "/health":
+				next.ServeHTTP(w, r)
+				return
+			case "/ready":
+				slots = diagnosticSlots
+			case "/readyz":
+				// Diagnostic and scrape traffic must not crowd out the kube probe.
+				slots = readinessSlots
+			case "/metrics":
+				slots = metricsSlots
+			}
 		}
 		select {
-		case semaphore <- struct{}{}:
-			defer func() { <-semaphore }()
+		case slots <- struct{}{}:
+			defer func() { <-slots }()
 			next.ServeHTTP(w, r)
 		default:
+			if slots == readinessSlots {
+				w.WriteHeader(http.StatusServiceUnavailable)
+				return
+			}
 			if strings.HasPrefix(r.URL.Path, "/internal/audit/") {
 				writeAuditRateLimitError(w)
 			} else {

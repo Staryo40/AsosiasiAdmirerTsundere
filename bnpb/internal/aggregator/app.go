@@ -34,6 +34,7 @@ func Initialize(ctx context.Context, mux *http.ServeMux, platform config.Config,
 	}
 	app := application{sources: newSourceClients(cfg, logger), store: store}
 	mux.HandleFunc("GET /ready", app.ready)
+	mux.HandleFunc("GET /readyz", app.readyProbe)
 	registerSnapshotRoutes(mux, store, cfg, platform.WriteTimeout)
 	registerAuditRoutes4(mux, store, cfg)
 	dispatcher := &outboxDispatcher{store: store, publisher: newAMQPPublisher(cfg), cfg: cfg, logger: logger}
@@ -55,14 +56,6 @@ func Initialize(ctx context.Context, mux *http.ServeMux, platform config.Config,
 type application struct {
 	sources sourceClients
 	store   *Store
-}
-
-func (app application) ready(w http.ResponseWriter, request *http.Request) {
-	if app.store == nil || app.store.Ready(request.Context()) != nil {
-		http.Error(w, "canonical store is unavailable", http.StatusServiceUnavailable)
-		return
-	}
-	w.WriteHeader(http.StatusOK)
 }
 
 // Fix the worker set before shutdown can wait.

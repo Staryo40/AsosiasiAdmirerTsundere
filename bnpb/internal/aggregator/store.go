@@ -287,51 +287,7 @@ func (store *Store) Close() {
 }
 
 func (store *Store) Ready(ctx context.Context) error {
-	ctx, cancel := context.WithTimeout(ctx, store.readTimeout)
-	defer cancel()
-	if store.shards[0] == nil {
-		version, err := schemaVersion(store.read.QueryRow(ctx, schemaHistoryQuery))
-		if err == nil && version != currentSchemaVersion {
-			err = errSchemaVersion
-		}
-		return storeError("canonical store readiness", err)
-	}
-	type readinessResult struct{ err error }
-	results := make(chan readinessResult, len(store.shards))
-	for _, shard := range store.shards {
-		go func(shard *Store) {
-			if shard == nil {
-				results <- readinessResult{err: errors.New("logical store unavailable")}
-				return
-			}
-			err := shard.verifyStartupResource(ctx)
-			if err == nil {
-				var version int
-				version, err = schemaVersion(shard.read.QueryRow(ctx, schemaHistoryQuery))
-				if err == nil && version != currentSchemaVersion {
-					err = errSchemaVersion
-				}
-			}
-			results <- readinessResult{err: err}
-		}(shard)
-	}
-	var firstErr error
-	ready := false
-	for range store.shards {
-		result := <-results
-		if result.err == nil {
-			ready = true
-		} else if firstErr == nil {
-			firstErr = result.err
-		}
-	}
-	if ready {
-		return nil
-	}
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	return storeError("routed logical store readiness", firstErr)
+	return store.readiness(ctx).err()
 }
 
 func (store *Store) migrate(ctx context.Context, admin *pgxpool.Pool, bootstrap *placementSnapshot, identity storeIdentity) (err error) {

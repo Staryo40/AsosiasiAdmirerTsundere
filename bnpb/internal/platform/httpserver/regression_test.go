@@ -125,16 +125,22 @@ func TestPanicDiscardsUncommittedResponseHeaders(t *testing.T) {
 	}
 }
 
-func TestOnlyHealthMethodsBypassLimit(t *testing.T) {
+func TestHealthAndReadinessRemainAdmittedWhenDataIsSaturated(t *testing.T) {
 	handler := limitRequests(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 	}), 0)
-	// A full limiter must admit GET/HEAD probes, but reject other methods.
-	for method, want := range map[string]int{"GET": 204, "HEAD": 204, "POST": 429} {
+	for _, request := range []struct {
+		method, path string
+		want         int
+	}{
+		{"GET", "/health", 204}, {"HEAD", "/health", 204}, {"POST", "/health", 429},
+		{"GET", "/ready", 204}, {"HEAD", "/ready", 204}, {"POST", "/ready", 429},
+		{"GET", "/internal/hazards", 429},
+	} {
 		response := httptest.NewRecorder()
-		handler.ServeHTTP(response, httptest.NewRequest(method, "/health", nil))
-		if response.Code != want {
-			t.Errorf("%s: got %d, want %d", method, response.Code, want)
+		handler.ServeHTTP(response, httptest.NewRequest(request.method, request.path, nil))
+		if response.Code != request.want {
+			t.Errorf("%s %s: got %d, want %d", request.method, request.path, response.Code, request.want)
 		}
 	}
 }
