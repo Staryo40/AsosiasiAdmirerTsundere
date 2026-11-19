@@ -1,3 +1,4 @@
+
 package aggregator
 
 import (
@@ -21,8 +22,12 @@ type Config struct {
 	BMKG, PVMBG                                     SourceConfig
 	BMKGAPIKey, PVMBGReaderClientID                 string
 	PVMBGReaderClientSecret, InternalKey            string
-	DatabaseURL, AMQPURL, HazardExchange            string
+	DatabaseURL, WriterURL, AMQPURL, HazardExchange string
+	ShardURLs, ShardWriterURLs                      [3]string
 	ShardPlacement                                  string
+	Authority                                       AuthorityConfig
+	Audit                                           AuditConfig
+	Catalog                                         CatalogConfig
 	PVMBGCycleTimeout, PollOverlap, RetryMaxBackoff time.Duration
 	WarningReconcileInterval, SourceStaleAfter      time.Duration
 	DBReadTimeout, DBWriteTimeout, PublishTimeout   time.Duration
@@ -30,6 +35,10 @@ type Config struct {
 	IngestChunkRecords, DBReadMaxConns              int
 	DBWriteMaxConns, ReadMaxInFlight                int
 	ListDefaultLimit, ListMaxLimit, OutboxBatchSize int
+}
+
+type CatalogConfig struct {
+	Token string
 }
 
 func LoadConfig() (Config, error) {
@@ -61,7 +70,57 @@ func loadConfig(lookup func(string) (string, bool)) (Config, error) {
 		}
 		*setting.target = configured
 	}
+	if writerURL, ok := lookup("BNPB_CANONICAL_WRITER_DATABASE_URL"); ok {
+		cfg.WriterURL = strings.TrimSpace(writerURL)
+	}
+	shardURLsConfigured := 0
+	for shardID := range cfg.ShardURLs {
+		name := fmt.Sprintf("BNPB_SHARD_%d_DATABASE_URL", shardID)
+		address, exists := lookup(name)
+		if exists {
+			shardURLsConfigured++
+			if strings.TrimSpace(address) == "" || strings.IndexFunc(address, unicode.IsControl) >= 0 {
+				return Config{}, fmt.Errorf("%s: required nonempty URL without control characters", name)
+			}
+			cfg.ShardURLs[shardID] = address
+		}
+		writerName := fmt.Sprintf("BNPB_SHARD_%d_WRITER_DATABASE_URL", shardID)
+		writerAddress, writerExists := lookup(writerName)
+		if writerExists {
+			if strings.TrimSpace(writerAddress) == "" || strings.IndexFunc(writerAddress, unicode.IsControl) >= 0 {
+				return Config{}, fmt.Errorf("%s: required nonempty URL without control characters", writerName)
+			}
+			cfg.ShardWriterURLs[shardID] = writerAddress
+		}
+	}
+	if shardURLsConfigured != 0 && shardURLsConfigured != len(cfg.ShardURLs) {
+		return Config{}, fmt.Errorf("BNPB_SHARD_0_DATABASE_URL through BNPB_SHARD_2_DATABASE_URL: configure all three or none")
+	}
 	cfg.ShardPlacement, _ = lookup("BNPB_SHARD_PLACEMENT")
+	var err error
+	cfg.Authority, err = loadAuthorityConfig(lookup)
+	if err != nil {
+		return Config{}, err
+	}
+	cfg.Audit, err = loadAuditConfig(lookup)
+	if err != nil {
+		return Config{}, err
+	}
+	cfg.Catalog, err = loadCatalogConfig(lookup)
+	if err != nil {
+		return Config{}, err
+	}
+	credentials := []string{cfg.InternalKey, cfg.BMKGAPIKey, cfg.PVMBGReaderClientID, cfg.PVMBGReaderClientSecret}
+	for _, credential := range credentials {
+		if cfg.Audit.Token != "" && credential != "" && cfg.Audit.Token == credential {
+			return Config{}, fmt.Errorf("BNPB_AUDIT_TOKEN: must not reuse another service credential")
+		}
+	}
+	for _, credential := range append(credentials, cfg.Audit.Token) {
+		if cfg.Catalog.Token != "" && credential != "" && cfg.Catalog.Token == credential {
+			return Config{}, fmt.Errorf("BNPB_CATALOG_TOKEN: must not reuse another service credential")
+		}
+	}
 	if err := loadBudgets(lookup, &cfg); err != nil {
 		return Config{}, err
 	}
@@ -69,6 +128,16 @@ func loadConfig(lookup func(string) (string, bool)) (Config, error) {
 		return Config{}, err
 	}
 	return cfg, nil
+}
+func loadCatalogConfig(lookup func(string) (string, bool)) (CatalogConfig, error) {
+	token, configured := lookup("BNPB_CATALOG_TOKEN")
+	if !configured {
+		return CatalogConfig{}, nil
+	}
+	if strings.TrimSpace(token) == "" || strings.IndexFunc(token, unicode.IsControl) >= 0 {
+		return CatalogConfig{}, fmt.Errorf("BNPB_CATALOG_TOKEN: must be nonempty and contain no control characters")
+	}
+	return CatalogConfig{Token: token}, nil
 }
 
 func loadBudgets(lookup func(string) (string, bool), cfg *Config) error {
@@ -147,7 +216,68 @@ func (cfg Config) validate() error {
 			return err
 		}
 	}
+	routed, err := validateShardURLs(cfg)
+	if err != nil {
+		return err
+	}
+	primaryURLs := []string{cfg.DatabaseURL}
+	if cfg.WriterURL != "" {
+		primaryURLs = append(primaryURLs, cfg.WriterURL)
+	}
+	for index := range cfg.ShardURLs {
+		if cfg.ShardURLs[index] != "" {
+			primaryURLs = append(primaryURLs, cfg.ShardURLs[index])
+		}
+		if cfg.ShardWriterURLs[index] != "" {
+			primaryURLs = append(primaryURLs, cfg.ShardWriterURLs[index])
+		}
+	}
+	if err := validatePhysicalCopyURLs(cfg.Audit.CopyURLs, primaryURLs); err != nil {
+		return fmt.Errorf("BNPB_STORAGE_COPY_DATABASE_URLS: invalid physical copy configuration")
+	}
+	if routed {
+		if err := validateRoutedWriters(cfg); err != nil {
+			return err
+		}
+		if cfg.Catalog.Token != "" && cfg.Authority.OwnerEndpoint == "" {
+			return fmt.Errorf("BNPB_AUTHORITY_OWNER_ENDPOINT: required when BNPB_CATALOG_TOKEN is configured")
+		}
+		if err := cfg.Authority.validate(); err != nil {
+			return err
+		}
+	} else if cfg.WriterURL != "" {
+		if err := validateURL("BNPB_CANONICAL_WRITER_DATABASE_URL", cfg.WriterURL, []string{"postgres", "postgresql"}); err != nil {
+			return err
+		}
+		adminURL, _ := url.Parse(cfg.DatabaseURL)
+		writerURL, _ := url.Parse(cfg.WriterURL)
+		if !sameDatabaseTarget(adminURL, writerURL) || adminURL.User == nil || writerURL.User == nil || adminURL.User.Username() == writerURL.User.Username() {
+			return fmt.Errorf("BNPB_CANONICAL_WRITER_DATABASE_URL: must use distinct credentials for the same database node, database, and schema")
+		}
+	}
 	return cfg.validateBudgets()
+}
+
+func validateShardURLs(cfg Config) (bool, error) {
+	routed := cfg.ShardURLs[0] != "" || cfg.ShardURLs[1] != "" || cfg.ShardURLs[2] != ""
+	if !routed {
+		return false, nil
+	}
+	for shardID, address := range cfg.ShardURLs {
+		name := fmt.Sprintf("BNPB_SHARD_%d_DATABASE_URL", shardID)
+		if err := validateURL(name, address, []string{"postgres", "postgresql"}); err != nil {
+			return true, err
+		}
+		if address == cfg.DatabaseURL {
+			return true, fmt.Errorf("%s: must differ from BNPB_CANONICAL_DATABASE_URL", name)
+		}
+		for prior := 0; prior < shardID; prior++ {
+			if address == cfg.ShardURLs[prior] {
+				return true, fmt.Errorf("%s: shard database URLs must be distinct", name)
+			}
+		}
+	}
+	return true, nil
 }
 
 func validateURL(name, address string, schemes []string) error {

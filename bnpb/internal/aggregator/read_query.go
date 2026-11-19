@@ -1,3 +1,4 @@
+
 package aggregator
 
 import (
@@ -23,15 +24,17 @@ type hazardFilters struct {
 
 type hazardCursor struct {
 	Version    int           `json:"v"`
-	OccurredAt time.Time     `json:"occurred_at"`
-	HazardID   string        `json:"hazard_id"`
+	Start      bool          `json:"start"`
+	OccurredAt *time.Time    `json:"occurred_at"`
+	HazardID   *string       `json:"hazard_id"`
 	Filters    hazardFilters `json:"filters"`
 }
 
 type hazardQuery struct {
-	filters hazardFilters
-	limit   int
-	cursor  *hazardCursor
+	filters     hazardFilters
+	limit       int
+	cursor      *hazardCursor
+	cursorToken string
 }
 
 func parseHazardQuery(rawQuery string, cfg Config) (hazardQuery, error) {
@@ -51,7 +54,8 @@ func parseHazardQuery(rawQuery string, cfg Config) (hazardQuery, error) {
 		}
 	}
 	if query.Has("cursor") {
-		page.cursor, err = parseHazardCursor(query.Get("cursor"), filters)
+		page.cursorToken = query.Get("cursor")
+		page.cursor, err = parseHazardCursor(page.cursorToken, filters)
 	}
 	return page, err
 }
@@ -113,8 +117,7 @@ func timeFilter(text string) (*time.Time, error) {
 }
 
 func (filters hazardFilters) consistent() bool {
-	if filters.Source != nil && filters.HazardType != nil &&
-		hazardTypeForSource(*filters.Source) != *filters.HazardType {
+	if filters.Source != nil && filters.HazardType != nil && hazardTypeForSource(*filters.Source) != *filters.HazardType {
 		return false
 	}
 	return filters.OccurredFrom == nil || filters.OccurredTo == nil || !filters.OccurredFrom.After(*filters.OccurredTo)
@@ -142,27 +145,48 @@ func parseHazardCursor(token string, filters hazardFilters) (*hazardCursor, erro
 		return nil, errInvalidQuery
 	}
 	var cursor hazardCursor
-	if err := json.Unmarshal(raw, &cursor); err != nil || cursor.Version != 1 ||
-		!validInstant(cursor.OccurredAt) || !validText(cursor.HazardID) || len(cursor.HazardID) > 2048 {
+	if err := json.Unmarshal(raw, &cursor); err != nil || cursor.Version != 2 {
 		return nil, errInvalidQuery
+	}
+	if cursor.Start {
+		if cursor.OccurredAt != nil || cursor.HazardID != nil {
+			return nil, errInvalidQuery
+		}
+	} else if cursor.OccurredAt == nil || cursor.HazardID == nil || !validInstant(*cursor.OccurredAt) || !validText(*cursor.HazardID) || len(*cursor.HazardID) > 2048 {
+		return nil, errInvalidQuery
+	} else {
+		*cursor.OccurredAt = cursor.OccurredAt.UTC()
 	}
 	expected, expectedErr := json.Marshal(filters)
 	actual, actualErr := json.Marshal(cursor.Filters)
 	if expectedErr != nil || actualErr != nil || !bytes.Equal(expected, actual) {
 		return nil, errInvalidQuery
 	}
-	cursor.OccurredAt = cursor.OccurredAt.UTC()
 	return &cursor, nil
 }
 
 func validCursorKeys(raw []byte) bool {
 	fields, err := parseObject(raw)
-	if err != nil || !exactKeys(fields, []string{"v", "occurred_at", "hazard_id", "filters"}) {
+	if err != nil || !exactKeys(fields, []string{"v", "start", "occurred_at", "hazard_id", "filters"}) {
 		return false
 	}
-	stamp, err := timeField(fields, "occurred_at")
-	if err != nil || !stamp.Equal(databaseTime(stamp)) {
+	var start bool
+	if err := json.Unmarshal(fields["start"], &start); err != nil {
 		return false
+	}
+	if start {
+		if !bytes.Equal(bytes.TrimSpace(fields["occurred_at"]), []byte("null")) || !bytes.Equal(bytes.TrimSpace(fields["hazard_id"]), []byte("null")) {
+			return false
+		}
+	} else {
+		stamp, err := timeField(fields, "occurred_at")
+		if err != nil || !stamp.Equal(databaseTime(stamp)) {
+			return false
+		}
+		var id string
+		if err := json.Unmarshal(fields["hazard_id"], &id); err != nil || !validText(id) || len(id) > 2048 {
+			return false
+		}
 	}
 	filters, err := parseObject(fields["filters"])
 	return err == nil && exactKeys(filters, []string{"source", "hazard_type", "severity", "occurred_from", "occurred_to"})
@@ -181,6 +205,12 @@ func exactKeys(fields rawObject, keys []string) bool {
 }
 
 func nextHazardCursor(hazard HazardEvent, filters hazardFilters) (string, error) {
-	raw, err := json.Marshal(hazardCursor{1, hazard.OccurredAt, hazard.HazardID, filters})
+	at, id := hazard.OccurredAt.UTC(), hazard.HazardID
+	raw, err := json.Marshal(hazardCursor{Version: 2, OccurredAt: &at, HazardID: &id, Filters: filters})
+	return base64.RawURLEncoding.EncodeToString(raw), err
+}
+
+func startHazardCursor(filters hazardFilters) (string, error) {
+	raw, err := json.Marshal(hazardCursor{Version: 2, Start: true, Filters: filters})
 	return base64.RawURLEncoding.EncodeToString(raw), err
 }

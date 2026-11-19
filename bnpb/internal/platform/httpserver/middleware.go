@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/Staryo40/AsosiasiAdmirerTsundere/bnpb/internal/platform/correlation"
@@ -53,7 +54,11 @@ func limitRequests(next http.Handler, maximum int) http.Handler {
 			defer func() { <-semaphore }()
 			next.ServeHTTP(w, r)
 		default:
-			writeJSONError(w, http.StatusTooManyRequests, "too many requests")
+			if strings.HasPrefix(r.URL.Path, "/internal/audit/") {
+				writeAuditRateLimitError(w)
+			} else {
+				writeJSONError(w, http.StatusTooManyRequests, "too many requests")
+			}
 		}
 	})
 }
@@ -154,4 +159,11 @@ func writeJSONError(w http.ResponseWriter, status int, publicMessage string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(map[string]string{"error": publicMessage})
+}
+func writeAuditRateLimitError(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusTooManyRequests)
+	_ = json.NewEncoder(w).Encode(map[string]map[string]string{
+		"error": {"code": "too_many_requests", "message": "too many requests"},
+	})
 }

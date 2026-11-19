@@ -29,8 +29,17 @@ func Initialize(ctx context.Context, mux *http.ServeMux, platform config.Config,
 	app := application{sources: newSourceClients(cfg, logger), store: store}
 	mux.HandleFunc("GET /ready", app.ready)
 	registerSnapshotRoutes(mux, store, cfg)
+	registerAuditRoutes4(mux, store, cfg)
 	dispatcher := &outboxDispatcher{store: store, publisher: newAMQPPublisher(cfg), cfg: cfg, logger: logger}
-	workers := append(app.pollWorkers(cfg, logger), dispatcher.run)
+	workers, err := app.ownerWorkers(ctx, cfg, logger, dispatcher.run)
+	if err != nil {
+		app.sources.closeIdleConnections()
+		store.Close()
+		return nil, err
+	}
+	if cfg.Catalog.Token != "" {
+		registerCatalogRoutes(mux, store, cfg, store.authority)
+	}
 	return app.start(ctx, workers...), nil
 }
 

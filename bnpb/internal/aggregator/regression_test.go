@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -257,6 +258,156 @@ func TestSourceClientsCorrelationCredentialsAndRedirects(t *testing.T) {
 	for _, path := range []string{"http://private", "//private", "/events?private", "/events#private"} {
 		err := clients.bmkg.doJSON(ctx, sourceRequest{method: "GET", path: path}, &payload)
 		assertSourceCategory(t, err, "invalid_request")
+	}
+}
+
+func TestRoutedPollTransportDoesNotResendDroppedGET(t *testing.T) {
+	for _, test := range []struct {
+		name         string
+		routed       bool
+		wantCategory string
+		wantRequests int32
+	}{
+		{name: "local reuses connection and resends", wantRequests: 3},
+		{name: "routed uses fresh connection and fails", routed: true, wantCategory: "transport_error", wantRequests: 2},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var requests atomic.Int32
+			agency := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+				if request.ProtoMajor != 1 || request.Close != test.routed {
+					t.Errorf("origin protocol = %s, Connection close = %t", request.Proto, request.Close)
+				}
+				if requests.Add(1) == 2 {
+					// Drop after the origin received the GET but before any response was sent.
+					conn, _, err := http.NewResponseController(w).Hijack()
+					if err != nil {
+						t.Error(err)
+						w.WriteHeader(http.StatusInternalServerError)
+						return
+					}
+					_ = conn.Close()
+					return
+				}
+				_, _ = io.WriteString(w, `[]`)
+			}))
+			t.Cleanup(agency.Close)
+			cfg := testConfig(t)
+			cfg.BMKG.BaseURL = agency.URL
+			if test.routed {
+				cfg.ShardURLs = [3]string{"postgres://shard0/db", "postgres://shard1/db", "postgres://shard2/db"}
+			}
+			clients := newSourceClients(cfg, quietLogger())
+			t.Cleanup(clients.closeIdleConnections)
+
+			request := sourceRequest{method: http.MethodGet, path: "/seismic-events"}
+			if _, err := clients.bmkg.fetchRecords(t.Context(), request); err != nil {
+				t.Fatalf("warm-up GET: %v", err)
+			}
+			_, err := clients.bmkg.fetchRecords(t.Context(), request)
+			assertSourceCategory(t, err, test.wantCategory)
+			if got := requests.Load(); got != test.wantRequests {
+				t.Fatalf("origin GETs including warm-up = %d, want %d", got, test.wantRequests)
+			}
+		})
+	}
+}
+
+func TestPVMBGRejectedTokenRecoveryFollowsPollMode(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		routed bool
+	}{
+		{name: "local renews immediately"},
+		{name: "routed renews next cycle", routed: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var logins, reports atomic.Int32
+			agency := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+				switch request.Method + " " + request.URL.Path {
+				case "POST /auth/login":
+					logins.Add(1)
+					_, _ = io.WriteString(w, `{"access_token":"renewed","token_type":"Bearer","expires_in":300}`)
+				case "GET /volcanic-reports":
+					if reports.Add(1) == 1 && request.Header.Get("Authorization") == "Bearer rejected" {
+						w.WriteHeader(http.StatusUnauthorized)
+						return
+					}
+					if request.Header.Get("Authorization") != "Bearer renewed" {
+						t.Error("volcanic report request did not use the renewed token")
+						w.WriteHeader(http.StatusUnauthorized)
+						return
+					}
+					_, _ = io.WriteString(w, `[]`)
+				default:
+					t.Errorf("unexpected request: %s %s", request.Method, request.URL.Path)
+					w.WriteHeader(http.StatusNotFound)
+				}
+			}))
+			t.Cleanup(agency.Close)
+			cfg := testConfig(t)
+			cfg.PVMBG.BaseURL = agency.URL
+			if test.routed {
+				cfg.ShardURLs = [3]string{"postgres://shard0/db", "postgres://shard1/db", "postgres://shard2/db"}
+			}
+			clients := newSourceClients(cfg, quietLogger())
+			t.Cleanup(clients.closeIdleConnections)
+			session := readerSession{client: clients.pvmbg, clientID: cfg.PVMBGReaderClientID,
+				clientSecret: cfg.PVMBGReaderClientSecret, token: "rejected", renewAt: time.Now().Add(time.Hour)}
+
+			_, err := session.reports(t.Context(), nil)
+			if test.routed {
+				var failure *sourceError
+				if !errors.As(err, &failure) || failure.statusCode != http.StatusUnauthorized {
+					t.Fatalf("first routed cycle error = %v, want HTTP 401", err)
+				}
+				if logins.Load() != 0 || reports.Load() != 1 {
+					t.Fatalf("first routed cycle sent %d logins and %d GETs, want 0 and 1", logins.Load(), reports.Load())
+				}
+				_, err = session.reports(t.Context(), nil)
+			}
+			if err != nil || logins.Load() != 1 || reports.Load() != 2 {
+				t.Fatalf("after recovery error = %v, logins = %d, GETs = %d; want nil, 1, 2", err, logins.Load(), reports.Load())
+			}
+		})
+	}
+}
+
+func TestRoutedPVMBGChecksOwnerAfterLogin(t *testing.T) {
+	kube, host := liveAuthorityFixture("owner-1", 8)
+	token := mutationToken{owner: "owner-1", epoch: 8}
+	authority := &PollAuthority{owner: token.owner, ownerDomain: authorityTestDomain, domains: []string{authorityTestDomain},
+		kubernetes: kube, host: host, token: &token}
+	var logins, reports atomic.Int32
+	agency := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		if request.Method != http.MethodPost || request.URL.Path != "/auth/login" {
+			reports.Add(1)
+			_, _ = io.WriteString(w, `[]`)
+			return
+		}
+		logins.Add(1)
+		record, version, _ := kube.snapshot()
+		record.State = authorityClosing
+		if _, err := kube.CompareAndSwap(request.Context(), version, record); err != nil {
+			t.Error(err)
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		_, _ = io.WriteString(w, `{"access_token":"fresh","token_type":"Bearer","expires_in":300}`)
+	}))
+	t.Cleanup(agency.Close)
+	cfg := testConfig(t)
+	cfg.PVMBG.BaseURL = agency.URL
+	cfg.ShardURLs = [3]string{"postgres://shard0/db", "postgres://shard1/db", "postgres://shard2/db"}
+	clients := newSourceClients(cfg, quietLogger())
+	t.Cleanup(clients.closeIdleConnections)
+	poller := poller{
+		cfg: cfg, store: &Store{shards: [3]*Store{{}}, authority: authority, writeTimeout: cfg.DBWriteTimeout},
+		reader: readerSession{client: clients.pvmbg, clientID: cfg.PVMBGReaderClientID, clientSecret: cfg.PVMBGReaderClientSecret},
+	}
+	ctx := context.WithValue(t.Context(), mutationContextKey{}, token)
+	_, err := poller.fetchPollReceipt(ctx, VolcanicEndpoint, nil, time.Now())
+	if !errors.Is(err, errStaleMutationAuthority) || logins.Load() != 1 || reports.Load() != 0 {
+		t.Fatalf("stale cycle error = %v, logins = %d, GETs = %d; want stale authority, 1, 0", err, logins.Load(), reports.Load())
 	}
 }
 

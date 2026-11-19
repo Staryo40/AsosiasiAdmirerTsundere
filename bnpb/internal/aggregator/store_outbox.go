@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"time"
+
+	"github.com/jackc/pgx/v5"
 )
 
 // Materialize and close rows before returning: no DB connection crosses broker I/O.
@@ -29,6 +31,7 @@ func (store *Store) pendingOutbox(ctx context.Context, limit int) ([]outboxMessa
 			break
 		}
 		totalBytes += int64(len(message.Payload))
+		message.store = store
 		if err := json.Unmarshal(message.Payload, &message.Publication); err != nil {
 			return nil, errors.New("invalid stored outbox envelope")
 		}
@@ -52,12 +55,33 @@ func (store *Store) retryOutbox(ctx context.Context, sequence int64, nextAttempt
         WHERE sequence = $1 AND sent_at IS NULL`, sequence, nextAttempt)
 }
 
-func (store *Store) updateOutbox(ctx context.Context, query string, args ...any) error {
+func (store *Store) updateOutbox(ctx context.Context, query string, args ...any) (err error) {
 	ctx, cancel := context.WithTimeout(ctx, store.writeTimeout)
 	defer cancel()
-	updated, err := store.write.Exec(ctx, query, args...)
+	var tx pgx.Tx
+	if _, _, ok := pollAuthorityToken(ctx); ok {
+		tx, err = store.beginMutation(ctx)
+	} else if store.shards[0] != nil {
+		return errors.New("outbox: owner authority required")
+	} else {
+		tx, err = store.write.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
+	}
+	if err != nil {
+		return storeError("begin outbox mutation", err)
+	}
+	defer func() {
+		if tx != nil {
+			_ = rollbackTransaction(context.Background(), tx)
+		}
+	}()
+	updated, err := tx.Exec(ctx, query, args...)
 	if err == nil && updated.RowsAffected() != 1 {
 		err = errors.New("pending outbox row missing")
 	}
-	return storeError("update outbox delivery", err)
+	if err != nil {
+		return storeError("update outbox delivery", err)
+	}
+	err = tx.Commit(ctx)
+	tx = nil
+	return storeError("commit outbox delivery", err)
 }

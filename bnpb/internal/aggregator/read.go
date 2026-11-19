@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"time"
 	"unicode/utf8"
@@ -89,7 +90,7 @@ func (api snapshotAPI) list(w http.ResponseWriter, request *http.Request) {
 		writeReadError(w, request, http.StatusServiceUnavailable, "store_unavailable")
 		return
 	}
-	if sourcesUnavailable(page.Sources) {
+	if !page.Partial && !page.MetadataUnavailable && sourcesUnavailable(page.Sources) {
 		failure := readErrorEnvelope{Error: readFailure(request, "source_unavailable"), Sources: page.Sources, AsOf: &page.AsOf}
 		writeReadJSON(w, http.StatusServiceUnavailable, failure)
 		return
@@ -104,8 +105,12 @@ func (api snapshotAPI) detail(w http.ResponseWriter, request *http.Request) {
 		return
 	}
 	detail, err := api.store.hazardDetail(request.Context(), hazardID, api.cfg)
-	if err == errHazardNotFound {
+	if errors.Is(err, errHazardNotFound) {
 		writeReadError(w, request, http.StatusNotFound, "not_found")
+		return
+	}
+	if errors.Is(err, errHazardUnavailable) {
+		writeReadError(w, request, http.StatusServiceUnavailable, "store_unavailable")
 		return
 	}
 	if err != nil {
@@ -117,9 +122,12 @@ func (api snapshotAPI) detail(w http.ResponseWriter, request *http.Request) {
 
 func readFailure(request *http.Request, code string) applicationError {
 	messages := map[string]string{
-		"invalid_query": "invalid query parameters", "missing_credential": "internal credential is required",
-		"invalid_credential": "invalid internal credential", "not_found": "hazard not found",
-		"source_unavailable": "selected sources are unavailable", "store_unavailable": "canonical store is unavailable",
+		"invalid_query": "invalid query parameters", "invalid_request": "invalid request body",
+		"missing_credential": "internal credential is required", "invalid_credential": "invalid internal credential",
+		"not_found": "hazard not found", "source_unavailable": "selected sources are unavailable",
+		"store_unavailable": "canonical store is unavailable", "authority_unavailable": "current write authority is unavailable",
+		"storage_unavailable": "canonical storage is unavailable", "catalogue_input_rejected": "one or more catalogue records were rejected",
+		"measurements_unavailable": "storage measurements are unavailable",
 	}
 	return applicationError{code, messages[code], correlation.ID(request.Context())}
 }

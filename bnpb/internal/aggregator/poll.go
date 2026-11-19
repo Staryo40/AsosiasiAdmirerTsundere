@@ -1,3 +1,4 @@
+
 package aggregator
 
 import (
@@ -25,23 +26,34 @@ type poller struct {
 	lastWarningReconcile time.Time
 }
 
+type pollReceipt struct {
+	response           IngestChunk
+	started            time.Time
+	holdCheckpoint     bool
+	reconcilesWarnings bool
+}
+
 func (app application) pollWorkers(cfg Config, logger *slog.Logger) []func(context.Context) {
 	poller := &poller{cfg: cfg, store: app.store, sources: app.sources, logger: logger,
 		lastWarningReconcile: time.Now(), reader: readerSession{client: app.sources.pvmbg,
 			clientID: cfg.PVMBGReaderClientID, clientSecret: cfg.PVMBGReaderClientSecret}}
 	workers := make([]func(context.Context), 0, 3)
 	for _, endpoint := range []Endpoint{SeismicEndpoint, WarningEndpoint, VolcanicEndpoint} {
-		interval := cfg.BMKG.PollInterval
-		if endpoint == VolcanicEndpoint {
-			interval = cfg.PVMBG.PollInterval
-		}
-		workers = append(workers, func(ctx context.Context) {
-			runPollLoop(ctx, interval, cfg.RetryMaxBackoff, func(ctx context.Context) error {
-				return poller.pollEndpoint(ctx, endpoint)
-			})
-		})
+		workers = append(workers, poller.endpointWorker(pollInterval(cfg, endpoint), func(ctx context.Context) error {
+			return poller.pollEndpoint(ctx, endpoint)
+		}))
 	}
 	return workers
+}
+
+func (poller *poller) endpointWorker(interval time.Duration, poll func(context.Context) error) func(context.Context) {
+	return func(ctx context.Context) {
+		// After handoff, leave one full local interval between activation and fresh dispatch.
+		if poller.store.shards[0] != nil && !waitPoll(ctx, interval) {
+			return
+		}
+		runPollLoop(ctx, interval, poller.cfg.RetryMaxBackoff, poll)
+	}
 }
 
 // Schedule from completion, so a slow endpoint cannot accumulate ticks or fetches.
@@ -104,8 +116,12 @@ func (poller *poller) pollEndpoint(ctx context.Context, endpoint Endpoint) error
 			logging.Event(ctx, poller.logger, logging.Record{Level: slog.LevelError, Event: "poll_state_failed", Message: "could not persist poll failure"}, "endpoint", string(endpoint), "category", "store")
 		}
 	}
-	logging.Event(ctx, poller.logger, logging.Record{Level: level, Event: "agency_poll", Message: "agency poll completed"},
-		"endpoint", string(endpoint), "category", category, "duration_ms", time.Since(started).Milliseconds())
+	fields := []any{"endpoint", string(endpoint), "period", pollPeriod(poller.cfg, endpoint, started),
+		"category", category, "duration_ms", time.Since(started).Milliseconds()}
+	if owner, epoch, ok := pollAuthorityToken(ctx); ok {
+		fields = append(fields, "owner", owner, "epoch", epoch)
+	}
+	logging.Event(ctx, poller.logger, logging.Record{Level: level, Event: "agency_poll", Message: "agency poll completed"}, fields...)
 	return err
 }
 
@@ -126,22 +142,60 @@ func (poller *poller) pollOnce(ctx context.Context, endpoint Endpoint, started t
 }
 
 func (poller *poller) importEndpoint(ctx context.Context, endpoint Endpoint, checkpoint *time.Time, started time.Time) error {
-	query := pollQuery(checkpoint, poller.cfg.PollOverlap, started, endpoint)
-	reconcile := endpoint == WarningEndpoint && started.Sub(poller.lastWarningReconcile) >= poller.cfg.WarningReconcileInterval
-	if reconcile {
-		query = nil
-	}
-	records, err := poller.fetch(ctx, endpoint, query)
+	receipt, err := poller.nextPollReceipt(ctx, endpoint, checkpoint, started)
 	if err != nil {
 		return err
 	}
-	if err := poller.ingestResponse(ctx, IngestChunk{Endpoint: endpoint, Records: records, ReceivedAt: time.Now().UTC()}, started); err != nil {
+	if err := poller.ingestResponse(ctx, receipt); err != nil {
 		return err
 	}
-	if reconcile || (endpoint == WarningEndpoint && checkpoint == nil) {
-		poller.lastWarningReconcile = started
+	if receipt.reconcilesWarnings {
+		poller.lastWarningReconcile = receipt.started
+	}
+	if poller.store.shards[0] != nil {
+		return poller.store.clearPollReceipt(ctx, receipt.response)
 	}
 	return nil
+}
+
+func (poller *poller) nextPollReceipt(ctx context.Context, endpoint Endpoint, checkpoint *time.Time, started time.Time) (pollReceipt, error) {
+	routed := poller.store.shards[0] != nil
+	if routed {
+		receipt, err := poller.store.pendingPollReceipt(ctx, endpoint)
+		if err != nil || receipt.response.InputID != "" {
+			return receipt, err
+		}
+	}
+	receipt, err := poller.fetchPollReceipt(ctx, endpoint, checkpoint, started)
+	if err != nil || !routed {
+		return receipt, err
+	}
+	return receipt, poller.store.stagePollReceipt(ctx, receipt)
+}
+
+func (poller *poller) fetchPollReceipt(ctx context.Context, endpoint Endpoint, checkpoint *time.Time, started time.Time) (pollReceipt, error) {
+	query := pollQuery(checkpoint, poller.cfg.PollOverlap, started, endpoint)
+	if endpoint == WarningEndpoint && started.Sub(poller.lastWarningReconcile) >= poller.cfg.WarningReconcileInterval {
+		query = nil
+	}
+	requestCtx, err := poller.pollRequestContext(ctx, endpoint, started)
+	if err != nil {
+		return pollReceipt{}, err
+	}
+	records, err := poller.fetch(requestCtx, endpoint, query)
+	if err != nil {
+		return pollReceipt{}, err
+	}
+	received := time.Now().UTC()
+	ordered, hold := orderRecords(records, endpoint)
+	// Persist the assigned ordinals, not a sort that a replacement could reinterpret.
+	for index, record := range ordered {
+		records[index] = record.raw
+	}
+	return pollReceipt{
+		response: IngestChunk{Endpoint: endpoint, Records: records, ReceivedAt: received, InputID: correlation.NewID()},
+		started:  started, holdCheckpoint: hold, reconcilesWarnings: endpoint == WarningEndpoint && query == nil,
+	}, nil
 }
 
 func (poller *poller) logRecovery(ctx context.Context, endpoint Endpoint, previous pollObservation) {
@@ -164,7 +218,33 @@ func pollQuery(checkpoint *time.Time, overlap time.Duration, started time.Time, 
 	return url.Values{"since": {boundary.Add(-overlap).UTC().Format(time.RFC3339Nano)}}
 }
 
+func (poller *poller) pollRequestContext(ctx context.Context, endpoint Endpoint, started time.Time) (context.Context, error) {
+	metadata := pollRequestMetadata{endpoint: endpoint, period: pollPeriod(poller.cfg, endpoint, started)}
+	if poller.store.shards[0] != nil {
+		if _, _, ok := pollAuthorityToken(ctx); !ok {
+			return nil, errStaleMutationAuthority
+		}
+		metadata.authority = poller.store.authority
+		metadata.authorityTimeout = poller.store.writeTimeout
+	}
+	return context.WithValue(ctx, pollRequestMetadataKey{}, metadata), nil
+}
+
+func pollInterval(cfg Config, endpoint Endpoint) time.Duration {
+	if endpoint == VolcanicEndpoint {
+		return cfg.PVMBG.PollInterval
+	}
+	return cfg.BMKG.PollInterval
+}
+
+func pollPeriod(cfg Config, endpoint Endpoint, started time.Time) string {
+	return started.UTC().Truncate(pollInterval(cfg, endpoint)).Format(time.RFC3339Nano)
+}
+
 func (poller *poller) fetch(ctx context.Context, endpoint Endpoint, query url.Values) ([]json.RawMessage, error) {
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
 	if endpoint == VolcanicEndpoint {
 		ctx, cancel := context.WithTimeout(ctx, poller.cfg.PVMBGCycleTimeout)
 		defer cancel()
@@ -212,22 +292,20 @@ func orderedSourceRecord(raw json.RawMessage, endpoint Endpoint) (orderedRecord,
 	return record, identityErr == nil && stampErr == nil
 }
 
-func (poller *poller) ingestResponse(ctx context.Context, response IngestChunk, started time.Time) error {
-	ordered, hold := orderRecords(response.Records, response.Endpoint)
-	policy := checkpointPolicy{hold: hold, started: &started}
+func (poller *poller) ingestResponse(ctx context.Context, receipt pollReceipt) error {
+	response := receipt.response
+	policy := checkpointPolicy{hold: receipt.holdCheckpoint, started: &receipt.started}
 	if response.Endpoint == WarningEndpoint {
-		ceiling := databaseTime(started)
+		ceiling := databaseTime(receipt.started)
 		policy.ceiling = &ceiling
 	}
-	return poller.ingestOrderedResponse(ctx, response, ordered, policy)
-}
-
-func (poller *poller) ingestOrderedResponse(ctx context.Context, response IngestChunk, ordered []orderedRecord, policy checkpointPolicy) error {
-	// An empty array still commits a successful observation without moving the cursor.
+	// An empty response still commits a successful poll observation.
 	for offset := 0; ; {
-		end := min(offset+poller.cfg.IngestChunkRecords, len(ordered))
-		chunk := responseChunk(response, ordered[offset:end])
-		policy.completePoll = end == len(ordered)
+		end := min(offset+poller.cfg.IngestChunkRecords, len(response.Records))
+		chunk := response
+		chunk.Records = response.Records[offset:end]
+		chunk.InputOffset += offset
+		policy.completePoll = end == len(response.Records)
 		if policy.completePoll {
 			completed := time.Now().UTC()
 			policy.completed = &completed
@@ -240,14 +318,6 @@ func (poller *poller) ingestOrderedResponse(ctx context.Context, response Ingest
 		}
 		offset = end
 	}
-}
-
-func responseChunk(response IngestChunk, ordered []orderedRecord) IngestChunk {
-	chunk := IngestChunk{Endpoint: response.Endpoint, ReceivedAt: response.ReceivedAt}
-	for _, record := range ordered {
-		chunk.Records = append(chunk.Records, record.raw)
-	}
-	return chunk
 }
 
 func pollCategory(err error) string {

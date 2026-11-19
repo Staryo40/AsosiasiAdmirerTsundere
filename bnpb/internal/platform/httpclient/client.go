@@ -18,16 +18,30 @@ const maxIdleConnections = 100
 
 // New returns an isolated, reusable client with correlation and latency logging.
 func New(timeout time.Duration, logger *slog.Logger) *http.Client {
-	transport := &http.Transport{
-		Proxy:                 http.ProxyFromEnvironment,
-		DialContext:           (&net.Dialer{Timeout: timeout, KeepAlive: 30 * time.Second}).DialContext,
-		ForceAttemptHTTP2:     true,
-		MaxIdleConns:          maxIdleConnections,
-		MaxIdleConnsPerHost:   maxIdleConnections,
-		IdleConnTimeout:       90 * time.Second,
-		TLSHandshakeTimeout:   10 * time.Second,
-		ExpectContinueTimeout: time.Second,
-	}
+	return newClient(timeout, logger, &http.Transport{
+		Proxy:               http.ProxyFromEnvironment,
+		ForceAttemptHTTP2:   true,
+		MaxIdleConns:        maxIdleConnections,
+		MaxIdleConnsPerHost: maxIdleConnections,
+		IdleConnTimeout:     90 * time.Second,
+	})
+}
+
+// NewDirectSingleRequest uses a fresh, direct HTTP/1 connection per request.
+// Go can replay a failed GET on a reused connection, but not on a fresh HTTP/1 connection.
+func NewDirectSingleRequest(timeout time.Duration, logger *slog.Logger) *http.Client {
+	protocols := new(http.Protocols)
+	protocols.SetHTTP1(true)
+	return newClient(timeout, logger, &http.Transport{
+		DisableKeepAlives: true,
+		Protocols:         protocols,
+	})
+}
+
+func newClient(timeout time.Duration, logger *slog.Logger, transport *http.Transport) *http.Client {
+	transport.DialContext = (&net.Dialer{Timeout: timeout, KeepAlive: 30 * time.Second}).DialContext
+	transport.TLSHandshakeTimeout = 10 * time.Second
+	transport.ExpectContinueTimeout = time.Second
 	return &http.Client{
 		Transport: instrumentedTransport{next: transport, logger: logger},
 		Timeout:   timeout,
