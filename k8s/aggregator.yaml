@@ -75,6 +75,9 @@ spec:
             - name: BNPB_AGGREGATOR_INTERNAL_KEY
               valueFrom:
                 secretKeyRef: {name: bnpb-secrets, key: BNPB_AGGREGATOR_INTERNAL_KEY}
+            - name: BNPB_PANTAI_AUTH_TOKEN
+              valueFrom:
+                secretKeyRef: {name: pantai-token, key: token}
           resources:
             requests: {memory: 256Mi}
             limits: {memory: 512Mi}

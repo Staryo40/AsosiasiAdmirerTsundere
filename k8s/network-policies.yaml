@@ -43,3 +43,20 @@ spec:
               app.kubernetes.io/name: broker-init
       ports:
         - port: 15672
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: sensor-pantai-aggregator-only
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: sensor-pantai
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: aggregator
+      ports:
+        - port: 8080
