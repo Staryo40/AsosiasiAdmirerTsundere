@@ -93,6 +93,73 @@ func TestPlacementBootstrapPersistsAcrossStartup(t *testing.T) {
 	}
 }
 
+func TestPlacementBootstrapRestartPreservesRepair(t *testing.T) {
+	cfg := configuredBootstrap(t, m2IsolatedConfig(t), 0, rotatingPlacement())
+	store := m2OpenStore(t, cfg)
+	initial, err := store.placement(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidate := repairCandidateFixture()
+	evidence := repairEvidenceFixture(candidate)
+	intent := repairIntent(candidate, evidence)
+	reservedRevision, err := store.reserveStandbyRepair(t.Context(), initial, candidate, intent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reserved, err := store.placement(t.Context())
+	if err != nil || reserved.Revision != reservedRevision {
+		t.Fatalf("read reserved placement: %+v, %v", reserved, err)
+	}
+	store.Close()
+
+	reordered := rotatingPlacement()
+	slices.Reverse(reordered)
+	restartCfg := configuredBootstrap(t, cfg, 0, reordered)
+	restarted := m2OpenStore(t, restartCfg)
+	afterReserve, err := restarted.placement(t.Context())
+	if err != nil || !reflect.DeepEqual(reserved, afterReserve) {
+		t.Fatalf("restart changed reserved placement: %+v, %v", afterReserve, err)
+	}
+	if revision, err := restarted.reserveStandbyRepair(t.Context(), afterReserve, candidate, intent); err != nil || revision != reservedRevision {
+		t.Fatalf("restart could not resume reservation: revision=%d err=%v", revision, err)
+	}
+	observedCfg := configuredBootstrap(t, cfg, afterReserve.Revision, afterReserve.Copies)
+	restarted.Close()
+	restarted = m2OpenStore(t, observedCfg)
+	for _, status := range []string{"provisioning", "copying"} {
+		if err := restarted.setStandbyRepairStatus(t.Context(), candidate, reservedRevision, status); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := restarted.completeStandbyRepair(t.Context(), candidate, reservedRevision, evidence); err != nil {
+		t.Fatal(err)
+	}
+	completed, err := restarted.placement(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	restarted.Close()
+
+	afterCompletion := m2OpenStore(t, observedCfg)
+	current, err := afterCompletion.placement(t.Context())
+	if err != nil || !reflect.DeepEqual(completed, current) {
+		t.Fatalf("restart changed completed placement: %+v, %v", current, err)
+	}
+	if done, err := afterCompletion.repairAlreadyVerified(t.Context(), candidate, current.Copies); err != nil || !done {
+		t.Fatalf("restart lost verified repair: done=%t err=%v", done, err)
+	}
+	stale := configuredBootstrap(t, cfg, initial.Revision, reordered)
+	rejected, err := OpenStore(t.Context(), stale, quietLogger())
+	if rejected != nil {
+		rejected.Close()
+		t.Fatal("restart accepted a stale revision with the same original inventory")
+	}
+	if !errors.Is(err, errPlacementChanged) {
+		t.Fatalf("stale bootstrap revision: %v", err)
+	}
+}
+
 func TestPlacementBootstrapConcurrentReplicas(t *testing.T) {
 	cfg := configuredBootstrap(t, m2IsolatedConfig(t), 0, rotatingPlacement())
 	type opened struct {

@@ -1,4 +1,3 @@
-
 package aggregator
 
 import (
@@ -51,6 +50,9 @@ var pollReceiptSchema string
 
 //go:embed migrations/012_live_mutation_generation.sql
 var liveMutationGenerationSchema string
+
+//go:embed migrations/013_shard_repair.sql
+var shardRepairSchema string
 
 const currentSchemaVersion = 12
 
@@ -347,6 +349,12 @@ func (store *Store) migrate(ctx context.Context, admin *pgxpool.Pool, bootstrap 
 	}
 	if identity.role != "" {
 		if err = configureStoreIdentity(ctx, tx, identity); err != nil {
+			return err
+		}
+	}
+	// Repair metadata must not change the canonical version required to recover an offline shard.
+	if identity.role == "control" || identity.role == "" {
+		if _, err := tx.Exec(ctx, shardRepairSchema); err != nil {
 			return err
 		}
 	}

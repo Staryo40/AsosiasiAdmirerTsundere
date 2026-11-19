@@ -1,4 +1,3 @@
-
 package aggregator
 
 import (
@@ -25,6 +24,7 @@ type Config struct {
 	DatabaseURL, WriterURL, AMQPURL, HazardExchange string
 	ShardURLs, ShardWriterURLs                      [3]string
 	ShardPlacement                                  string
+	ShardRepairCandidates                           string
 	Authority                                       AuthorityConfig
 	Audit                                           AuditConfig
 	Catalog                                         CatalogConfig
@@ -97,6 +97,7 @@ func loadConfig(lookup func(string) (string, bool)) (Config, error) {
 		return Config{}, fmt.Errorf("BNPB_SHARD_0_DATABASE_URL through BNPB_SHARD_2_DATABASE_URL: configure all three or none")
 	}
 	cfg.ShardPlacement, _ = lookup("BNPB_SHARD_PLACEMENT")
+	cfg.ShardRepairCandidates, _ = lookup("BNPB_SHARD_REPAIR_CANDIDATES")
 	var err error
 	cfg.Authority, err = loadAuthorityConfig(lookup)
 	if err != nil {

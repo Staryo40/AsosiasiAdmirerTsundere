@@ -84,15 +84,34 @@ func bootstrapPlacement(ctx context.Context, tx pgx.Tx, proposed placementSnapsh
 	if err != nil {
 		return err
 	}
-	// A restarted/competing replica may carry the already-applied configuration.
-	// Never rewrite it or reset revision merely because the input revision is stale.
-	if proposed.Revision <= current.Revision && slices.Equal(proposed.Copies, current.Copies) {
+	config, err := json.Marshal(proposed)
+	if err != nil {
+		return err
+	}
+	var hasConfig, sameConfig bool
+	if err := tx.QueryRow(ctx, `SELECT bootstrap_config IS NOT NULL, COALESCE(bootstrap_config=$1::jsonb,false)
+        FROM placement_revision WHERE singleton`, config).Scan(&hasConfig, &sameConfig); err != nil {
+		return storeError("read applied placement configuration", err)
+	}
+	// Repair changes the live inventory, not the configuration a restarted replica carries.
+	if sameConfig {
 		return nil
 	}
-	if len(current.Copies) == 0 && !replicatedBootstrap(proposed.Copies) {
-		return errInvalidPlacement
+	matchesInventory := slices.Equal(proposed.Copies, current.Copies)
+	if matchesInventory && proposed.Revision < current.Revision && hasConfig {
+		// An older matching snapshot must not displace the most recently applied ConfigMap.
+		return nil
 	}
-	return recordPlacementChange(ctx, tx, proposed, current)
+	if !matchesInventory || proposed.Revision > current.Revision {
+		if len(current.Copies) == 0 && !replicatedBootstrap(proposed.Copies) {
+			return errInvalidPlacement
+		}
+		if err := recordPlacementChange(ctx, tx, proposed, current); err != nil {
+			return err
+		}
+	}
+	_, err = tx.Exec(ctx, "UPDATE placement_revision SET bootstrap_config=$1::jsonb WHERE singleton", config)
+	return storeError("persist applied placement configuration", err)
 }
 
 func replicatedBootstrap(copies []shardPlacement) bool {

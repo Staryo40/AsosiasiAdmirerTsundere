@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/Staryo40/AsosiasiAdmirerTsundere/bnpb/internal/platform/config"
 	"github.com/Staryo40/AsosiasiAdmirerTsundere/bnpb/internal/platform/logging"
@@ -26,6 +27,11 @@ func Initialize(ctx context.Context, mux *http.ServeMux, platform config.Config,
 		logging.Event(ctx, logger, logging.Record{Level: slog.LevelError, Event: "canonical_store_initialization_failed", Message: err.Error()})
 		return nil, err
 	}
+	repair, err := newRepairWorker(store, cfg.ShardRepairCandidates, cfg.Authority.Kubernetes)
+	if err != nil {
+		store.Close()
+		return nil, err
+	}
 	app := application{sources: newSourceClients(cfg, logger), store: store}
 	mux.HandleFunc("GET /ready", app.ready)
 	registerSnapshotRoutes(mux, store, cfg)
@@ -36,6 +42,9 @@ func Initialize(ctx context.Context, mux *http.ServeMux, platform config.Config,
 		app.sources.closeIdleConnections()
 		store.Close()
 		return nil, err
+	}
+	if repair != nil {
+		workers = append(workers, func(ctx context.Context) { runRepair(ctx, logger, repair) })
 	}
 	if cfg.Catalog.Token != "" {
 		registerCatalogRoutes(mux, store, cfg, store.authority)
@@ -81,6 +90,22 @@ func (app application) start(ctx context.Context, workers ...func(context.Contex
 			return nil
 		case <-shutdownCtx.Done():
 			return shutdownCtx.Err()
+		}
+	}
+}
+
+func runRepair(ctx context.Context, logger *slog.Logger, reconcile func(context.Context) error) {
+	const interval = 5 * time.Second
+	const repairCycleBudget = 20 * time.Second
+	for ctx.Err() == nil {
+		cycle, cancel := context.WithTimeout(ctx, repairCycleBudget)
+		err := reconcile(cycle)
+		cancel()
+		if err != nil && ctx.Err() == nil {
+			logger.WarnContext(ctx, "standby repair reconciliation did not complete", "event", "standby_repair_reconcile_failed")
+		}
+		if !waitPoll(ctx, interval) {
+			return
 		}
 	}
 }

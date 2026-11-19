@@ -150,9 +150,55 @@ func TestM2MigrationPreservesLegacyRowsAndOutbox(t *testing.T) {
 		t.Fatalf("warning/event/backfill differ: %d/%d/%d", seismic, warning, hazard)
 	}
 	_ = m2OpenStore(t, cfg)
-	var count int
-	if err := store.read.QueryRow(t.Context(), "SELECT count(*) FROM schema_migrations").Scan(&count); err != nil || count != currentSchemaVersion {
-		t.Fatalf("migration rerun: count=%d, %v", count, err)
+	assertSchemaRepairMetadata(t, store.read, true)
+}
+
+func TestM2RepairMetadataOnExistingVersion12(t *testing.T) {
+	shardID := int16(0)
+	for _, identity := range []storeIdentity{{role: "control"}, {role: "shard", shardID: &shardID}} {
+		t.Run(identity.role, func(t *testing.T) {
+			cfg := m2IsolatedConfig(t)
+			ctx := t.Context()
+			pool, err := openPool(ctx, cfg.DatabaseURL, 2, quietLogger())
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(pool.Close)
+			tx, err := pool.Begin(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer rollbackTransaction(ctx, tx)
+			if err := migrateSchema(ctx, tx); err != nil {
+				t.Fatal(err)
+			}
+			if err := tx.Commit(ctx); err != nil {
+				t.Fatal(err)
+			}
+			assertSchemaRepairMetadata(t, pool, false)
+
+			if err := (&Store{}).migrate(ctx, pool, nil, identity); err != nil {
+				t.Fatal(err)
+			}
+			assertSchemaRepairMetadata(t, pool, identity.role == "control")
+		})
+	}
+}
+
+func assertSchemaRepairMetadata(t *testing.T, pool *pgxpool.Pool, wantRepair bool) {
+	t.Helper()
+	var version, count, minimum int
+	if err := pool.QueryRow(t.Context(), schemaHistoryQuery).Scan(&version, &count, &minimum); err != nil || version != 12 || count != 12 || minimum != 1 {
+		t.Fatalf("schema history: version=%d count=%d minimum=%d, %v; want 1 through 12", version, count, minimum, err)
+	}
+	var repairTable bool
+	var columnType string
+	err := pool.QueryRow(t.Context(), `SELECT to_regclass('shard_repair_jobs') IS NOT NULL, COALESCE((
+		SELECT data_type FROM information_schema.columns WHERE table_schema = current_schema()
+		AND table_name = 'placement_revision' AND column_name = 'bootstrap_config'
+	), '')`).Scan(&repairTable, &columnType)
+	if err != nil || repairTable != wantRepair || (wantRepair && columnType != "jsonb") || (!wantRepair && columnType != "") {
+		t.Fatalf("repair metadata (want present=%t): table=%t bootstrap_config type=%q, %v", wantRepair, repairTable, columnType, err)
 	}
 }
 
