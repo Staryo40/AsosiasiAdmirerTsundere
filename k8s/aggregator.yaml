@@ -17,6 +17,10 @@ spec:
       labels:
         app.kubernetes.io/name: aggregator
         role: aggregator
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8083"
+        prometheus.io/path: "/metrics"
     spec:
       terminationGracePeriodSeconds: 30
       topologySpreadConstraints:
