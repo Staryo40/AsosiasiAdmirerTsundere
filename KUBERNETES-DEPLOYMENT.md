@@ -175,7 +175,25 @@ kubectl -n sistem-informasi-kebencanaan-bnpb rollout restart deployment/<name>
 
 `<node-ip>` can be the IP of any node.
 
-## 6. Tester Agent
+## 6. Observability
+
+Prometheus and Grafana run in the separate `monitoring` namespace so Appendix B
+limits and the Tester Agent stay focused on application pods:
+
+```text
+kubectl apply -k k8s/monitoring
+```
+
+| Service | Address |
+| --- | --- |
+| Prometheus | `http://<node-ip>:30900` |
+| Grafana | `http://<node-ip>:30300` (anonymous Viewer; admin/`bnpb-observability`) |
+
+BNPB Go services expose `GET /metrics`. Pods with the `prometheus.io/scrape`
+annotation are discovered automatically. Rebuild and reload those images before
+expecting series such as `http_requests_total` and `http_request_duration_seconds`.
+
+## 7. Tester Agent
 
 ```text
 kubectl apply -f https://raw.githubusercontent.com/susTuna/if4031-tester-agent/ebb55261711123a9a211739ffbf140a275caa6da/manifest.yaml
