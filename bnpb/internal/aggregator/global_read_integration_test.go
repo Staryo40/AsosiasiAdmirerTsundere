@@ -1,6 +1,5 @@
 //go:build integration
 
-
 package aggregator
 
 import (
@@ -217,6 +216,29 @@ func TestGlobalReadIntegrationControlOutageKeepsCanonicalRows(t *testing.T) {
 	state := page.Sources[BMKG]
 	if !page.MetadataUnavailable || state.Status != "unavailable" || !state.HasCachedData {
 		t.Fatalf("metadata/cache status = metadataUnavailable:%t source:%+v", page.MetadataUnavailable, state)
+	}
+}
+
+func TestGlobalReadIntegrationMetadataQueryFailureKeepsCanonicalRows(t *testing.T) {
+	cfg := globalReadM2Config(t)
+	store := openGlobalReadM2Store(t, cfg)
+	ownerCtx := activateFixtureOwner(t, cfg, store, fixtureMutationOwner, fixtureMutationEpoch)
+	const hazardID = "metadata-query-failure"
+	insertGlobalReadFixture(t, ownerCtx, store.shards[0], hazardID, globalReadReference(t, 0, hazardID), time.Now().UTC())
+	// Keep the connection and transaction usable while forcing the metadata query to fail.
+	if _, err := store.authorityPools[0].Exec(t.Context(), `ALTER TABLE poll_state RENAME TO unavailable_poll_state`); err != nil {
+		t.Fatal(err)
+	}
+	page, err := store.listHazards(t.Context(), hazardQuery{limit: 10}, cfg)
+	if err != nil || !page.MetadataUnavailable || page.Partial || len(page.Items) != 1 || page.Items[0].HazardID != hazardID {
+		t.Fatalf("list after metadata query failure: page=%+v err=%v", page, err)
+	}
+	if state := page.Sources[BMKG]; state.Status != "unavailable" || !state.HasCachedData {
+		t.Fatalf("list metadata/cache state: %+v", state)
+	}
+	detail, err := store.hazardDetail(t.Context(), hazardID, cfg)
+	if err != nil || detail.Item.HazardID != hazardID || detail.AsOf.IsZero() || detail.Sources[BMKG].Status != "unavailable" {
+		t.Fatalf("detail after metadata query failure: detail=%+v err=%v", detail, err)
 	}
 }
 

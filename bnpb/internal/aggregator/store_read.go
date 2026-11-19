@@ -147,15 +147,8 @@ func (store *Store) listHazards(requestCtx context.Context, query hazardQuery, c
 		page.Items = page.Items[:query.limit]
 	}
 
-	// The control DB owns source poll metadata, not canonical routed data. A
-	// control failure is represented as unavailable metadata without dropping
-	// rows from any successful logical shard snapshot.
-	page.Sources, page.AsOf = unavailableSourceMetadata(selected)
-	metadataErr := store.primarySnapshot(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		var err error
-		page.Sources, page.AsOf, err = readFreshness(ctx, tx, selected, cfg)
-		return err
-	})
+	var metadataErr error
+	page.Sources, page.AsOf, metadataErr = store.sourceMetadata(ctx, selected, cfg)
 	page.MetadataUnavailable = metadataErr != nil
 	for source, exists := range cached {
 		state := page.Sources[source]
@@ -165,7 +158,6 @@ func (store *Store) listHazards(requestCtx context.Context, query hazardQuery, c
 		}
 		page.Sources[source] = state
 	}
-	page.AsOf = page.AsOf.UTC()
 
 	if page.Partial {
 		if query.cursor != nil {
@@ -223,19 +215,28 @@ func (store *Store) hazardDetail(requestCtx context.Context, hazardID string, cf
 			continue
 		}
 		detail := hazardDetail{Item: result.Value.Hazard, Partial: len(units) != 0, UnavailableUnits: units}
-		detail.Sources, detail.AsOf = unavailableSourceMetadata([]Source{detail.Item.Source})
-		_ = store.primarySnapshot(ctx, func(ctx context.Context, tx pgx.Tx) error {
-			var err error
-			detail.Sources, detail.AsOf, err = readFreshness(ctx, tx, []Source{detail.Item.Source}, cfg)
-			return err
-		})
-		detail.AsOf = detail.AsOf.UTC()
+		detail.Sources, detail.AsOf, _ = store.sourceMetadata(ctx, []Source{detail.Item.Source}, cfg)
 		return detail, nil
 	}
 	if len(units) != 0 {
 		return hazardDetail{Partial: true, UnavailableUnits: units}, errHazardUnavailable
 	}
 	return hazardDetail{}, errHazardNotFound
+}
+
+func (store *Store) sourceMetadata(ctx context.Context, selected []Source, cfg Config) (map[Source]sourceState, time.Time, error) {
+	var states map[Source]sourceState
+	var asOf time.Time
+	err := store.primarySnapshot(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		var readErr error
+		states, asOf, readErr = readFreshness(ctx, tx, selected, cfg)
+		return readErr
+	})
+	if err != nil {
+		// AI-assisted fix: even a failed control snapshot must leave reachable shard rows servable.
+		states, asOf = unavailableSourceMetadata(selected)
+	}
+	return states, asOf, err
 }
 
 func unavailableSourceMetadata(sources []Source) (map[Source]sourceState, time.Time) {
