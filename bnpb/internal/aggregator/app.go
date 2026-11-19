@@ -34,7 +34,7 @@ func Initialize(ctx context.Context, mux *http.ServeMux, platform config.Config,
 	}
 	app := application{sources: newSourceClients(cfg, logger), store: store}
 	mux.HandleFunc("GET /ready", app.ready)
-	registerSnapshotRoutes(mux, store, cfg)
+	registerSnapshotRoutes(mux, store, cfg, platform.WriteTimeout)
 	registerAuditRoutes4(mux, store, cfg)
 	dispatcher := &outboxDispatcher{store: store, publisher: newAMQPPublisher(cfg), cfg: cfg, logger: logger}
 	workers, err := app.ownerWorkers(ctx, cfg, logger, dispatcher.run)

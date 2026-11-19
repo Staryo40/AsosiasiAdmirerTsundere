@@ -45,7 +45,7 @@ func p1Ingest(t *testing.T, store *Store, endpoint Endpoint, records ...json.Raw
 func p1ReadServer(t *testing.T, store *Store, cfg Config) *httptest.Server {
 	t.Helper()
 	mux := http.NewServeMux()
-	registerSnapshotRoutes(mux, store, cfg)
+	registerSnapshotRoutes(mux, store, cfg, 10*time.Second)
 	server := httptest.NewServer(mux)
 	t.Cleanup(server.Close)
 	return server

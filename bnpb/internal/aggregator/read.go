@@ -15,9 +15,10 @@ import (
 const internalKeyHeader = "X-BNPB-Internal-Key"
 
 type snapshotAPI struct {
-	store *Store
-	cfg   Config
-	slots chan struct{}
+	store           *Store
+	cfg             Config
+	slots           chan struct{}
+	analyticsBudget time.Duration
 }
 
 type applicationError struct {
@@ -32,10 +33,14 @@ type readErrorEnvelope struct {
 	AsOf    *time.Time             `json:"as_of,omitempty"`
 }
 
-func registerSnapshotRoutes(mux *http.ServeMux, store *Store, cfg Config) {
+func registerSnapshotRoutes(mux *http.ServeMux, store *Store, cfg Config, writeTimeout time.Duration) {
 	api := snapshotAPI{store: store, cfg: cfg, slots: make(chan struct{}, cfg.ReadMaxInFlight)}
 	mux.Handle("GET /internal/hazards", api.authenticate(http.HandlerFunc(api.list)))
 	mux.Handle("GET /internal/hazards/{hazard_id}", api.authenticate(http.HandlerFunc(api.detail)))
+	analytics := api
+	analytics.slots = make(chan struct{}, 1)
+	analytics.analyticsBudget = analyticsReadBudget(cfg, writeTimeout)
+	mux.Handle("GET /internal/analytics", analytics.authenticate(http.HandlerFunc(analytics.analytics)))
 }
 
 func (api snapshotAPI) authenticate(next http.Handler) http.Handler {

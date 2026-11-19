@@ -108,12 +108,20 @@ func timeFilter(text string) (*time.Time, error) {
 	if text == "" {
 		return nil, nil
 	}
-	stamp, err := time.Parse(time.RFC3339Nano, text)
-	if err != nil || !sourceTimestamp.MatchString(text) || !validInstant(stamp) {
+	stamp, err := parseQueryTimestamp(text)
+	if err != nil || stamp.IsZero() {
 		return nil, errInvalidQuery
 	}
-	stamp = stamp.UTC()
 	return &stamp, nil
+}
+
+func parseQueryTimestamp(text string) (time.Time, error) {
+	stamp, err := time.Parse(time.RFC3339Nano, text)
+	stamp = stamp.UTC()
+	if err != nil || !sourceTimestamp.MatchString(text) || stamp.Year() < 1 || stamp.Year() > 9999 {
+		return time.Time{}, errInvalidQuery
+	}
+	return stamp, nil
 }
 
 func (filters hazardFilters) consistent() bool {
