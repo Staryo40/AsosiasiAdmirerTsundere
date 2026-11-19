@@ -3,8 +3,10 @@ package aggregator
 
 import (
 	"crypto/x509"
+	"encoding/json"
 	"encoding/pem"
 	"fmt"
+	"io"
 	"net/url"
 	"os"
 	"regexp"
@@ -21,10 +23,16 @@ type AuthorityConfig struct {
 	RenewalInterval time.Duration
 }
 
+const (
+	authorityOwnerDomainEnv = "BNPB_AUTHORITY_OWNER_DOMAIN_UUID"
+	authorityNodeNameEnv    = "BNPB_K8S_NODE_NAME"
+	authorityNodeDomainsEnv = "BNPB_AUTHORITY_NODE_DOMAINS"
+)
+
 var (
 	authorityDomainPattern     = regexp.MustCompile(`(?i)^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
 	kubernetesNamespacePattern = regexp.MustCompile(`^[a-z0-9](?:[-a-z0-9]*[a-z0-9])?$`)
-	kubernetesConfigMapPattern = regexp.MustCompile(`^[a-z0-9](?:[-a-z0-9]*[a-z0-9])?(?:\.[a-z0-9](?:[-a-z0-9]*[a-z0-9])?)*$`)
+	kubernetesSubdomainPattern = regexp.MustCompile(`^[a-z0-9](?:[-a-z0-9]*[a-z0-9])?(?:\.[a-z0-9](?:[-a-z0-9]*[a-z0-9])?)*$`)
 )
 
 func loadAuthorityConfig(lookup func(string) (string, bool)) (AuthorityConfig, error) {
@@ -54,11 +62,18 @@ func loadAuthorityConfig(lookup func(string) (string, bool)) (AuthorityConfig, e
 		{"BNPB_AUTHORITY_HOST_BASE_URL", &cfg.HostFence.BaseURL},
 		{"BNPB_AUTHORITY_HOST_TOKEN_FILE", &cfg.HostFence.TokenFile},
 		{"BNPB_AUTHORITY_HOST_CA_FILE", &cfg.HostFence.CAFile},
-		{"BNPB_AUTHORITY_OWNER_DOMAIN_UUID", &cfg.OwnerDomain},
 	} {
 		if set(field.name, field.dst) {
 			configured++
 		}
+	}
+	ownerDomain, ownerDomainSet, err := loadAuthorityOwnerDomain(lookup)
+	if err != nil {
+		return AuthorityConfig{}, err
+	}
+	if ownerDomainSet {
+		cfg.OwnerDomain = ownerDomain
+		configured++
 	}
 	domains, domainsSet := lookup("BNPB_AUTHORITY_DOMAINS")
 	if domainsSet {
@@ -87,6 +102,86 @@ func loadAuthorityConfig(lookup func(string) (string, bool)) (AuthorityConfig, e
 	return cfg, nil
 }
 
+func loadAuthorityOwnerDomain(lookup func(string) (string, bool)) (string, bool, error) {
+	literal, literalSet := lookup(authorityOwnerDomainEnv)
+	node, nodeSet := lookup(authorityNodeNameEnv)
+	mapping, mappingSet := lookup(authorityNodeDomainsEnv)
+	literal = strings.TrimSpace(literal)
+	if !nodeSet && !mappingSet {
+		return literal, literalSet, nil
+	}
+	if !validKubernetesSubdomain(node) {
+		return "", false, fmt.Errorf("%s: required valid Kubernetes node name with %s", authorityNodeNameEnv, authorityNodeDomainsEnv)
+	}
+	domain, err := authorityDomainForNode(node, mapping)
+	if err != nil {
+		return "", false, err
+	}
+	if literalSet && !strings.EqualFold(literal, domain) {
+		return "", false, fmt.Errorf("%s: conflicts with %s for the scheduled node", authorityOwnerDomainEnv, authorityNodeDomainsEnv)
+	}
+	return domain, true, nil
+}
+
+func authorityDomainForNode(node, mapping string) (string, error) {
+	nodeDomains, err := parseAuthorityNodeDomains(mapping)
+	if err != nil {
+		return "", err
+	}
+	if domain, ok := nodeDomains[node]; ok {
+		return domain, nil
+	}
+	return "", fmt.Errorf("%s: no mapping for scheduled node %q", authorityNodeDomainsEnv, node)
+}
+
+func parseAuthorityNodeDomains(mapping string) (map[string]string, error) {
+	decoder := json.NewDecoder(strings.NewReader(mapping))
+	if start, err := decoder.Token(); err != nil || start != json.Delim('{') {
+		return nil, fmt.Errorf("%s: must be a JSON object mapping node names to domain UUIDs", authorityNodeDomainsEnv)
+	}
+	nodeDomains := make(map[string]string)
+	assignedDomains := make(map[string]struct{})
+	for decoder.More() {
+		node, domain, err := decodeAuthorityNodeDomain(decoder)
+		if err != nil {
+			return nil, err
+		}
+		if _, exists := nodeDomains[node]; exists {
+			return nil, fmt.Errorf("%s: duplicate node name %q", authorityNodeDomainsEnv, node)
+		}
+		domainKey := strings.ToLower(domain)
+		if _, exists := assignedDomains[domainKey]; exists {
+			return nil, fmt.Errorf("%s: duplicate domain UUID", authorityNodeDomainsEnv)
+		}
+		nodeDomains[node] = domain
+		assignedDomains[domainKey] = struct{}{}
+	}
+	if end, err := decoder.Token(); err != nil || end != json.Delim('}') {
+		return nil, fmt.Errorf("%s: invalid JSON object", authorityNodeDomainsEnv)
+	}
+	if _, err := decoder.Token(); err != io.EOF {
+		return nil, fmt.Errorf("%s: unexpected data after JSON object", authorityNodeDomainsEnv)
+	}
+	return nodeDomains, nil
+}
+
+func decodeAuthorityNodeDomain(decoder *json.Decoder) (string, string, error) {
+	key, err := decoder.Token()
+	node, ok := key.(string)
+	if err != nil || !ok || !validKubernetesSubdomain(node) {
+		return "", "", fmt.Errorf("%s: invalid node name", authorityNodeDomainsEnv)
+	}
+	var domain string
+	if err := decoder.Decode(&domain); err != nil || !authorityDomainPattern.MatchString(domain) {
+		return "", "", fmt.Errorf("%s: invalid domain UUID for node %q", authorityNodeDomainsEnv, node)
+	}
+	return node, domain, nil
+}
+
+func validKubernetesSubdomain(name string) bool {
+	return len(name) <= 253 && kubernetesSubdomainPattern.MatchString(name)
+}
+
 func (cfg AuthorityConfig) validate() error {
 	if cfg.OwnerEndpoint != "" {
 		if err := validateOwnerEndpoint(cfg.OwnerEndpoint); err != nil {
@@ -110,7 +205,7 @@ func (cfg AuthorityConfig) validate() error {
 	if len(cfg.Kubernetes.Namespace) > 63 || !kubernetesNamespacePattern.MatchString(cfg.Kubernetes.Namespace) {
 		return fmt.Errorf("BNPB_AUTHORITY_KUBERNETES_NAMESPACE: invalid namespace name")
 	}
-	if len(cfg.Kubernetes.ConfigMap) > 253 || !kubernetesConfigMapPattern.MatchString(cfg.Kubernetes.ConfigMap) {
+	if !validKubernetesSubdomain(cfg.Kubernetes.ConfigMap) {
 		return fmt.Errorf("BNPB_AUTHORITY_KUBERNETES_CONFIGMAP: invalid ConfigMap name")
 	}
 	if cfg.RenewalInterval <= 0 || cfg.RenewalInterval >= 10*time.Second {
