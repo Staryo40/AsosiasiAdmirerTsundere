@@ -10,10 +10,12 @@ type HazardType string
 type Severity string
 
 const (
-	BMKG     Source     = "BMKG"
-	PVMBG    Source     = "PVMBG"
-	Seismic  HazardType = "SEISMIC"
-	Volcanic HazardType = "VOLCANIC"
+	BMKG         Source     = "BMKG"
+	PVMBG        Source     = "PVMBG"
+	SensorPantai Source     = "SENSOR_PANTAI"
+	Seismic      HazardType = "SEISMIC"
+	Volcanic     HazardType = "VOLCANIC"
+	Coastal      HazardType = "COASTAL"
 	Normal   Severity   = "NORMAL"
 	Waspada  Severity   = "WASPADA"
 	Siaga    Severity   = "SIAGA"

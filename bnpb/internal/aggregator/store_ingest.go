@@ -18,6 +18,7 @@ const (
 	SeismicEndpoint  Endpoint = "seismic"
 	WarningEndpoint  Endpoint = "warnings"
 	VolcanicEndpoint Endpoint = "volcanic"
+	CoastalEndpoint  Endpoint = "coastal"
 )
 
 type IngestChunk struct {
@@ -40,6 +41,7 @@ var ingestEndpoints = map[Endpoint]endpointFields{
 	SeismicEndpoint:  {"event_id", "occurred_at", 1},
 	WarningEndpoint:  {"warning_id", "issued_at", 1},
 	VolcanicEndpoint: {"report_id", "reported_at", 2},
+	CoastalEndpoint:  {"observation_id", "observed_at", 3},
 }
 
 // Ingest commits one bounded chunk. Callers must decode a complete response before submitting chunks.
@@ -156,6 +158,8 @@ func (store *Store) writeSourceRecord(ctx context.Context, tx pgx.Tx, chunk Inge
 		return store.writeWarning(ctx, tx, chunk, raw)
 	case SeismicEndpoint:
 		return store.writeSeismic(ctx, tx, chunk, raw)
+	case CoastalEndpoint:
+		return store.writeCoastal(ctx, tx, chunk, raw)
 	default:
 		hazard, err := MapVolcanic(raw, newReceipt(chunk.ReceivedAt))
 		if err != nil {

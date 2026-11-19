@@ -267,6 +267,8 @@ func pollCategory(err error) string {
 	switch failure.category {
 	case "timeout":
 		return "timeout"
+	case "circuit_open":
+		return "circuit_open"
 	case "transport_error", "read_error":
 		return "network"
 	default:

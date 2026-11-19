@@ -25,7 +25,10 @@ var snapshotIndexSchema string
 //go:embed migrations/004_outbox_sequence.sql
 var outboxSequenceSchema string
 
-const currentSchemaVersion = 4
+//go:embed migrations/005_coastal.sql
+var coastalSchema string
+
+const currentSchemaVersion = 5
 
 const schemaHistoryQuery = `SELECT COALESCE(max(version), 0), count(*),
     COALESCE(min(version), 0) FROM schema_migrations`
@@ -37,13 +40,15 @@ type Store struct {
 	readTimeout, writeTimeout time.Duration
 	chunkRecords              int
 	maxBytes                  int64
+	coastalStale              time.Duration
+	coastal                   coastalIngest
 }
 
 func OpenStore(ctx context.Context, cfg Config, logger *slog.Logger) (*Store, error) {
 	ctx, cancel := context.WithTimeout(ctx, cfg.DBWriteTimeout)
 	defer cancel()
 	store := &Store{readTimeout: cfg.DBReadTimeout, writeTimeout: cfg.DBWriteTimeout,
-		chunkRecords: cfg.IngestChunkRecords, maxBytes: cfg.MaxResponseBytes}
+		chunkRecords: cfg.IngestChunkRecords, maxBytes: cfg.MaxResponseBytes, coastalStale: cfg.SourceStaleAfter}
 	var err error
 	if store.write, err = openPool(ctx, cfg.DatabaseURL, cfg.DBWriteMaxConns, logger); err != nil {
 		return nil, storeError("open write pool", err)
@@ -152,7 +157,7 @@ func applyPendingMigrations(ctx context.Context, tx pgx.Tx, version int) error {
 	for _, migration := range []struct {
 		version int
 		sql     string
-	}{{2, outboxIdentitySchema}, {3, snapshotIndexSchema}, {4, outboxSequenceSchema}} {
+	}{{2, outboxIdentitySchema}, {3, snapshotIndexSchema}, {4, outboxSequenceSchema}, {5, coastalSchema}} {
 		if version < migration.version {
 			if _, err := tx.Exec(ctx, migration.sql); err != nil {
 				return err

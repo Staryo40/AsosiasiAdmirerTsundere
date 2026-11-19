@@ -26,16 +26,18 @@ func Initialize(ctx context.Context, mux *http.ServeMux, platform config.Config,
 		logging.Event(ctx, logger, logging.Record{Level: slog.LevelError, Event: "canonical_store_initialization_failed", Message: err.Error()})
 		return nil, err
 	}
-	app := application{sources: newSourceClients(cfg, logger), store: store}
+	pantai := newPantaiClient(cfg, logger)
+	app := application{sources: newSourceClients(cfg, logger), pantai: pantai, store: store}
 	mux.HandleFunc("GET /ready", app.ready)
 	registerSnapshotRoutes(mux, store, cfg)
 	dispatcher := &outboxDispatcher{store: store, publisher: newAMQPPublisher(cfg), cfg: cfg, logger: logger}
-	workers := append(app.pollWorkers(cfg, logger), dispatcher.run)
+	workers := append(app.pollWorkers(cfg, logger), app.pantaiWorker(cfg, pantai, logger), dispatcher.run)
 	return app.start(ctx, workers...), nil
 }
 
 type application struct {
 	sources sourceClients
+	pantai  *pantaiClient
 	store   *Store
 }
 
@@ -59,6 +61,9 @@ func (app application) start(ctx context.Context, workers ...func(context.Contex
 		<-ctx.Done()
 		group.Wait()
 		app.sources.closeIdleConnections()
+		if app.pantai != nil {
+			app.pantai.closeIdleConnections()
+		}
 		close(done)
 	}()
 	return func(shutdownCtx context.Context) error {
