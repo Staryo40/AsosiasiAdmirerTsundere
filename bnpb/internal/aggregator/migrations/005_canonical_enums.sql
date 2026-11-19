@@ -1,4 +1,3 @@
--- AI-assisted implementation; human review and AI-use disclosure are required.
 -- Replace only the two inherited enum checks, in the startup migration transaction.
 -- A normal CHECK validation scans existing rows; it does not rewrite their values.
 ALTER TABLE hazard_events

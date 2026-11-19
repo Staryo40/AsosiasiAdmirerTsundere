@@ -1,6 +1,5 @@
 package aggregator
 
-// AI-assisted implementation; configuration does not provision or promote physical copies.
 import (
 	"context"
 	"encoding/json"

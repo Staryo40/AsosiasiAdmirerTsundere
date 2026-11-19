@@ -1,8 +1,8 @@
 # TsundereDISTRIBUTED - Asosiasi Admirer Tsundere
 
-TsundereDISTRIBUTED is a disaster-coordination platform that aggregates seismic and volcanic hazard reports from two independent agency sources, Indonesia's BMKG (meteorology/seismology) and PVMBG (volcanology), into one canonical event stream. Incoming reports are mapped into a single `HazardEvent` format, stored in a database owned by exactly one service, published to a message broker, and served to downstream clients through a role-based read API — with independent consumers reacting to the same event stream for dashboards, alerting, and third-party feeds.
+TsundereDISTRIBUTED is a disaster-coordination platform that aggregates agency reports into canonical hazard records, stores them behind an Aggregator-owned storage boundary, publishes notifications, and serves role-specific client views. The BNPB source now also includes M2 work for durable routed ingestion, guarded ownership, bounded partial cross-shard reads, Audit, catalog loading and measurements.
 
-This repository is the Milestone 1 submission for IF4031 Arsitektur Aplikasi Terdistribusi. It contains mock implementations of both agency sources, the full BNPB backend (ingestion, canonical storage, authentication, client-facing API, and message-broker consumers), and the Docker Compose orchestration tying all of it into one runnable system.
+This repository contains the Milestone 1 application and ongoing Milestone 2 implementation. The local Compose stack remains a development environment; no verified Kubernetes deployment command or external M2 acceptance is claimed.
 
 ## Table of Contents
 
@@ -21,8 +21,8 @@ This repository is the Milestone 1 submission for IF4031 Arsitektur Aplikasi Ter
 | --- | --- | --- |
 | Mock BMKG | Rust, Axum | Rust edition 2024 · Axum 0.8.9 · Tokio 1.53.1 |
 | Mock PVMBG | Kotlin, Ktor | Kotlin 2.4.0 · Ktor 3.5.2 · JVM toolchain 21 |
-| BNPB backend (Aggregator, Auth, Client-Facing API, consumer-1/2/3) | Go | Go 1.26.0 · toolchain 1.26.8 |
-| Canonical Store | PostgreSQL | 18.6 |
+| BNPB backend | Go | go.mod targets Go 1.26.0 · observed local toolchain 1.26.8 |
+| Canonical storage | PostgreSQL | Compose image 18.6 · observed installed local PostgreSQL 18.1 |
 | Message broker | RabbitMQ | 4.3.5 (management image) |
 | Per-consumer local storage | SQLite via `modernc.org/sqlite` | pure Go, no CGO |
 | Orchestration | Docker, Docker Compose | Compose 2.24.4+ (`include:` and `!override`) |
@@ -141,10 +141,7 @@ volume (`docker compose --profile demo down -v`) or restore the original value.
 
 ### Complete variable list
 
-The tables below are the complete contents of the three `.env.example` files.
-`required` means there is no usable default. Values marked `match` must be the
-same value in both services. The values in the Default column are the example
-defaults used by this repository.
+The tables below describe the active example settings; optional M2 feature settings are also listed in the BNPB README and remain commented out in `bnpb/.env.example` unless their dependencies and credentials are configured. `BNPB_AUDIT_CHECKSUM_TIMEOUT` is an optional checksum-only query deadline (default 5s, range 1ms–1m); it does not change the public read timeout default of 200ms.
 
 #### `bmkg/.env`
 
@@ -181,7 +178,7 @@ defaults used by this repository.
 | --- | --- | --- |
 | `POSTGRES_DB` | `bnpb` | Canonical Store database name. |
 | `POSTGRES_USER` | `bnpb` | Canonical Store database user. |
-| `POSTGRES_PASSWORD` | `required` | PostgreSQL password; also used in `BNPB_CANONICAL_DATABASE_URL`. |
+| `POSTGRES_PASSWORD` | `required` | PostgreSQL password for the privileged startup migration/authority DSN; restricted runtime writer credentials are separate. |
 | `RABBITMQ_DEFAULT_USER` | `bnpb` | RabbitMQ bootstrap/admin user. |
 | `RABBITMQ_DEFAULT_PASS` | `required` | RabbitMQ bootstrap/admin password. |
 | `BNPB_LOG_LEVEL` | `INFO` | Shared BNPB log level. |
@@ -225,7 +222,7 @@ defaults used by this repository.
 | `BNPB_PVMBG_READER_CLIENT_ID` | `required / match` | PVMBG reader ID; equal to `PVMBG_READER_CLIENT_ID`. |
 | `BNPB_PVMBG_READER_CLIENT_SECRET` | `required / match` | PVMBG reader secret; equal to `PVMBG_READER_CLIENT_SECRET`. |
 | `BNPB_AGGREGATOR_INTERNAL_KEY` | `required` | API ↔ Aggregator trust key; at least 32 bytes. |
-| `BNPB_CANONICAL_DATABASE_URL` | `required` | PostgreSQL DSN, e.g. `postgres://bnpb:<password>@postgres:5432/bnpb?sslmode=disable`. |
+| `BNPB_CANONICAL_DATABASE_URL` | `required` | Privileged PostgreSQL migration/authority DSN, e.g. `postgres://bnpb:<password>@postgres:5432/bnpb?sslmode=disable`; not a reader-only runtime URL. |
 | `BNPB_SHARD_PLACEMENT` | empty / preserve | Optional Aggregator startup-only JSON `{revision,copies}`; [bootstrap contract](bnpb/contracts/v1/README.md#placement-bootstrap). No admin API or live reload. |
 | `BNPB_AMQP_URL` | `required` | Publisher AMQP URL, e.g. `amqp://publisher:<password>@rabbitmq:5672`. |
 | `BNPB_HAZARD_EXCHANGE` | `hazard.events` | RabbitMQ fanout exchange. |
@@ -405,7 +402,7 @@ Service names, as Compose knows them (use any of these in place of `<service-nam
 | `consumer-3` | Regional portal feed — append-only log (`demo` profile only) |
 | `postgres` | The Canonical Store, owned solely by the Aggregator |
 | `rabbitmq` | The message broker (`hazard.events` fanout exchange) |
-| `broker-init` | One-shot: provisions RabbitMQ policies and per-service users before anything else starts |
+| `broker-init` | One-shot: provisions the exchange and per-service users before startup. Source policy changes for no-TTL/no-expiry `reject-publish` queues are authorized but have not been applied to the live broker. |
 
 ```text
 docker compose ps                        # status of every service
@@ -709,7 +706,8 @@ docker run --rm -p 8089:8080 \
 
 Then open `http://localhost:8089` in a browser.
 
-This contract covers the **internal** read API (`GET /internal/hazards`, `GET /internal/hazards/{hazard_id}`) that only the Client-Facing API is allowed to call. The **public** endpoints that downstream clients (Media, Field Team, BNPB Internal Ops) actually use — `POST /auth/login`, `POST /auth/refresh`, `GET /v1/hazards`, `GET /v1/hazards/{hazard_id}` — are documented in prose, with full request/response examples and the Summary/Full field-projection rules, in [`bnpb/README.md`](bnpb/README.md). Each mock source's own endpoints are documented the same way in [`bmkg/README.md`](bmkg/README.md) and [`pvmbg/README.md`](pvmbg/README.md).
+This contract covers the Aggregator's internal read APIs, Audit endpoints, catalog ingestion and storage measurements. Audit and catalog use dedicated Bearer credentials; those routes are documented in [the contract README](bnpb/contracts/v1/README.md). The **public** endpoints that downstream clients (Media, Field Team, BNPB Internal Ops) actually use — `POST /auth/login`, `POST /auth/refresh`, `GET /v1/hazards`, `GET /v1/hazards/{hazard_id}` — are documented in prose, with full request/response examples and Summary/Full field-projection rules, in [`bnpb/README.md`](bnpb/README.md). Each mock source's own endpoints are documented the same way in [`bmkg/README.md`](bmkg/README.md) and [`pvmbg/README.md`](pvmbg/README.md).
+The catalogue route accepts at most 1000 records and 4 MiB per request. A follower discovers `owner_endpoint` and transparently forwards original request bytes at most one hop; retries preserve input identity and bytes. The owner chunks by the configured store write budget and does not mutate poll state. Retained receipt outcomes are 409; uncertain outcomes are 503. The loader streams only JSONL or JSON arrays, with 128 KiB record and 4 MiB wire limits; there is no arbitrary 256 MiB whole-artifact cap. Storage measurements are parallel per configured physical pool: canonical revisions are exact for observed outbox rows, PostgreSQL insert/update statistics are sampled, and relation bytes do not represent node disk or WAL. A2, native host resource bindings/proof, catalog reference data, and actual Member 3 API remain unavailable; no deployment or acceptance result is implied.
 
 There is no graphical interface anywhere in this system — every component, including the three broker consumers, is a headless API driven by `curl`, a script, or the Swagger UI above.
 

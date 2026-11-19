@@ -1,4 +1,3 @@
--- AI-assisted implementation; see contracts/v1/README.md. No physical deployment is implied.
 CREATE TABLE logical_shards (
     shard_id smallint PRIMARY KEY CHECK (shard_id BETWEEN 0 AND 2),
     name text NOT NULL UNIQUE,

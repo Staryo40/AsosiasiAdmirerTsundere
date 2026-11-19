@@ -1,4 +1,3 @@
--- AI-assisted review fix. Keep migration 006 and the identity hash unchanged.
 -- Refuse an already-invalid inventory rather than erase copies to make it fit.
 DO $$
 BEGIN

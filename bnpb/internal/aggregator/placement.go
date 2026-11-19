@@ -1,6 +1,5 @@
 package aggregator
 
-// AI-assisted implementation; see contracts/v1/README.md for scope and invariants.
 import (
 	"context"
 	"errors"

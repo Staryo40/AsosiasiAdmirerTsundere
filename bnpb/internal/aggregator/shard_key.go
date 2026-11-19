@@ -1,6 +1,5 @@
 package aggregator
 
-// AI-assisted implementation; see contracts/v1/README.md for the reviewed contract.
 import (
 	"crypto/sha256"
 	"encoding/binary"

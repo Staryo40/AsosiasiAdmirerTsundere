@@ -147,7 +147,7 @@ golangci-lint run ./...   # v2.14.0, matches CI
 
 ## Endpoints
 
-Platform-wide conventions apply to every service below (see [Shared platform behavior](#shared-platform-behavior) at the end): `GET /health` always answers `200 {"service":"<name>","status":"ok"}` with no dependency checks, every response carries `X-Correlation-ID`, and a 429/500 from the shared middleware can occur on any route.
+Platform-wide conventions apply to every service below (see [Shared platform behavior](#shared-platform-behavior) at the end): `GET /health` always answers `200 {"service":"<name>","status":"ok"}` with no dependency checks, every standard platform response carries `X-Correlation-ID`, and shared middleware can return 429/500 on any standard route. The four Audit endpoints intentionally do not use correlation IDs and return their exact two-field error envelope.
 
 ### Client-Facing API (public, `:8080`)
 
@@ -237,6 +237,21 @@ Never reachable from the host (except via the root `compose.override.yaml`'s ins
 
 **`GET /internal/hazards/{hazard_id}`** — no query string allowed at all (even a bare `?` is `400 invalid_query`). Not found → `404 not_found`. Store error → `503 store_unavailable`.
 
+
+M2 Aggregator-owned routes (source-level implementation; dedicated credentials are distinct):
+
+| Method and path | Credential | Behavior |
+| --- | --- | --- |
+| `GET /internal/audit/events` | Audit Bearer | Logical ascending events; inclusive `since`; default 100/max 1000; partial cursor does not claim incomplete progress. |
+| `GET /internal/audit/checksum` | Audit Bearer | Per-source logical event count and byte-sorted SHA-256 of LF-joined `source_ref_id` values (no final LF; duplicate values remain). |
+| `GET /internal/audit/location` | Audit Bearer | Probes configured physical copies and live PostgreSQL identity/role; missing evidence is partial. |
+| `GET /internal/audit/unprocessed` | Audit Bearer | Bounded metadata-only Member 3 proxy; absent/unavailable upstream is 503. |
+| `POST /internal/catalog/seismic` | Catalog Bearer | At most 1000 records/4 MiB; owner-routed durable ingestion with original-byte retry identity; internal store-budget chunking and no poll-state changes. Retained input → 409; uncertain outcome → 503. |
+| `GET /internal/storage/measurements` | Catalog Bearer | Parallel per-pool PostgreSQL measurements with verified logical identity: exact observed outbox revision count, sampled/approximate insert/update stats, and relation bytes (not node/WAL totals). Missing or unavailable units are explicit. |
+
+All four Audit endpoints return UTC timestamps where applicable and exact error bodies `{"error":{"code":"…","message":"…"}}`, with no `correlation_id`. Unspecified Audit event source means all sources. `BNPB_AUDIT_CHECKSUM_TIMEOUT` defaults to 5s and accepts 1ms–1m; it is separate from the unchanged public read timeout default of 200ms. Schema migration 010 adds four C-order Audit indexes for event traversal and checksum sorting, trading additional index space and write work for those reads. Host-fence protocol statuses are 404 for a closed grant, 410 for an expired grant, and bounded 503 for an uncertain outcome; these status meanings do not establish host service availability.
+
+These routes are not part of the existing local Compose API surface unless all required settings and backing dependencies are supplied.
 **HazardEvent** (the canonical record, 11 fields total including `attributes`):
 ```json
 {
@@ -262,6 +277,24 @@ Never reachable from the host (except via the root `compose.override.yaml`'s ins
 
 **`GET /ready`** checks **PostgreSQL only** (schema version matches what the Aggregator expects) — it does not check RabbitMQ connectivity.
 
+M2-only optional configuration is kept commented out in `.env.example`; configure it only in an Aggregator runtime with matching credentials and backing dependencies:
+
+| Setting | Purpose |
+| --- | --- |
+| `BNPB_CANONICAL_DATABASE_URL`, `BNPB_SHARD_0_DATABASE_URL` … `_2_DATABASE_URL` | Privileged migration/authority DSNs. These are not runtime reader-only URLs. |
+| `BNPB_CANONICAL_WRITER_DATABASE_URL`, `BNPB_SHARD_0_WRITER_DATABASE_URL` … `_2_WRITER_DATABASE_URL` | Restricted runtime read/write URLs to the corresponding migration DSN targets, with distinct credentials; routed mode supplies all shard URLs. |
+| `BNPB_AUDIT_TOKEN` | Dedicated Audit Bearer secret. |
+| `BNPB_AUDIT_CHECKSUM_TIMEOUT` | Checksum-only query deadline; default `5s`, range `1ms`–`1m`. Public read timeout remains `BNPB_DB_READ_TIMEOUT` (`200ms` by default). |
+| `BNPB_AUTHORITY_OWNER_ENDPOINT` | Optional private owner origin discovered for routed Catalog requests; when Catalog is configured, owner discovery is required. A follower forwards original bytes transparently at most once. |
+| `BNPB_UNPROCESSED_API_URL`, `BNPB_UNPROCESSED_API_TOKEN` | Optional metadata-only external owner API; both required together. |
+| `BNPB_STORAGE_COPY_DATABASE_URLS` | Bounded JSON list of configured physical copy DSNs; never infer replicas from placement metadata. |
+| `BNPB_CATALOG_TOKEN` | Dedicated catalog/measurement Bearer secret. |
+| `BNPB_AUTHORITY_KUBERNETES_SERVER_URL`, `BNPB_AUTHORITY_KUBERNETES_NAMESPACE`, `BNPB_AUTHORITY_KUBERNETES_CONFIGMAP`, `BNPB_AUTHORITY_KUBERNETES_TOKEN_FILE`, `BNPB_AUTHORITY_KUBERNETES_CA_FILE` | ConfigMap CAS authority API connection. |
+| `BNPB_AUTHORITY_HOST_BASE_URL`, `BNPB_AUTHORITY_HOST_TOKEN_FILE`, `BNPB_AUTHORITY_HOST_CA_FILE`, `BNPB_AUTHORITY_DOMAINS`, `BNPB_AUTHORITY_OWNER_DOMAIN_UUID` | Host-fence API and configured domain identities; owner domain must be in the allowed domain set. |
+| `BNPB_AUTHORITY_RENEWAL_INTERVAL` | Authority renewal period; default `5s`, positive and below the `10s` fencing lead. Runtime owner retries are capped at 5s; activation attempts are bounded at 20s. |
+
+Authority fields/domains are all-or-none. Host-native configuration must bind every allowed owner domain UUID to its actual PostgreSQL guard target(s) using a bounded resource file and privileged guard-only credentials; physical mappings, credential values, and native Secret/config paths have not been supplied. Missing/incomplete/mismatched bindings fail closed. The host `init` and `serve` source commands accept `--resources-file` (and the other flags shown in source), but native build/run/fencing proof is missing; those flag names are not an installation procedure. Graceful owner shutdown cancels and joins workers, then closes guards; takeover fences the old owner domain.
+
 ### Consumers (internal, `:8085`/`:8086`/`:8087`)
 
 Each consumer exposes only two routes, both unauthenticated (internal network only):
@@ -277,15 +310,25 @@ Each consumer exposes only two routes, both unauthenticated (internal network on
 ### Shared platform behavior
 
 - **Correlation ID** — `X-Correlation-ID` request header, echoed on the response; generated if missing or invalid (1–64 chars, `A-Za-z0-9._-`), and attached to every log line for that request across every service.
-- **Concurrency limiting (429)** — every service's whole mux is wrapped by a semaphore sized `BNPB_MAX_IN_FLIGHT` (default 64). Once full, excess requests get `429 {"error":"too many requests"}` immediately — note this is a **flatter** shape than the API's own `publicError` (no `code`/`correlation_id` keys). `/health` is exempt.
+- **Concurrency limiting (429)** — shared routes may use the generic `{"error":"too many requests"}` platform rejection. Audit routes preserve their exact `{"error":{"code":"…","message":"…"}}` envelope, with no correlation field in the body.
 - **Panic recovery (500)** — any unhandled panic anywhere becomes a clean `500 {"error":"internal server error"}`, never a crash or a leaked stack trace to the client.
 - **No business-logic sharing** — every `internal/<service>` package only ever imports `internal/platform`, enforced by CI lint (`depguard`). Each consumer's AMQP/SQLite code is its own copy by design (KI.1), not a shared library.
 
-## M2 Member 1 Step 1–4 boundary
+## M2 Member 1 Steps 1–9a — source and local-evidence boundary
 
-Canonical enums, consumer/API validation, migration 005, fixed `sha256-32be-v1` logical IDs, migration 006 placement metadata and migration 007 storage guards are implemented here. The [contract and handoffs](contracts/v1/README.md#kontrak-implementasi-member-1--step-14) distinguish proposed lifecycle/fencing/read contracts from runtime. Existing ingestion still uses the configured single M1 database: **no Step 5 routed per-shard writer, HA deployment, fencing, wildfire/retract processor, Audit or repair is claimed**.
+The implementation now includes the fixed three-logical-shard routing and durable per-input receipts (Step 5); ConfigMap CAS owner/epoch plus per-resource PostgreSQL generation guards and independent host BOOTTIME fencing controls (Step 6); owner-scoped durable outbox retries and persistent consumer dedupe (Step 7); cross-shard public partial reads with logical v2 cursors (Step 8); four dedicated-token Audit routes and physical-copy probes (Step 9); and a dedicated catalog ingest/measurement API plus offline loader/comparison CLIs (Step 9a). These source changes do not establish deployed Kubernetes, distributed PostgreSQL HA, external host-fence availability, or fault acceptance.
 
-Migration preserves public records, revisions, outbox, poll state and rejects; generated shard columns backfill by source identity, warnings by `related_event_id`. Startup runs migrations atomically and can hold DDL locks/backfill time: coordinate binary/schema cutover rather than claiming zero-lock online migration. Old binaries reject schema version 7. Do not activate new-source ingestion until its writer/lifecycle/authority and consumer contracts are implemented.
+Step 5 stores each input identity and ordinal with per-shard durable outcomes, committing canonical/source/outbox state atomically within one shard. Replays are idempotent, conflicting receipt bytes are rejected, and a central checkpoint advances only across a contiguous prefix of durable outcomes. Step 6 serializes protected SQL mutations with authority guards and holds their locks through commit. Application epoch and PostgreSQL generation remain distinct; a host BOOTTIME deadline and independently armed host timer—not a guest wall clock or PG clock—provide the frozen-guest fence path. The controls are not evidence that a multi-node HA database or independent hypervisor timer has been deployed.
+
+Step 7 retries the same immutable outbox message identity and bytes after uncertain publication; each consumer's durable dedupe/effect state survives restart. Dedupe is intentionally retained indefinitely because pruning without a safe replay horizon could permit old duplicate effects; this trades storage capacity for correctness. Step 8 performs concurrent bounded live shard reads under one deadline; these are not a global snapshot. Explicit partial/unavailable metadata accompanies reachable candidates; incomplete pages retry the last complete boundary (or opaque v2 start marker) and incomplete details do not become false 404s.
+
+Step 9 exposes `GET /internal/audit/events`, `/internal/audit/checksum`, `/internal/audit/location`, and `/internal/audit/unprocessed`, each guarded by a dedicated Audit Bearer token. Checksum uses byte-sorted `source_ref_id` values separated by LF with no final LF. Location probes actual configured copies and live `pg_is_in_recovery()` plus PostgreSQL `bnpb.node_name` / `bnpb.unit_name`; placement intent alone is not proof. Unprocessed metadata is fetched over the network from the configured Member 3 API; absent/unreachable/invalid/oversized metadata yields 503. No actual Member 3 API was available.
+
+Step 9a exposes `POST /internal/catalog/seismic` and `GET /internal/storage/measurements`, protected by a separate catalog Bearer token. Owner discovery uses `owner_endpoint`; a follower transparently forwards the original request bytes to the owner at most one hop. Retries preserve the original input identity and bytes. Requests allow up to 1000 records/4 MiB and the owner splits them internally by configured store write budget, without writing poll state or synthesizing source success. Durable retained outcomes return 409; uncertain outcomes return bounded 503. The actual CLI names are `cmd/catalog-load` (flags `-artifact`, `-base-url`, `-token-file`, `-audit-token-file`, `-expected-checksum`, `-resources-manifest`, `-run-output`) and `cmd/placement-compare` (flags `-input`, `-resources`, optional `-burst-area`). Catalog artifacts stream JSONL or JSON arrays; records are limited to 128 KiB and each wire request to 4 MiB, with batches of at most 20 records; there is no arbitrary whole-artifact 256 MiB cap. The comparison reports offline `fixed_hash` and `longitude_band` strategies, not runtime placement metrics. Catalog/reference data and deployed node metadata are unavailable, so no catalog checksum, per-node distribution, Kubernetes readiness, or M2 external acceptance is claimed.
+Storage measurements query configured physical pools in parallel and validate each pool's logical store identity. The canonical revision field counts observed outbox rows exactly; PostgreSQL insert/update statistics are sampled and approximate. Relation-size bytes are not total node disk, filesystem, or WAL usage, and do not establish measured distributed skew.
+The source broker policy changes are user-authorized but are not applied to the live broker: intended main/dead-letter queue bounds are 10,000/1,000, with no TTL or expiry and `reject-publish` overflow. This remains a source change, not observed broker configuration.
+
+M2 startup settings (writer URLs, Audit/Catalog credentials, optional copy inventory, and Authority endpoint/domain set) are feature-specific and must be supplied consistently; leave optional entries in `.env.example` commented out for local Compose. Do not use sample node names or empty credentials as configured values. The installed `golangci-lint` is 1.64.8, while CI pins 2.14.0; no local lint pass is claimed. This repository has no verified Kubernetes deployment command; the Compose workflow remains for local development only.
 
 Placement starts empty unless configured through `BNPB_SHARD_PLACEMENT`, a bounded startup-only JSON environment value from an Aggregator-only ConfigMap. `OpenStore` atomically migrates and bootstraps it before readiness: first initialization requires RF2-ready metadata; identical configuration/reordering/restarts are no-ops; stale different content or future revisions fail startup. Omission preserves storage. Structured `placement_loaded` logs expose the actual revision/count for the next CAS update. No new admin endpoint, reader privilege, watcher or dependency is added. Copy identity/no-forgetting/no-full-node guards remain enforced; metadata does not provision physical replicas. See the [bootstrap and selected fencing contract](contracts/v1/README.md#placement-bootstrap). SATELIT/SENSOR_PANTAI freshness remains explicitly unconfigured until their adapters exist.
 
@@ -298,3 +341,10 @@ go test ./internal/aggregator ./internal/api ./internal/consumer-1 ./internal/co
 From application root: `python -B -m unittest discover -s testing -p test_canonical_contracts.py`.
 
 PostgreSQL integration fixtures are opt-in: start a **new disposable loopback PostgreSQL 18** server on a free port, create database `bnpb_m2_step4_test`, set `BNPB_M2_LOCAL_TEST_DATABASE_URL` to that server/database with an explicit port, then run `go test -tags=integration -run '^Test(M2|Placement)' ./internal/aggregator` from `bnpb/`. Each test creates/removes its own random schema; this environment variable must never point to a service/canonical database. These fixtures do not replace the separate `postgres-test/bnpb_test` M1 Compose scenarios or demonstrate distributed HA/fault acceptance.
+
+### Distributed evidence handoff
+
+- **Primary routes:** For the control store and each logical shard, A2 must provide a stable route gated by the Patroni `/primary` endpoint (PostgreSQL primary **and** leader lock). Fence the old primary and drain old pooled sessions, verify the replacement has applied through the acknowledged WAL boundary, then expose the new route. Close/rebind the application guard before enabling writes on the new timeline. Use separate Patroni scopes and `pg-role` without changing `role=store`. Verify bounded partial reads recover to complete reads at the same logical cursor.
+- **Polling:** Capture upstream receipt logs, not just response-completion logs, and correlate endpoint/request ID to owner and epoch. Distinguish rejected auth, a replayed durable receipt (no fetch), and a request whose response never became durable. Measure from owner death to the replacement's first fetch, including fencing, activation, the elapsed handoff and any receipt replay. Test the ≤60 s bound and the skew/freeze rejection on the approved topology. Configure the fence endpoint on the independent libvirt host that can address all configured guest domains; this does not cover loss of that host.
+- **Catalogue:** Run `catalog-load` with the assistant catalogue, supplied checksum, and actual resource manifest. Allow temporary disk space for its private artifact snapshot. Require complete before/after measurements and a matching complete Audit checksum/count with other writes excluded from the measurement window. Join measurements by `(node, unit)` and placement shard; count each logical shard once in logical totals and each physical copy once in physical totals. Verify no node holds all logical records, not merely that each node hosts fewer than three shard IDs.
+- **Regional burst:** Use a separate bounded same-region input with new source reference IDs so it exercises writes rather than replay. Measure offered/accepted/completed rate, latency, CPU, disk and network on every node in the same sampling window. Keep resources, replica policy, batch size, and baseline constant; record the baseline and post-burst checksums separately. Use `placement-compare` on identical inputs for the offline hash/longitude comparison only. PostgreSQL tuple counters are sampled and do not count standby WAL replay; use physical node metrics for replica write load.
