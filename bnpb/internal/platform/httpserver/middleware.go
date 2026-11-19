@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/Staryo40/AsosiasiAdmirerTsundere/bnpb/internal/platform/correlation"
+	"github.com/Staryo40/AsosiasiAdmirerTsundere/bnpb/internal/platform/tracing"
 	"github.com/Staryo40/AsosiasiAdmirerTsundere/bnpb/internal/platform/logging"
 )
 
@@ -37,7 +38,9 @@ func correlate(next http.Handler) http.Handler {
 			correlationID = correlation.NewID()
 		}
 		w.Header().Set(correlation.Header, correlationID)
-		next.ServeHTTP(w, r.WithContext(correlation.WithID(r.Context(), correlationID)))
+		ctx, traceparent := tracing.Ensure(r.WithContext(correlation.WithID(r.Context(), correlationID)))
+		w.Header().Set(tracing.Header, traceparent)
+		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
 
@@ -96,6 +99,7 @@ func logRequest(request *http.Request, logger *slog.Logger, recorder *responseRe
 		"path", request.URL.Path,
 		"status", status,
 		"duration_ms", duration.Milliseconds(),
+		"traceparent", tracing.Parent(request.Context()),
 	)
 }
 

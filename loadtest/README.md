@@ -4,6 +4,8 @@ Run k6 on the host or any machine that can reach the API NodePort (default `192.
 
 ```powershell
 k6 run loadtest/k6-api-sustained.js
+k6 run loadtest/k6-api-10k.js
+k6 run loadtest/k6-media-shed.js
 ```
 
 Environment variables:

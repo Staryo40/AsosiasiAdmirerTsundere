@@ -40,12 +40,14 @@ func endpointObservation(snapshot endpointSnapshot, asOf time.Time, cfg Config) 
 }
 
 func endpointThreshold(endpoint Endpoint, cfg Config) time.Duration {
-	source := cfg.BMKG
-	if endpoint == VolcanicEndpoint {
-		source = cfg.PVMBG
-		return max(3*source.PollInterval, cfg.PVMBGCycleTimeout+source.PollInterval)
+	switch endpoint {
+	case VolcanicEndpoint:
+		return max(3*cfg.PVMBG.PollInterval, cfg.PVMBGCycleTimeout+cfg.PVMBG.PollInterval)
+	case CoastalEndpoint:
+		return max(3*cfg.Pantai.PollInterval, cfg.Pantai.HTTPTimeout+cfg.Pantai.PollInterval)
+	default:
+		return max(3*cfg.BMKG.PollInterval, cfg.BMKG.HTTPTimeout+cfg.BMKG.PollInterval)
 	}
-	return max(3*source.PollInterval, source.HTTPTimeout+source.PollInterval)
 }
 
 func overdueObservation(observation pollObservation, asOf time.Time, threshold time.Duration) pollObservation {
@@ -72,7 +74,7 @@ func safePollCategory(category *string) *string {
 		return nil
 	}
 	switch *category {
-	case "outage", "auth", "rate_limited", "timeout", "network", "invalid_response", "store":
+	case "outage", "auth", "rate_limited", "timeout", "network", "invalid_response", "store", "circuit_open":
 		return category
 	default:
 		redacted := "invalid_response"
@@ -117,6 +119,8 @@ func publicEndpoint(endpoint Endpoint) string {
 		return "seismic_events"
 	case WarningEndpoint:
 		return "tsunami_warnings"
+	case CoastalEndpoint:
+		return "coastal_observations"
 	default:
 		return "volcanic_reports"
 	}

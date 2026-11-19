@@ -492,7 +492,8 @@ Edit a value in `k8s/config/*.env`, run `kubectl apply -k k8s`, and Kustomize ro
 
 | Service | Address |
 | --- | --- |
-| Client-Facing API | `http://<node-ip>:30080` (`/auth/login`, `/auth/refresh`, `/v1/hazards`, `/v1/hazards/{hazard_id}`, `/health`) |
+| Client-Facing API | `http://<node-ip>:30080` (`/auth/login`, `/auth/refresh`, `/v1/hazards`, `/v1/hazards/{hazard_id}`, `/v1/coastal/status`, `/health`) |
+| Analytics dashboard (UI) | `http://<node-ip>:30081` |
 | Aggregator (internal read API, Audit API) | `http://<node-ip>:30083` |
 | RabbitMQ management | `kubectl -n sistem-informasi-kebencanaan-bnpb port-forward svc/rabbitmq 15672`, then <http://localhost:15672> |
 | Prometheus | `http://<node-ip>:30900` (after `kubectl apply -k k8s/monitoring`) |

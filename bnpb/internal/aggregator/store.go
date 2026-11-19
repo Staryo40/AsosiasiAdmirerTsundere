@@ -42,6 +42,7 @@ type Store struct {
 	maxBytes                  int64
 	coastalStale              time.Duration
 	coastal                   coastalIngest
+	pantaiClient              *pantaiClient
 }
 
 func OpenStore(ctx context.Context, cfg Config, logger *slog.Logger) (*Store, error) {

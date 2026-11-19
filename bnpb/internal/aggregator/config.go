@@ -18,8 +18,9 @@ type SourceConfig struct {
 }
 
 type pantaiResilience struct {
-	BreakerFailures int
-	BreakerCooldown time.Duration
+	BreakerFailures  int
+	BreakerCooldown  time.Duration
+	MaxInFlightCalls int
 }
 
 type Config struct {
@@ -130,6 +131,7 @@ func loadCounts(lookup func(string) (string, bool), cfg *Config) error {
 		{"BNPB_LIST_MAX_LIMIT", 500, 500, &cfg.ListMaxLimit},
 		{"BNPB_OUTBOX_BATCH_SIZE", 100, 1000, &cfg.OutboxBatchSize},
 		{"BNPB_PANTAI_BREAKER_FAILURES", 5, 64, &cfg.PantaiResilience.BreakerFailures},
+		{"BNPB_PANTAI_MAX_IN_FLIGHT", 1, 8, &cfg.PantaiResilience.MaxInFlightCalls},
 	} {
 		configured, exists := lookup(setting.name)
 		if !exists {

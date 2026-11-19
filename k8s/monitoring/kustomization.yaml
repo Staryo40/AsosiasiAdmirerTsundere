@@ -7,5 +7,7 @@ kind: Kustomization
 resources:
   - namespace.yaml
   - prometheus-rbac.yaml
+  - prometheus-rules.yaml
   - prometheus.yaml
   - grafana.yaml
+  - tempo.yaml

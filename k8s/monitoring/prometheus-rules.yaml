@@ -1,0 +1,25 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-rules
+  namespace: monitoring
+data:
+  bnpb-slo.yaml: |
+    groups:
+      - name: bnpb-slo
+        rules:
+          - record: bnpb:http_error_ratio:5m
+            expr: |
+              sum(rate(http_requests_total{code=~"5.."}[5m]))
+              / clamp_min(sum(rate(http_requests_total[5m])), 1e-9)
+          - record: bnpb:http_latency_p95:5m
+            expr: |
+              histogram_quantile(0.95,
+                sum by (le, service) (rate(http_request_duration_seconds_bucket[5m])))
+          - alert: BNPBHighErrorBudgetBurn
+            expr: bnpb:http_error_ratio:5m > 0.01
+            for: 2m
+            labels:
+              severity: warning
+            annotations:
+              summary: HTTP error budget burn above 1% (field alert path SLO)

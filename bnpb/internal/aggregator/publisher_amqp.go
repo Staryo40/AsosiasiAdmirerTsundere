@@ -3,6 +3,7 @@ package aggregator
 import (
 	"context"
 	"crypto/tls"
+	"encoding/json"
 	"errors"
 	"net"
 	"time"
@@ -57,9 +58,26 @@ func adaptPublicationError(err error) error {
 
 func amqpPublication(message Publication) amqp.Publishing {
 	return amqp.Publishing{ContentType: "application/json", ContentEncoding: "utf-8", DeliveryMode: amqp.Persistent,
-		MessageId: message.MessageID, CorrelationId: message.CorrelationID, Type: message.EventType,
-		Timestamp: message.ProducedAt, AppId: "bnpb-aggregator", Body: message.Payload,
+		Priority: publicationPriority(message.Payload), MessageId: message.MessageID, CorrelationId: message.CorrelationID,
+		Type: message.EventType, Timestamp: message.ProducedAt, AppId: "bnpb-aggregator", Body: message.Payload,
 		Headers: amqp.Table{"hazard_id": message.HazardID, "revision": message.Revision, "schema_version": int32(message.SchemaVersion)}}
+}
+
+func publicationPriority(payload []byte) uint8 {
+	var notification hazardNotification
+	if err := json.Unmarshal(payload, &notification); err != nil {
+		return 0
+	}
+	if notification.HazardEvent.Source == SensorPantai && notification.HazardEvent.Severity == Awas {
+		return 10
+	}
+	if notification.HazardEvent.Severity == Awas {
+		return 8
+	}
+	if notification.HazardEvent.Severity == Siaga {
+		return 5
+	}
+	return 0
 }
 
 func (publisher *amqpPublisher) connect(ctx context.Context) error {

@@ -26,7 +26,8 @@
       "type": "string",
       "enum": [
         "BMKG",
-        "PVMBG"
+        "PVMBG",
+        "SENSOR_PANTAI"
       ],
       "x-classification": "Ringkasan"
     },
@@ -38,7 +39,8 @@
       "type": "string",
       "enum": [
         "SEISMIC",
-        "VOLCANIC"
+        "VOLCANIC",
+        "COASTAL"
       ],
       "x-classification": "Ringkasan"
     },

@@ -10,6 +10,8 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+
+	"github.com/Staryo40/AsosiasiAdmirerTsundere/bnpb/internal/platform/tracing"
 )
 
 const (
@@ -101,6 +103,9 @@ func (service *publicService) aggregatorCall(ctx context.Context, path, rawQuery
 		return 0, nil, err
 	}
 	request.Header.Set(aggregatorInternalKeyHeader, service.config.aggregatorKey)
+	if parent := tracing.Parent(ctx); parent != "" {
+		request.Header.Set(tracing.Header, parent)
+	}
 	response, err := service.client.Do(request)
 	if err != nil {
 		return 0, nil, fmt.Errorf("aggregator request: %w", err)

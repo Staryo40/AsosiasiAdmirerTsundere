@@ -29,7 +29,11 @@ func Initialize(ctx context.Context, mux *http.ServeMux, platform config.Config,
 	pantai := newPantaiClient(cfg, logger)
 	app := application{sources: newSourceClients(cfg, logger), pantai: pantai, store: store}
 	mux.HandleFunc("GET /ready", app.ready)
-	registerSnapshotRoutes(mux, store, cfg)
+	snapshot := registerSnapshotRoutes(mux, store, cfg)
+	registerCoastalRoutes(mux, snapshot)
+	if cfg.PantaiAuthToken != "" {
+		store.attachPantaiBreaker(app.pantai)
+	}
 	dispatcher := &outboxDispatcher{store: store, publisher: newAMQPPublisher(cfg), cfg: cfg, logger: logger}
 	workers := append(app.pollWorkers(cfg, logger), app.pantaiWorker(cfg, pantai, logger), dispatcher.run)
 	return app.start(ctx, workers...), nil

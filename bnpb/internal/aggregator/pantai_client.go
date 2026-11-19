@@ -32,18 +32,24 @@ type pantaiClient struct {
 	token      string
 	maxBytes   int64
 	breaker    *circuitBreaker
+	inFlight   chan struct{}
 	stations   map[string]pantaiStation
 	stationsAt time.Time
 }
 
 func newPantaiClient(cfg Config, logger *slog.Logger) *pantaiClient {
 	origin, _ := url.Parse(cfg.Pantai.BaseURL)
+	slots := cfg.PantaiResilience.MaxInFlightCalls
+	if slots < 1 {
+		slots = 1
+	}
 	return &pantaiClient{
 		http:     httpclient.New(cfg.Pantai.HTTPTimeout, logger),
 		origin:   origin,
 		token:    cfg.PantaiAuthToken,
 		maxBytes: cfg.MaxResponseBytes,
 		breaker:  newCircuitBreaker(cfg.PantaiResilience.BreakerFailures, cfg.PantaiResilience.BreakerCooldown),
+		inFlight: make(chan struct{}, slots),
 		stations: make(map[string]pantaiStation),
 	}
 }
@@ -56,6 +62,12 @@ func (client *pantaiClient) observations(ctx context.Context, cursor string) (pa
 	now := time.Now().UTC()
 	if !client.breaker.allow(now) {
 		return pantaiObservations{}, &sourceError{category: "circuit_open"}
+	}
+	select {
+	case client.inFlight <- struct{}{}:
+		defer func() { <-client.inFlight }()
+	default:
+		return pantaiObservations{}, &sourceError{category: "bulkhead_rejected"}
 	}
 	query := url.Values{}
 	if cursor != "" {
