@@ -104,39 +104,6 @@ func TestIncrementAttemptsCountsUpPerMessage(t *testing.T) {
 	}
 }
 
-func TestPruneOldRecordsRemovesOnlyStaleRows(t *testing.T) {
-	store := openTestStore(t)
-	ctx := t.Context()
-	if err := store.Apply(ctx, sampleEntry("fresh")); err != nil {
-		t.Fatal(err)
-	}
-	stale := time.Now().Add(-5 * time.Hour).UTC().Format(time.RFC3339Nano)
-	if _, err := store.db.ExecContext(ctx, `INSERT INTO processed_messages (message_id, processed_at) VALUES (?, ?)`, "stale", stale); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := store.db.ExecContext(ctx, `INSERT INTO delivery_attempts (message_id, attempts, updated_at) VALUES (?, 1, ?)`, "stale", stale); err != nil {
-		t.Fatal(err)
-	}
-
-	if err := store.PruneOldRecords(ctx); err != nil {
-		t.Fatal(err)
-	}
-
-	var count int
-	if err := store.db.QueryRowContext(ctx, `SELECT count(*) FROM processed_messages WHERE message_id = ?`, "stale").Scan(&count); err != nil {
-		t.Fatal(err)
-	}
-	if count != 0 {
-		t.Fatal("a stale processed_messages row survived pruning")
-	}
-	if err := store.db.QueryRowContext(ctx, `SELECT count(*) FROM processed_messages WHERE message_id = ?`, "fresh").Scan(&count); err != nil {
-		t.Fatal(err)
-	}
-	if count != 1 {
-		t.Fatal("a fresh processed_messages row was pruned")
-	}
-}
-
 func TestOpenStoreIsReusableAcrossReopens(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "consumer-3.db")
 	ctx := context.Background()

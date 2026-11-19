@@ -18,7 +18,6 @@ const (
 	exchange            = "hazard.events"
 	maxDeliveryAttempts = 3
 	prefetchCount       = 1
-	pruneInterval       = 30 * time.Minute
 )
 
 var reconnectBackoff = []time.Duration{time.Second, 2 * time.Second, 5 * time.Second, 10 * time.Second, 15 * time.Second}
@@ -52,11 +51,9 @@ type consumer struct {
 // run owns the AMQP connection for the process lifetime: connect, declare,
 // consume, reconnect on loss, until ctx is canceled.
 func run(ctx context.Context, cfg Config, store *Store, logger *slog.Logger) {
-	pruned := make(chan struct{})
-	go func() { defer close(pruned); pruneLoop(ctx, store, logger) }()
-	defer func() { <-pruned }()
 	worker := &consumer{cfg: cfg, store: store, logger: logger}
 	defer worker.closePublisher()
+
 	for attempt := 0; ctx.Err() == nil; attempt++ {
 		if err := worker.consumeOnce(ctx); err != nil && ctx.Err() == nil {
 			logging.Event(ctx, logger, logging.Record{Level: slog.LevelError, Event: "broker_connection_lost", Message: "AMQP connection or channel closed"}, "category", "broker")
@@ -134,21 +131,6 @@ func (worker *consumer) handleDelivery(ctx context.Context, session *consumerSes
 		return worker.handleFailure(ctx, session, delivery, err)
 	}
 	return worker.acknowledge(ctx, session, delivery)
-}
-
-func pruneLoop(ctx context.Context, store *Store, logger *slog.Logger) {
-	ticker := time.NewTicker(pruneInterval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			if err := store.PruneOldRecords(ctx); err != nil {
-				logging.Event(ctx, logger, logging.Record{Level: slog.LevelError, Event: "prune_failed", Message: "could not prune old dedupe records"}, "error", err.Error())
-			}
-		}
-	}
 }
 
 func waitBackoff(ctx context.Context, delay time.Duration) error {

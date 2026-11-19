@@ -10,10 +10,9 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-// processedMessageWindow must exceed the broker's 3h message TTL: a message
-// older than that can never be redelivered, so its dedupe row is safe to
-// prune.
-const processedMessageWindow = 4 * time.Hour
+// processed_messages identities are retained permanently: broker TTLs do not
+// bound delayed outbox retries or parked-message replay. The tradeoff is that
+// this dedupe table grows with the number of distinct messages processed.
 
 // errDuplicateMessage marks a message_id already recorded in
 // processed_messages; the caller acks it without touching hazard_state.
@@ -172,17 +171,4 @@ func (store *Store) Stats(ctx context.Context) (Stats, error) {
 		return Stats{}, fmt.Errorf("count processed_messages: %w", err)
 	}
 	return stats, nil
-}
-
-// PruneOldRecords removes dedupe and attempt-tracking rows old enough that
-// the broker's 3h message TTL guarantees they can never be touched again.
-func (store *Store) PruneOldRecords(ctx context.Context) error {
-	cutoff := time.Now().Add(-processedMessageWindow).UTC().Format(time.RFC3339Nano)
-	if _, err := store.db.ExecContext(ctx, `DELETE FROM processed_messages WHERE processed_at < ?`, cutoff); err != nil {
-		return fmt.Errorf("prune processed_messages: %w", err)
-	}
-	if _, err := store.db.ExecContext(ctx, `DELETE FROM delivery_attempts WHERE updated_at < ?`, cutoff); err != nil {
-		return fmt.Errorf("prune delivery_attempts: %w", err)
-	}
-	return nil
 }
