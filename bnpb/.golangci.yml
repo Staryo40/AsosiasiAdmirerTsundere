@@ -35,6 +35,12 @@ linters:
             - '!**/internal/consumer-2/**'
             - '!**/cmd/consumer-3/**'
             - '!**/internal/consumer-3/**'
+            - '!**/cmd/fence-host/**'
+            - '!**/internal/fencehost/**'
+            - '!**/cmd/catalog-load/**'
+            - '!**/internal/catalogload/**'
+            - '!**/cmd/placement-compare/**'
+            - '!**/internal/placementcompare/**'
           allow:
             - github.com/Staryo40/AsosiasiAdmirerTsundere/bnpb/internal/platform$
             - github.com/Staryo40/AsosiasiAdmirerTsundere/bnpb/internal/platform/
@@ -110,6 +116,42 @@ linters:
           allow:
             - github.com/Staryo40/AsosiasiAdmirerTsundere/bnpb/internal/consumer-3$
             - github.com/Staryo40/AsosiasiAdmirerTsundere/bnpb/internal/consumer-3/
+            - github.com/Staryo40/AsosiasiAdmirerTsundere/bnpb/internal/platform$
+            - github.com/Staryo40/AsosiasiAdmirerTsundere/bnpb/internal/platform/
+          deny: *bnpb-boundary
+
+        fence-host:
+          list-mode: lax
+          files:
+            - '**/cmd/fence-host/**'
+            - '**/internal/fencehost/**'
+          allow:
+            - github.com/Staryo40/AsosiasiAdmirerTsundere/bnpb/internal/fencehost$
+            - github.com/Staryo40/AsosiasiAdmirerTsundere/bnpb/internal/fencehost/
+            - github.com/Staryo40/AsosiasiAdmirerTsundere/bnpb/internal/platform$
+            - github.com/Staryo40/AsosiasiAdmirerTsundere/bnpb/internal/platform/
+          deny: *bnpb-boundary
+
+        catalog-load:
+          list-mode: lax
+          files:
+            - '**/cmd/catalog-load/**'
+            - '**/internal/catalogload/**'
+          allow:
+            - github.com/Staryo40/AsosiasiAdmirerTsundere/bnpb/internal/catalogload$
+            - github.com/Staryo40/AsosiasiAdmirerTsundere/bnpb/internal/catalogload/
+            - github.com/Staryo40/AsosiasiAdmirerTsundere/bnpb/internal/platform$
+            - github.com/Staryo40/AsosiasiAdmirerTsundere/bnpb/internal/platform/
+          deny: *bnpb-boundary
+
+        placement-compare:
+          list-mode: lax
+          files:
+            - '**/cmd/placement-compare/**'
+            - '**/internal/placementcompare/**'
+          allow:
+            - github.com/Staryo40/AsosiasiAdmirerTsundere/bnpb/internal/placementcompare$
+            - github.com/Staryo40/AsosiasiAdmirerTsundere/bnpb/internal/placementcompare/
             - github.com/Staryo40/AsosiasiAdmirerTsundere/bnpb/internal/platform$
             - github.com/Staryo40/AsosiasiAdmirerTsundere/bnpb/internal/platform/
           deny: *bnpb-boundary
