@@ -200,7 +200,7 @@ Only `BMKG/SEISMIC`, `PVMBG/VOLCANIC`, `SATELIT/WILDFIRE`, and `SENSOR_PANTAI/CO
 | `dependency_unavailable` | 503 | Auth or Aggregator unreachable, or returned something the API can't trust (invalid JSON, inconsistent shape) |
 | passthrough | 400/404/429/503 | The Aggregator itself returned one of these with a valid JSON body — forwarded verbatim, unchanged |
 
-**`GET /ready`** checks the Aggregator's own `/ready` and Auth's `/health` concurrently (not Auth's `/ready` — Auth has none); either failing → `503 "API dependency is unavailable"`. Postgres/RabbitMQ are only checked transitively, through the Aggregator's own `/ready`.
+**`GET /ready`** checks the Aggregator's `/ready` and Auth's `/health` concurrently (Auth has no `/ready`); either failing → `503 "API dependency is unavailable"`. The Aggregator checks PostgreSQL for readiness, not RabbitMQ.
 
 ### Auth (internal, `:8084`)
 
@@ -223,13 +223,15 @@ Error codes: `invalid_request` (400, bad body), `missing_credential` (401, no `X
 
 ### Aggregator (internal, `:8083`)
 
-Never reachable from the host (except via the root `compose.override.yaml`'s inspection-only port mapping). Every route requires `X-BNPB-Internal-Key`, matching `BNPB_AGGREGATOR_INTERNAL_KEY`. Missing header → `401 missing_credential`; present-but-wrong (including repeated or empty) → `403 invalid_credential`. Every response sets `Cache-Control: no-store`.
+In local Compose, the Aggregator is not exposed to the host except through the inspection-only mapping in the root `compose.override.yaml`. The hazard routes use `X-BNPB-Internal-Key`, matching `BNPB_AGGREGATOR_INTERNAL_KEY`. Missing header → `401 missing_credential`; present-but-wrong (including repeated or empty) → `403 invalid_credential`. Hazard responses set `Cache-Control: no-store`.
 
 | Method and path | Purpose |
 | --- | --- |
 | `GET /internal/hazards` | List canonical hazards |
 | `GET /internal/hazards/{hazard_id}` | One canonical hazard |
-| `GET /health` / `GET /ready` | Liveness / Canonical Store readiness |
+| `GET /health` | Process liveness |
+| `GET /readyz` | Data-only Kubernetes readiness probe |
+| `GET /ready` | Readiness diagnostics, including poll-owner state |
 
 **`GET /internal/hazards`** — same allowed query keys as the public API's list endpoint (`source, hazard_type, severity, occurred_from, occurred_to, limit, cursor`; no `view` here — that's an API-layer concept). `limit` defaults to `BNPB_LIST_DEFAULT_LIMIT` (100) when omitted, capped by `BNPB_LIST_MAX_LIMIT` (500, 1–500 range). Sort order is `occurred_at DESC, hazard_id DESC` (locale-independent collation).
 
@@ -248,6 +250,7 @@ M2 Aggregator-owned routes (source-level implementation; dedicated credentials a
 | `GET /internal/audit/unprocessed` | Audit Bearer | Bounded metadata-only Member 3 proxy; absent/unavailable upstream is 503. |
 | `POST /internal/catalog/seismic` | Catalog Bearer | At most 1000 records/4 MiB; owner-routed durable ingestion with original-byte retry identity; internal store-budget chunking and no poll-state changes. Retained input → 409; uncertain outcome → 503. |
 | `GET /internal/storage/measurements` | Catalog Bearer | Parallel per-pool PostgreSQL measurements with verified logical identity: exact observed outbox revision count, sampled/approximate insert/update stats, and relation bytes (not node/WAL totals). Missing or unavailable units are explicit. |
+| `GET /internal/analytics` | Internal key | Bounded counts by time/category, severity and area across logical shards, with explicit partial results. |
 
 All four Audit endpoints return UTC timestamps where applicable and exact error bodies `{"error":{"code":"…","message":"…"}}`, with no `correlation_id`. Unspecified Audit event source means all sources. `BNPB_AUDIT_CHECKSUM_TIMEOUT` defaults to 5s and accepts 1ms–1m; it is separate from the unchanged public read timeout default of 200ms. Schema migration 010 adds four C-order Audit indexes for event traversal and checksum sorting, trading additional index space and write work for those reads. Host-fence protocol statuses are 404 for a closed grant, 410 for an expired grant, and bounded 503 for an uncertain outcome; these status meanings do not establish host service availability.
 
@@ -275,7 +278,7 @@ These routes are not part of the existing local Compose API surface unless all r
 | `store_unavailable` | 503 | PostgreSQL error |
 | — | 429 | The Aggregator's own read-path semaphore (`BNPB_READ_MAX_IN_FLIGHT`, default 4) is full — separate from the platform-wide `BNPB_MAX_IN_FLIGHT` limiter |
 
-**`GET /ready`** checks **PostgreSQL only** (schema version matches what the Aggregator expects) — it does not check RabbitMQ connectivity.
+**`GET /readyz`** succeeds when at least one logical primary passes the PostgreSQL identity, role, and schema checks, regardless of poll ownership. No valid unit → 503. It does not wait on poll authority, upstream services, or RabbitMQ. **`GET /ready`** adds per-shard and poll-owner diagnostics; the Kubernetes readiness probe uses `/readyz`, not `/ready`.
 
 M2-only optional configuration is kept commented out in `.env.example`; configure it only in an Aggregator runtime with matching credentials and backing dependencies:
 
@@ -284,13 +287,15 @@ M2-only optional configuration is kept commented out in `.env.example`; configur
 | `BNPB_CANONICAL_DATABASE_URL`, `BNPB_SHARD_0_DATABASE_URL` … `_2_DATABASE_URL` | Privileged migration/authority DSNs. These are not runtime reader-only URLs. |
 | `BNPB_CANONICAL_WRITER_DATABASE_URL`, `BNPB_SHARD_0_WRITER_DATABASE_URL` … `_2_WRITER_DATABASE_URL` | Restricted runtime read/write URLs to the corresponding migration DSN targets, with distinct credentials; routed mode supplies all shard URLs. |
 | `BNPB_AUDIT_TOKEN` | Dedicated Audit Bearer secret. |
-| `BNPB_AUDIT_CHECKSUM_TIMEOUT` | Checksum-only query deadline; default `5s`, range `1ms`–`1m`. Public read timeout remains `BNPB_DB_READ_TIMEOUT` (`200ms` by default). |
+| `BNPB_AUDIT_CHECKSUM_TIMEOUT` | Audit checksum deadline and starting budget for Analytics; default `5s`, range `1ms`–`1m`. Analytics clamps its budget below `BNPB_WRITE_TIMEOUT`. Public read timeout remains `BNPB_DB_READ_TIMEOUT` (`200ms` by default). |
 | `BNPB_AUTHORITY_OWNER_ENDPOINT` | Optional private owner origin discovered for routed Catalog requests; when Catalog is configured, owner discovery is required. A follower forwards original bytes transparently at most once. |
 | `BNPB_UNPROCESSED_API_URL`, `BNPB_UNPROCESSED_API_TOKEN` | Optional metadata-only external owner API; both required together. |
 | `BNPB_STORAGE_COPY_DATABASE_URLS` | Bounded JSON list of configured physical copy DSNs; never infer replicas from placement metadata. |
 | `BNPB_CATALOG_TOKEN` | Dedicated catalog/measurement Bearer secret. |
 | `BNPB_AUTHORITY_KUBERNETES_SERVER_URL`, `BNPB_AUTHORITY_KUBERNETES_NAMESPACE`, `BNPB_AUTHORITY_KUBERNETES_CONFIGMAP`, `BNPB_AUTHORITY_KUBERNETES_TOKEN_FILE`, `BNPB_AUTHORITY_KUBERNETES_CA_FILE` | ConfigMap CAS authority API connection. |
-| `BNPB_AUTHORITY_HOST_BASE_URL`, `BNPB_AUTHORITY_HOST_TOKEN_FILE`, `BNPB_AUTHORITY_HOST_CA_FILE`, `BNPB_AUTHORITY_DOMAINS`, `BNPB_AUTHORITY_OWNER_DOMAIN_UUID` | Host-fence API and configured domain identities; owner domain must be in the allowed domain set. |
+| `BNPB_AUTHORITY_HOST_BASE_URL`, `BNPB_AUTHORITY_HOST_TOKEN_FILE`, `BNPB_AUTHORITY_HOST_CA_FILE`, `BNPB_AUTHORITY_DOMAINS` | Host-fence API, credential-file paths, and allowed domain set. |
+| `BNPB_K8S_NODE_NAME`, `BNPB_AUTHORITY_NODE_DOMAINS` | Kubernetes owner identity: Downward API `spec.nodeName` and ConfigMap JSON object mapping node names to dedicated fence domain UUIDs in the allowlist. |
+| `BNPB_AUTHORITY_OWNER_DOMAIN_UUID` | Literal owner domain UUID for non-Kubernetes use only; must be in the allowed domain set. Do not set it together with node-based identity. |
 | `BNPB_AUTHORITY_RENEWAL_INTERVAL` | Authority renewal period; default `5s`, positive and below the `10s` fencing lead. Runtime owner retries are capped at 5s; activation attempts are bounded at 20s. |
 
 Authority fields/domains are all-or-none. Host-native configuration must bind every allowed owner domain UUID to its actual PostgreSQL guard target(s) using a bounded resource file and privileged guard-only credentials; physical mappings, credential values, and native Secret/config paths have not been supplied. Missing/incomplete/mismatched bindings fail closed. The host `init` and `serve` source commands accept `--resources-file` (and the other flags shown in source), but native build/run/fencing proof is missing; those flag names are not an installation procedure. Graceful owner shutdown cancels and joins workers, then closes guards; takeover fences the old owner domain.
@@ -348,3 +353,13 @@ PostgreSQL integration fixtures are opt-in: start a **new disposable loopback Po
 - **Polling:** Capture upstream receipt logs, not just response-completion logs, and correlate endpoint/request ID to owner and epoch. Distinguish rejected auth, a replayed durable receipt (no fetch), and a request whose response never became durable. Measure from owner death to the replacement's first fetch, including fencing, activation, the elapsed handoff and any receipt replay. Test the ≤60 s bound and the skew/freeze rejection on the approved topology. Configure the fence endpoint on the independent libvirt host that can address all configured guest domains; this does not cover loss of that host.
 - **Catalogue:** Run `catalog-load` with the assistant catalogue, supplied checksum, and actual resource manifest. Allow temporary disk space for its private artifact snapshot. Require complete before/after measurements and a matching complete Audit checksum/count with other writes excluded from the measurement window. Join measurements by `(node, unit)` and placement shard; count each logical shard once in logical totals and each physical copy once in physical totals. Verify no node holds all logical records, not merely that each node hosts fewer than three shard IDs.
 - **Regional burst:** Use a separate bounded same-region input with new source reference IDs so it exercises writes rather than replay. Measure offered/accepted/completed rate, latency, CPU, disk and network on every node in the same sampling window. Keep resources, replica policy, batch size, and baseline constant; record the baseline and post-burst checksums separately. Use `placement-compare` on identical inputs for the offline hash/longitude comparison only. PostgreSQL tuple counters are sampled and do not count standby WAL replay; use physical node metrics for replica write load.
+
+## Member 1 — repair, analytics, and readiness
+
+- [Repair handoff](contracts/v1/README.md#step-10--penempatan-dan-perbaikan-standby): repair metadata is additive; canonical schema stays at migration version 12. The copy source must be the current ready primary in placement and match a configured allowed member. Once the target is synchronous, capture a fixed WAL flush barrier on the source and wait for the target to replay through it. The standby remains `nofailover`; fencing the old primary, promotion and route cutover, and demonstrating tolerance of a second loss remain external to the repair controller.
+- [Analytics handoff](contracts/v1/README.md#step-11--handoff-analitik-untuk-anggota-2): `GET /internal/analytics` is an internal-key route for the Member 2 backend. Keep the key out of the browser. Range endpoints accept up to nine fractional-second digits and must be representable as RFC 3339 in UTC. Output is bounded, and the query budget is clamped below the HTTP write timeout. Treat `partial` as incomplete even if a chart value is zero; reconcile all dimensions with Audit events on the same stable population.
+- [Aggregator deployment contribution](../deploy/aggregator.yaml): replace, do not duplicate, the Member 2 `aggregator` Deployment/Service. It follows `origin/feat/k8s-platform@3d08ba8`: `app.kubernetes.io/name=aggregator`, image key `aat/bnpb-aggregator`, `bnpb-common` and `aggregator-config`, and NodePort `30083` → `8083`. Kubernetes 1.30+ and at least three eligible hostname domains are required. Use the Aggregator-only `aggregator-secrets` Secret and `aggregator` ServiceAccount with narrow RBAC and the Member 2 image-pull binding; do not import the shared all-service Secret wholesale. The first routed shard DSN (`BNPB_SHARD_0_DATABASE_URL`) is a required Secret key reference, not optional. Supply `host-fence-token` and `host-fence-ca.crt` in that Secret. Inject `BNPB_K8S_NODE_NAME` from Downward API `spec.nodeName` and put the `BNPB_AUTHORITY_NODE_DOMAINS` node-to-dedicated-fence-UUID JSON mapping in `aggregator-config`; do not set the non-Kubernetes literal owner UUID in this workload. If configured, bind the catalog owner URL to the pod. Use `/health` for liveness and `/readyz` for data-only Kubernetes readiness; `/ready` provides diagnostics.
+- [Store overlay patch](../deploy/store.yaml): apply as a targeted Kustomize strategic-merge patch to desired `apps/v1` StatefulSets with a `postgres` container. For A2's current monolithic resource use `name: postgres`; for per-scope workloads carrying the workload label, select `role=store`. It merges Appendix B memory values without discarding CPU settings. Keep `role=store` for the workload and use a separate `pg-role` via `kubernetes.role_label` for Patroni. For a repair standby, the prebound node-local data claim must mount at the same path as the explicitly configured `postgresql.data_dir` and `PGDATA`.
+- A2 still supplies actual configuration and Secret values, scoped RBAC, per-scope Store workloads and pinned Patroni/PostgreSQL image, disk and node-local PV/PVC bindings, post-fence routing, network policy that enforces storage ownership without obstructing Tester Agent, and telemetry integration. These source contributions are not a standalone cluster deployment or evidence of acceptance.
+- `/metrics` uses separate admission from the data routes and exposes per-route HTTP request totals and duration histograms, including controlled 429s. Scrape per pod to retain backend identity. Shared Go HTTP calls forward a valid `traceparent` unchanged, including the Catalog follower-to-owner relay; correlation IDs and outbound durations aid log diagnosis. An actual distributed trace still requires A2's exporter/backend and instrumentation at each service on the path.
+- [Verification order and evidence](../testing/README.md#urutan-verifikasi-member-1--repair-analitik-dan-readiness) separate the disposable loopback tests from Kubernetes, Tester Agent, and assistant-catalogue acceptance.

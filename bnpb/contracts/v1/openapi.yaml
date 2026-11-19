@@ -3,7 +3,7 @@ info:
   title: BNPB Aggregator Internal API
   version: 1.0.0
   description: >-
-    Internal Aggregator read APIs, M2 Audit API, catalog ingestion, and physical
+    Internal Aggregator read and analytics APIs, M2 Audit API, catalog ingestion, and physical
     storage measurements. Routes and runtime capabilities are documented in
     README.md. Audit and catalog routes use dedicated Bearer credentials.
     M2 public cursors are opaque v2 logical-boundary tokens; partial reads never
@@ -131,16 +131,89 @@ paths:
           $ref: '#/components/responses/UnexpectedError'
         '503':
           $ref: '#/components/responses/DependencyUnavailable'
+  /internal/analytics:
+    get:
+      operationId: aggregateHazards
+      summary: Aggregate active logical hazards across canonical shards
+      description: >-
+        Uses an inclusive from and exclusive to on occurred_at, at most 366 days
+        and 1000 intersecting UTC buckets. Timestamps allow at most nine
+        fractional digits and must normalize to a four-digit common-era UTC year.
+        A seismic event with a correlated warning
+        counts as TSUNAMI instead of EARTHQUAKE. Never reads physical replicas.
+        as_of is a request time, not a global snapshot or Audit watermark.
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+        - {name: from, in: query, required: true, schema: {type: string, format: date-time}}
+        - {name: to, in: query, required: true, schema: {type: string, format: date-time}}
+        - name: bucket
+          in: query
+          schema: {type: string, enum: [hour, day, week], default: day}
+      responses:
+        '200':
+          description: Active totals; partial results cover only available logical units.
+          headers:
+            X-Correlation-ID:
+              $ref: '#/components/headers/CorrelationId'
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/HazardAnalytics'}
+        '400':
+          $ref: '#/components/responses/InvalidQuery'
+        '401':
+          $ref: '#/components/responses/MissingCredential'
+        '403':
+          $ref: '#/components/responses/InvalidCredential'
+        '429':
+          $ref: '#/components/responses/AdmissionLimited'
+        '500':
+          $ref: '#/components/responses/UnexpectedError'
+        '503':
+          description: >-
+            An analytics result exceeded a configured bound, or the response could
+            not be encoded (analytics_unavailable).
+          headers:
+            X-Correlation-ID:
+              $ref: '#/components/headers/CorrelationId'
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApplicationError'
+                  - properties:
+                      error:
+                        properties:
+                          code: {enum: [analytics_result_limit, analytics_response_too_large, analytics_unavailable]}
   /ready:
     get:
       operationId: readiness
-      summary: Check initialized schema and database readiness
+      summary: Check process, canonical logical units and poll-owner status
       security: []
       responses:
         '200':
-          description: Initialized schema and database are usable; body not specified.
+          description: At least one schema- and identity-verified logical unit is usable.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AggregatorReadiness'}
         '503':
-          description: Initialization or database is unavailable; body not specified.
+          description: No verified logical unit is usable.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AggregatorReadiness'}
+        '429':
+          $ref: '#/components/responses/AdmissionLimited'
+  /readyz:
+    get:
+      operationId: readinessProbe
+      summary: Check canonical data readiness without consulting poll-owner authority
+      security: []
+      responses:
+        '200':
+          description: At least one schema- and identity-verified logical unit is usable.
+        '503':
+          description: No verified logical unit is usable before the probe deadline.
+        '429':
+          $ref: '#/components/responses/AdmissionLimited'
   /health:
     get:
       operationId: liveness
@@ -430,6 +503,67 @@ components:
       schema:
         $ref: '#/components/schemas/CorrelationId'
   schemas:
+    HazardAnalytics:
+      type: object
+      additionalProperties: false
+      required: [from, to, bucket, as_of, total, series, severity, areas, partial, unavailable_units]
+      properties:
+        from: {$ref: '#/components/schemas/UtcTimestamp'}
+        to: {$ref: '#/components/schemas/UtcTimestamp'}
+        bucket: {type: string, enum: [hour, day, week]}
+        as_of: {$ref: '#/components/schemas/UtcTimestamp'}
+        total: {type: integer, minimum: 0}
+        series:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [start, category, count]
+            properties:
+              start: {$ref: '#/components/schemas/UtcTimestamp'}
+              category: {type: string, enum: [EARTHQUAKE, TSUNAMI, VOLCANIC, WILDFIRE, COASTAL]}
+              count: {type: integer, minimum: 1}
+        severity:
+          type: object
+          additionalProperties: false
+          required: [NORMAL, WASPADA, SIAGA, AWAS]
+          properties:
+            NORMAL: {type: integer, minimum: 0}
+            WASPADA: {type: integer, minimum: 0}
+            SIAGA: {type: integer, minimum: 0}
+            AWAS: {type: integer, minimum: 0}
+        areas:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [area_name, count]
+            properties:
+              area_name: {type: string, minLength: 1}
+              count: {type: integer, minimum: 1}
+        partial: {type: boolean}
+        unavailable_units:
+          type: array
+          items: {type: string, minLength: 1}
+    AggregatorReadiness:
+      type: object
+      additionalProperties: false
+      required: [process_status, ready, logical_shards, poll_owner]
+      properties:
+        process_status: {type: string, const: ok}
+        ready: {type: boolean}
+        logical_shards:
+          type: array
+          maxItems: 3
+          items:
+            type: object
+            additionalProperties: false
+            required: [id, unit, status]
+            properties:
+              id: {type: integer, minimum: 0, maximum: 2}
+              unit: {type: string, enum: [local, shard-0, shard-1, shard-2]}
+              status: {type: string, enum: [ready, unavailable]}
+        poll_owner: {type: string, enum: [local, owner, follower, unavailable]}
     HazardEvent:
       $ref: './schemas/hazard-event.schema.json'
     HazardSummary:
@@ -571,7 +705,20 @@ components:
       properties:
         code:
           type: string
-          enum: [invalid_query, missing_credential, invalid_credential, not_found, source_unavailable, store_unavailable, invalid_request, authority_unavailable, measurements_unavailable, catalogue_input_rejected]
+          enum:
+            - invalid_query
+            - missing_credential
+            - invalid_credential
+            - not_found
+            - source_unavailable
+            - store_unavailable
+            - invalid_request
+            - authority_unavailable
+            - measurements_unavailable
+            - catalogue_input_rejected
+            - analytics_result_limit
+            - analytics_response_too_large
+            - analytics_unavailable
         message:
           type: string
           minLength: 1
