@@ -1,0 +1,11 @@
+{
+  "reference_checksum": "712b744466f9b29cb92ee1d952e2cd9221080f8f946597f9e363ce1fb4b60fdd",
+  "resources": {
+    "fixture_kind": "synthetic",
+    "assistant_dataset": false,
+    "execution": "single local process and isolated PostgreSQL 18.1 test instance",
+    "logical_strategy_buckets": 3,
+    "application_pod_memory_limits_enforced": false,
+    "distributed_topology_verified": false
+  }
+}

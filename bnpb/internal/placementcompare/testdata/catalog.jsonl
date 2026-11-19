@@ -1,0 +1,6 @@
+{"event_id":"synthetic-catalog-001","region_name":"Kabupaten Contoh","epicenter_lat":-6.2,"epicenter_lon":106.8,"magnitude":4.1,"depth_km":10,"occurred_at":"2025-01-01T00:00:00Z","potential_tsunami":false}
+{"event_id":"synthetic-catalog-002","region_name":"Kabupaten Contoh","epicenter_lat":-7.1,"epicenter_lon":110.4,"magnitude":4.3,"depth_km":12,"occurred_at":"2025-01-02T00:00:00Z","potential_tsunami":false}
+{"event_id":"synthetic-catalog-003","region_name":"Kota Contoh Utara","epicenter_lat":1.2,"epicenter_lon":102.5,"magnitude":5.0,"depth_km":20,"occurred_at":"2025-01-03T00:00:00Z","potential_tsunami":false}
+{"event_id":"synthetic-catalog-004","region_name":"Kota Contoh Timur","epicenter_lat":-2.2,"epicenter_lon":122.0,"magnitude":5.2,"depth_km":30,"occurred_at":"2025-01-04T00:00:00Z","potential_tsunami":false}
+{"event_id":"synthetic-catalog-005","region_name":"Kabupaten Contoh Selatan","epicenter_lat":-8.2,"epicenter_lon":115.2,"magnitude":3.8,"depth_km":15,"occurred_at":"2025-01-05T00:00:00Z","potential_tsunami":false}
+{"event_id":"synthetic-catalog-006","region_name":"Kota Contoh Barat","epicenter_lat":-0.9,"epicenter_lon":99.1,"magnitude":4.8,"depth_km":25,"occurred_at":"2025-01-06T00:00:00Z","potential_tsunami":false}
