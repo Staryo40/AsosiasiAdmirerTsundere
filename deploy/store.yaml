@@ -1,0 +1,19 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres
+  labels:
+    role: store
+spec:
+  template:
+    metadata:
+      labels:
+        role: store
+    spec:
+      containers:
+        - name: postgres
+          resources:
+            requests:
+              memory: 512Mi
+            limits:
+              memory: 1Gi

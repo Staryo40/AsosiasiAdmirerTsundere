@@ -1,0 +1,136 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: aggregator
+  namespace: sistem-informasi-kebencanaan-bnpb
+  labels:
+    app.kubernetes.io/name: aggregator
+    role: aggregator
+spec:
+  replicas: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: aggregator
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: aggregator
+        role: aggregator
+    spec:
+      serviceAccountName: aggregator
+      securityContext:
+        fsGroup: 65532
+      terminationGracePeriodSeconds: 30
+      topologySpreadConstraints:
+        - maxSkew: 1
+          # minDomains requires Kubernetes 1.30 or newer; the A2 version is unverified.
+          minDomains: 3
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: DoNotSchedule
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: aggregator
+      volumes:
+        - name: host-fence-credentials
+          projected:
+            defaultMode: 0440
+            sources:
+              - secret:
+                  name: aggregator-secrets
+                  optional: false
+                  items:
+                    - key: host-fence-token
+                      path: host-fence-token
+                    - key: host-fence-ca.crt
+                      path: host-fence-ca.crt
+      containers:
+        - name: aggregator
+          image: aat/bnpb-aggregator
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8083
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: bnpb-common
+            - configMapRef:
+                name: aggregator-config
+            - secretRef:
+                name: aggregator-secrets
+          env:
+            - name: BNPB_K8S_NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            # JSON object keyed by Kubernetes node name, with libvirt domain UUID values.
+            - name: BNPB_AUTHORITY_NODE_DOMAINS
+              valueFrom:
+                configMapKeyRef:
+                  name: aggregator-config
+                  key: BNPB_AUTHORITY_NODE_DOMAINS
+                  optional: false
+            - name: BNPB_SHARD_0_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: aggregator-secrets
+                  key: BNPB_SHARD_0_DATABASE_URL
+                  optional: false
+            - name: BNPB_AUTHORITY_HOST_TOKEN_FILE
+              value: /var/run/bnpb/host-fence/host-fence-token
+            - name: BNPB_AUTHORITY_HOST_CA_FILE
+              value: /var/run/bnpb/host-fence/host-fence-ca.crt
+            # Shadow the envFrom keys so the credential contents remain file-only.
+            - name: host-fence-token
+            - name: host-fence-ca.crt
+          volumeMounts:
+            - name: host-fence-credentials
+              mountPath: /var/run/bnpb/host-fence
+              readOnly: true
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            timeoutSeconds: 1
+            periodSeconds: 3
+            failureThreshold: 2
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          lifecycle:
+            preStop:
+              sleep:
+                seconds: 5
+          resources:
+            requests:
+              memory: 256Mi
+            limits:
+              memory: 512Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: aggregator
+  namespace: sistem-informasi-kebencanaan-bnpb
+  labels:
+    app.kubernetes.io/name: aggregator
+    role: aggregator
+spec:
+  type: NodePort
+  publishNotReadyAddresses: false
+  selector:
+    app.kubernetes.io/name: aggregator
+  ports:
+    - name: http
+      port: 8083
+      targetPort: http
+      nodePort: 30083
+      protocol: TCP
