@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -86,13 +87,13 @@ func OpenStore(ctx context.Context, cfg Config, logger *slog.Logger) (*Store, er
 	if routed {
 		startupBudget *= time.Duration(1 + logicalShardCount)
 	}
-	ctx, cancel := context.WithTimeout(ctx, startupBudget)
-	defer cancel()
 	identity := storeIdentity{}
 	if routed {
 		identity.role = "control"
 	}
-	store, err := openStore(ctx, cfg, logger, identity)
+	controlCtx, cancel := context.WithTimeout(ctx, startupBudget)
+	store, err := openStore(controlCtx, cfg, logger, identity)
+	cancel()
 	if err != nil {
 		return nil, err
 	}
@@ -123,20 +124,35 @@ func OpenStore(ctx context.Context, cfg Config, logger *slog.Logger) (*Store, er
 }
 
 func openShardStores(ctx context.Context, parent *Store, cfg Config, logger *slog.Logger) error {
+
+	var workers sync.WaitGroup
+	var failures [logicalShardCount]error
+	// Shards may share a PostgreSQL database during development and serialize migrations there.
+	startupBudget := cfg.DBWriteTimeout * time.Duration(logicalShardCount)
 	for shardID, address := range cfg.ShardURLs {
-		shardConfig := cfg
-		shardConfig.DatabaseURL = address
-		shardConfig.WriterURL = cfg.ShardWriterURLs[shardID]
-		childID := int16(shardID)
-		identity := storeIdentity{role: "shard", shardID: &childID}
-		child, err := openStore(ctx, shardConfig, logger, identity)
-		if errors.Is(err, errStartupDatabaseUnavailable) {
-			child, err = openUnavailableShardStore(shardConfig, logger, identity)
-		}
+		workers.Go(func() {
+			shardConfig := cfg
+			shardConfig.DatabaseURL = address
+			shardConfig.WriterURL = cfg.ShardWriterURLs[shardID]
+			childID := int16(shardID)
+			identity := storeIdentity{role: "shard", shardID: &childID}
+			shardCtx, cancel := context.WithTimeout(ctx, startupBudget)
+			defer cancel()
+			child, err := openStore(shardCtx, shardConfig, logger, identity)
+			if ctx.Err() == nil && (errors.Is(err, errStartupDatabaseUnavailable) || errors.Is(err, context.DeadlineExceeded)) {
+				child, err = openUnavailableShardStore(shardConfig, logger, identity)
+			}
+			parent.shards[shardID], failures[shardID] = child, err
+		})
+	}
+	workers.Wait()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	for shardID, err := range failures {
 		if err != nil {
 			return fmt.Errorf("initialize shard %d: %w", shardID, err)
 		}
-		parent.shards[shardID] = child
 	}
 	return nil
 }
@@ -159,7 +175,12 @@ func openStore(ctx context.Context, cfg Config, logger *slog.Logger, identity st
 	}
 	store := &Store{readTimeout: cfg.DBReadTimeout, writeTimeout: cfg.DBWriteTimeout,
 		chunkRecords: cfg.IngestChunkRecords, maxBytes: cfg.MaxResponseBytes, storeIdentity: identity}
-	admin, err := openPool(ctx, cfg.DatabaseURL, cfg.DBWriteMaxConns, logger)
+	connect := func(address string, maximum int) (*pgxpool.Pool, error) {
+		connectCtx, cancel := context.WithTimeout(ctx, cfg.DBWriteTimeout)
+		defer cancel()
+		return openPool(connectCtx, address, maximum, logger)
+	}
+	admin, err := connect(cfg.DatabaseURL, cfg.DBWriteMaxConns)
 	if err == nil {
 		store.authorityPools = append(store.authorityPools, admin)
 		err = store.migrate(ctx, admin, bootstrap, identity)
@@ -169,7 +190,7 @@ func openStore(ctx context.Context, cfg Config, logger *slog.Logger, identity st
 		writerURL = cfg.DatabaseURL
 	}
 	if err == nil {
-		store.write, err = openPool(ctx, writerURL, cfg.DBWriteMaxConns, logger)
+		store.write, err = connect(writerURL, cfg.DBWriteMaxConns)
 	}
 	if err == nil && cfg.WriterURL != "" {
 		err = validatePoolTarget(ctx, admin, store.write)
@@ -181,7 +202,7 @@ func openStore(ctx context.Context, cfg Config, logger *slog.Logger, identity st
 		err = grantReceiptBindingPrivileges(ctx, admin, store.write)
 	}
 	if err == nil {
-		store.read, err = openPool(ctx, writerURL, cfg.DBReadMaxConns, logger)
+		store.read, err = connect(writerURL, cfg.DBReadMaxConns)
 	}
 	if err == nil && bootstrap != nil {
 		var persisted placementSnapshot

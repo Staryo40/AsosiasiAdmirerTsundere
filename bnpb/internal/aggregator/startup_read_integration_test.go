@@ -34,7 +34,9 @@ func TestStartupReadIntegrationRecoversUnavailableShardWithoutRestart(t *testing
 	}
 	setup.Close()
 
-	const unavailableShard = 1
+	// The first route consumes its entire startup budget without completing a handshake.
+	cfg.DBWriteTimeout = time.Second
+	const unavailableShard = 0
 	proxy := newStartupReadProxy(t, cfg.ShardURLs[unavailableShard])
 	cfg.ShardURLs[unavailableShard] = startupProxyURL(t, cfg.ShardURLs[unavailableShard], proxy.address())
 	cfg.ShardWriterURLs[unavailableShard] = startupProxyURL(t, cfg.ShardWriterURLs[unavailableShard], proxy.address())
@@ -44,10 +46,10 @@ func TestStartupReadIntegrationRecoversUnavailableShardWithoutRestart(t *testing
 	if err != nil {
 		t.Fatalf("read reachable shards after startup: %v", err)
 	}
-	if !partial.Partial || !reflect.DeepEqual(partial.UnavailableUnits, []string{"shard-1"}) {
-		t.Fatalf("startup read partial=%v unavailable=%v, want true/[shard-1]", partial.Partial, partial.UnavailableUnits)
+	if !partial.Partial || !reflect.DeepEqual(partial.UnavailableUnits, []string{"shard-0"}) {
+		t.Fatalf("startup read partial=%v unavailable=%v, want true/[shard-0]", partial.Partial, partial.UnavailableUnits)
 	}
-	if got, want := startupHazardIDs(partial.Items), []string{ids[2], ids[0]}; !reflect.DeepEqual(got, want) {
+	if got, want := startupHazardIDs(partial.Items), []string{ids[2], ids[1]}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("initial reachable rows %v, want %v", got, want)
 	}
 
@@ -273,16 +275,18 @@ func (proxy *startupReadProxy) serve() {
 func (proxy *startupReadProxy) handle(client net.Conn) {
 	defer proxy.handlers.Done()
 	defer client.Close()
+	proxy.track(client, true)
+	defer proxy.track(client, false)
 	if !proxy.active.Load() {
+		// Read the startup packet and leave the connection silent until timeout.
+		_, _ = io.Copy(io.Discard, client)
 		return
 	}
 	upstream, err := (&net.Dialer{Timeout: time.Second}).Dial("tcp", proxy.upstream)
 	if err != nil {
 		return
 	}
-	proxy.track(client, true)
 	proxy.track(upstream, true)
-	defer proxy.track(client, false)
 	defer proxy.track(upstream, false)
 	defer upstream.Close()
 	done := make(chan struct{}, 2)
