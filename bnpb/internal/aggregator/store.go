@@ -54,7 +54,10 @@ var liveMutationGenerationSchema string
 //go:embed migrations/013_shard_repair.sql
 var shardRepairSchema string
 
-const currentSchemaVersion = 12
+//go:embed migrations/013_receipt_binding.sql
+var receiptBindingSchema string
+
+const currentSchemaVersion = 13
 
 const schemaHistoryQuery = `SELECT COALESCE(max(version), 0), count(*),
     COALESCE(min(version), 0) FROM schema_migrations`
@@ -174,6 +177,9 @@ func openStore(ctx context.Context, cfg Config, logger *slog.Logger, identity st
 	if err == nil && cfg.WriterURL != "" {
 		err = validateRuntimeWriter(ctx, store.write)
 	}
+	if err == nil && identity.role == "control" {
+		err = grantReceiptBindingPrivileges(ctx, admin, store.write)
+	}
 	if err == nil {
 		store.read, err = openPool(ctx, writerURL, cfg.DBReadMaxConns, logger)
 	}
@@ -198,6 +204,15 @@ func openStore(ctx context.Context, cfg Config, logger *slog.Logger, identity st
 		store.authorityPools = nil
 	}
 	return store, nil
+}
+
+func grantReceiptBindingPrivileges(ctx context.Context, admin, writer *pgxpool.Pool) error {
+	var role string
+	if err := writer.QueryRow(ctx, "SELECT current_user").Scan(&role); err != nil {
+		return err
+	}
+	_, err := admin.Exec(ctx, "GRANT SELECT, INSERT ON receipt_bindings TO "+pgx.Identifier{role}.Sanitize())
+	return err
 }
 
 func openPool(ctx context.Context, address string, maximum int, logger *slog.Logger) (*pgxpool.Pool, error) {
@@ -357,7 +372,8 @@ func applyPendingMigrations(ctx context.Context, tx pgx.Tx, version int) error {
 		sql     string
 	}{{2, outboxIdentitySchema}, {3, snapshotIndexSchema}, {4, outboxSequenceSchema},
 		{5, m2EnumSchema}, {6, shardSchema}, {7, placementGuardSchema}, {8, handledInputsSchema},
-		{9, mutationFenceSchema}, {10, auditIndexSchema}, {11, pollReceiptSchema}, {12, liveMutationGenerationSchema}} {
+		{9, mutationFenceSchema}, {10, auditIndexSchema}, {11, pollReceiptSchema}, {12, liveMutationGenerationSchema},
+		{13, receiptBindingSchema}} {
 		if version < migration.version {
 			if _, err := tx.Exec(ctx, migration.sql); err != nil {
 				return err

@@ -14,19 +14,25 @@ import (
 
 // Routed writes have per-record durability; the control checkpoint follows only after every outcome.
 func (store *Store) ingestShardChunk(ctx context.Context, chunk IngestChunk, policy checkpointPolicy) error {
-
 	if _, _, ok := pollAuthorityToken(ctx); !ok {
 		return fmt.Errorf("routed ingest: %w", errStaleMutationAuthority)
 	}
-	if err := store.validateChunk(chunk); err != nil {
-		return err
+	if len(chunk.Records) == 0 {
+		return store.writeShardCheckpoint(ctx, chunk, policy)
+	}
+	bindings := planReceiptBindings(chunk)
+	if err := store.bindReceipt(ctx, bindings); err != nil {
+		if errors.Is(err, errReceiptConflict) {
+			return errReceiptConflict
+		}
+		return storeError("bind routed receipt", err)
 	}
 	for index, raw := range chunk.Records {
 		recordChunk := chunk
 		recordChunk.InputOffset += index
-		shardID, identityErr := inputShard(chunk.Endpoint, raw)
-		if identityErr != nil {
-			if err := store.writeUnroutable(ctx, recordChunk, raw, identityErr); err != nil {
+		shardID := bindings.destinations[index]
+		if shardID == controlReceiptDestination {
+			if err := store.writeUnroutable(ctx, recordChunk, raw, bindings.routeErrors[index]); err != nil {
 				return storeError("retain unroutable input", err)
 			}
 			continue
@@ -40,6 +46,137 @@ func (store *Store) ingestShardChunk(ctx context.Context, chunk IngestChunk, pol
 		}
 	}
 	return store.writeShardCheckpoint(ctx, chunk, policy)
+}
+
+const controlReceiptDestination int16 = -1
+
+var errReceiptConflict = errors.New("receipt ordinal already binds different content or destination")
+
+type receiptBindings struct {
+	endpoint        string
+	hashes, digests [][]byte
+	destinations    []int16
+	routeErrors     []error
+}
+
+func planReceiptBindings(chunk IngestChunk) receiptBindings {
+	count := len(chunk.Records)
+	bindings := receiptBindings{
+		endpoint: string(chunk.Endpoint),
+		hashes:   make([][]byte, count), digests: make([][]byte, count), destinations: make([]int16, count),
+	}
+	digests := make([][sha256.Size]byte, count)
+	for index, raw := range chunk.Records {
+		bindings.hashes[index] = inputHash(chunk)
+		digests[index] = sha256.Sum256(raw)
+		bindings.digests[index] = digests[index][:]
+		destination, err := inputShard(chunk.Endpoint, raw)
+		if err != nil {
+			if bindings.routeErrors == nil {
+				bindings.routeErrors = make([]error, count)
+			}
+			bindings.routeErrors[index], destination = err, controlReceiptDestination
+		}
+		bindings.destinations[index] = destination
+		if index+1 < count {
+			chunk.InputOffset++
+		}
+	}
+	return bindings
+}
+
+const receiptBindingEntries = `unnest($2::bytea[], $3::bytea[], $4::smallint[])
+	WITH ORDINALITY AS expected(input_hash, raw_digest, destination, ordinal)`
+
+func (store *Store) bindReceipt(ctx context.Context, bindings receiptBindings) (err error) {
+	ctx, cancel := context.WithTimeout(ctx, store.writeTimeout)
+	defer cancel()
+	tx, err := store.beginMutation(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if cleanupErr := rollbackTransaction(ctx, tx); cleanupErr != nil {
+			err = errors.Join(err, cleanupErr)
+		}
+	}()
+	inserted, err := bindings.reserve(ctx, tx)
+	if err != nil {
+		return err
+	}
+	if len(inserted) != 0 {
+		if err := store.verifyLegacyReceipt(ctx, tx, bindings, inserted); err != nil {
+			return err
+		}
+	}
+	return tx.Commit(ctx)
+}
+
+func (bindings receiptBindings) reserve(ctx context.Context, tx pgx.Tx) ([][]byte, error) {
+	var inserted [][]byte
+	// An overlapping retry must reserve its ordinals in the same order. DO NOTHING
+	// waits for a concurrent winner; the next Read Committed statement sees its binding.
+	err := tx.QueryRow(ctx, `WITH inserted AS (
+		INSERT INTO receipt_bindings (endpoint, input_hash, raw_digest, destination)
+		SELECT $1, input_hash, raw_digest, destination FROM `+receiptBindingEntries+` ORDER BY ordinal
+		ON CONFLICT (endpoint, input_hash) DO NOTHING RETURNING input_hash
+	) SELECT array_agg(input_hash) FROM inserted`,
+		bindings.endpoint, bindings.hashes, bindings.digests, bindings.destinations).Scan(&inserted)
+	if err != nil || len(inserted) == len(bindings.hashes) {
+		return inserted, err
+	}
+	err = rejectReceiptConflict(tx.QueryRow(ctx, `SELECT EXISTS (
+		SELECT FROM `+receiptBindingEntries+` WHERE NOT EXISTS (
+			SELECT FROM receipt_bindings actual WHERE actual.endpoint=$1
+			AND (actual.input_hash, actual.raw_digest, actual.destination)
+				= (expected.input_hash, expected.raw_digest, expected.destination)
+		))`, bindings.endpoint, bindings.hashes, bindings.digests, bindings.destinations))
+	return inserted, err
+}
+
+type receiptBindingReader interface {
+	QueryRow(context.Context, string, ...any) pgx.Row
+}
+
+func (bindings receiptBindings) checkLegacy(ctx context.Context, db receiptBindingReader, inserted [][]byte, destination int16) error {
+	return rejectReceiptConflict(db.QueryRow(ctx, `SELECT EXISTS (
+		SELECT FROM `+receiptBindingEntries+` JOIN handled_inputs old USING (input_hash)
+		WHERE old.endpoint=$1 AND old.input_hash=ANY($5::bytea[])
+		AND (sha256(old.raw_payload)<>expected.raw_digest OR $6::smallint<>expected.destination)
+	)`, bindings.endpoint, bindings.hashes, bindings.digests, bindings.destinations, inserted, destination))
+}
+
+func (store *Store) verifyLegacyReceipt(ctx context.Context, tx pgx.Tx, bindings receiptBindings, inserted [][]byte) error {
+	// Pre-binding ledgers may hold these keys on any store. A missing store is
+	// not evidence of absence, and a second placement is always a conflict.
+	if err := bindings.checkLegacy(ctx, tx, inserted, controlReceiptDestination); err != nil {
+		return err
+	}
+	for id := range store.shards {
+		destination := int16(id)
+		shard, err := store.shardStore(ctx, destination)
+		if err != nil {
+			return err
+		}
+		if err := shard.verifyStartupResource(ctx); err != nil {
+			return err
+		}
+		if err := bindings.checkLegacy(ctx, shard.read, inserted, destination); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func rejectReceiptConflict(row pgx.Row) error {
+	var conflict bool
+	if err := row.Scan(&conflict); err != nil {
+		return err
+	}
+	if conflict {
+		return errReceiptConflict
+	}
+	return nil
 }
 
 func inputShard(endpoint Endpoint, raw json.RawMessage) (int16, error) {
@@ -131,6 +268,10 @@ func (store *Store) writeUnroutable(ctx context.Context, chunk IngestChunk, raw 
 			err = errors.Join(err, cleanupErr)
 		}
 	}()
+	// An identical retry can overlap before the first retained outcome exists.
+	if _, err = tx.Exec(ctx, "SELECT pg_advisory_xact_lock(4031, $1)", ingestEndpoints[chunk.Endpoint].lock); err != nil {
+		return err
+	}
 	_, exists, err := handledInputStatus(ctx, tx, chunk, raw)
 	if err != nil {
 		return err

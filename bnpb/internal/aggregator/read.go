@@ -128,6 +128,7 @@ func readFailure(request *http.Request, code string) applicationError {
 		"not_found": "hazard not found", "source_unavailable": "selected sources are unavailable",
 		"store_unavailable": "canonical store is unavailable", "authority_unavailable": "current write authority is unavailable",
 		"storage_unavailable": "canonical storage is unavailable", "catalogue_input_rejected": "one or more catalogue records were rejected",
+		"catalogue_input_conflict": "catalogue input identity conflicts with a previous receipt",
 		"measurements_unavailable": "storage measurements are unavailable",
 	}
 	return applicationError{code, messages[code], correlation.ID(request.Context())}

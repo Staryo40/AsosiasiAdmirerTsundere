@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"math"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -59,8 +60,8 @@ type checkpointPolicy struct {
 }
 
 func (store *Store) ingestChunk(ctx context.Context, chunk IngestChunk, policy checkpointPolicy) (err error) {
-	if chunk.InputOffset < 0 {
-		return errors.New("ingest: negative input offset")
+	if !validInputOrdinals(chunk.InputOffset, len(chunk.Records)) {
+		return errors.New("ingest: input ordinal range is invalid")
 	}
 	if chunk.InputID == "" {
 		encoded, marshalErr := json.Marshal(chunk.Records)
@@ -71,11 +72,11 @@ func (store *Store) ingestChunk(ctx context.Context, chunk IngestChunk, policy c
 		digest := sha256.Sum256(identity)
 		chunk.InputID = hex.EncodeToString(digest[:])
 	}
-	if store.shards[0] != nil {
-		return store.ingestShardChunk(ctx, chunk, policy)
-	}
 	if err := store.validateChunk(chunk); err != nil {
 		return err
+	}
+	if store.shards[0] != nil {
+		return store.ingestShardChunk(ctx, chunk, policy)
 	}
 	ctx, cancel := context.WithTimeout(ctx, store.writeTimeout)
 	defer cancel()
@@ -97,6 +98,10 @@ func (store *Store) ingestChunk(ctx context.Context, chunk IngestChunk, policy c
 		return err
 	}
 	return tx.Commit(ctx)
+}
+
+func validInputOrdinals(offset, count int) bool {
+	return offset >= 0 && (count == 0 || offset <= math.MaxInt-(count-1))
 }
 
 func (store *Store) beginWriteMutation(ctx context.Context) (pgx.Tx, error) {

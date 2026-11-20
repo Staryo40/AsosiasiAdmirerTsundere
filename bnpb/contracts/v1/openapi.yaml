@@ -387,8 +387,8 @@ paths:
         active owner ingests the receipt in storage-budget-sized chunks without
         changing poll state. A follower discovers owner_endpoint and forwards
         the original request bytes transparently at most one hop. Retries must
-        reuse the original input identity and bytes. A retained rejection is
-        409; an outcome that cannot be determined is 503.
+        reuse the original input identity and bytes. A retained rejection or
+        conflicting receipt identity returns 409; an uncertain outcome is 503.
       security:
         - CatalogBearer: []
       requestBody:
@@ -716,6 +716,7 @@ components:
             - authority_unavailable
             - measurements_unavailable
             - catalogue_input_rejected
+            - catalogue_input_conflict
             - analytics_result_limit
             - analytics_response_too_large
             - analytics_unavailable
@@ -1032,7 +1033,7 @@ components:
         application/json:
           schema: {$ref: '#/components/schemas/ApplicationError'}
     CatalogRetainedConflict:
-      description: The durable receipt contains a retained rejected input.
+      description: A durable retained rejection or a receipt identity/content conflict.
       content:
         application/json:
           schema: {$ref: '#/components/schemas/ApplicationError'}

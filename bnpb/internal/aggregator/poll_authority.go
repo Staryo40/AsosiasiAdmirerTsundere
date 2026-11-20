@@ -556,7 +556,7 @@ func (authority *PollAuthority) identity(record authorityRecord, domain string) 
 }
 
 func (authority *PollAuthority) validateDatabaseRoles(ctx context.Context, highWater int64) error {
-	protected := []string{"hazard_events", "source_seismic", "source_warnings", "handled_inputs", "poll_state", "outbox"}
+	protected := []string{"hazard_events", "source_seismic", "source_warnings", "handled_inputs", "receipt_bindings", "poll_state", "outbox"}
 	for index, store := range authority.stores {
 		if err := store.verifyStartupResource(ctx); err != nil {
 			return err

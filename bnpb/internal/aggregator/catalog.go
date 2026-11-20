@@ -73,6 +73,10 @@ func (api catalogAPI) ingest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := api.ingestCatalogChunks(ctx, receipt); err != nil {
+		if errors.Is(err, errReceiptConflict) {
+			writeReadError(w, r, http.StatusConflict, "catalogue_input_conflict")
+			return
+		}
 		code := "storage_unavailable"
 		if errors.Is(err, errAuthorityUnavailable) || errors.Is(err, errStaleMutationAuthority) {
 			code = "authority_unavailable"
@@ -128,7 +132,8 @@ func decodeCatalogReceipt(w http.ResponseWriter, r *http.Request) (catalogReceip
 	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
 		return catalogReceipt{}, errors.New("catalogue receipt has trailing JSON")
 	}
-	if receipt.InputID == "" || len(receipt.InputID) > 128 || receipt.InputOffset < 0 || !validInstant(receipt.ReceivedAt) || len(receipt.Records) == 0 || len(receipt.Records) > 1000 {
+	if receipt.InputID == "" || len(receipt.InputID) > 128 || !validInputOrdinals(receipt.InputOffset, len(receipt.Records)) ||
+		!validInstant(receipt.ReceivedAt) || len(receipt.Records) == 0 || len(receipt.Records) > 1000 {
 		return catalogReceipt{}, errors.New("catalogue receipt fields are invalid")
 	}
 	for _, record := range receipt.Records {
@@ -145,15 +150,27 @@ func (api catalogAPI) ingestCatalogChunks(ctx context.Context, receipt catalogRe
 	if chunkSize <= 0 {
 		return errors.New("catalogue ingest chunk size is invalid")
 	}
-	for start := 0; start < len(receipt.Records); start += chunkSize {
-		end := min(start+chunkSize, len(receipt.Records))
-		chunk := IngestChunk{
-			Endpoint: SeismicEndpoint, Records: receipt.Records[start:end], ReceivedAt: receipt.ReceivedAt,
-			InputID: receipt.InputID, InputOffset: receipt.InputOffset + start,
-		}
-		if err := api.store.ingestChunk(ctx, chunk, checkpointPolicy{omitPollState: true}); err != nil {
+	batch := IngestChunk{
+		Endpoint: SeismicEndpoint, Records: receipt.Records, ReceivedAt: receipt.ReceivedAt,
+		InputID: receipt.InputID, InputOffset: receipt.InputOffset,
+	}
+	policy := checkpointPolicy{omitPollState: true}
+	routed := api.store.shards[0] != nil
+	for start := 0; start < len(batch.Records); start += chunkSize {
+		end := start + min(chunkSize, len(batch.Records)-start)
+		chunk := batch
+		chunk.Records, chunk.InputOffset = batch.Records[start:end], batch.InputOffset+start
+		if routed {
+			if err := api.store.validateChunk(chunk); err != nil {
+				return err
+			}
+		} else if err := api.store.ingestChunk(ctx, chunk, policy); err != nil {
 			return err
 		}
+	}
+	if routed {
+		// A conflict in a later catalogue chunk must not commit a fresh prefix.
+		return api.store.ingestShardChunk(ctx, batch, policy)
 	}
 	return nil
 }
