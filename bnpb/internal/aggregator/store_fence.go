@@ -44,3 +44,27 @@ func (store *Store) beginMutation(ctx context.Context) (pgx.Tx, error) {
 	}
 	return fail(errStaleMutationAuthority)
 }
+
+const mutationGenerationQuery = `SELECT NOT pg_is_in_recovery(),
+	state='active' AND owner=$1 AND epoch=$2,
+	CASE WHEN pg_is_in_recovery() THEN false ELSE
+		pg_generation=$3 AND resource_identity=$4
+		AND resource_identity=live_mutation_resource('mutation_guard'::regclass)
+	END FROM mutation_guard WHERE singleton`
+
+func verifyMutationGeneration(row pgx.Row) error {
+	var primary, ownerMatches, generationMatches bool
+	if err := row.Scan(&primary, &ownerMatches, &generationMatches); err != nil {
+		return storeError("verify PostgreSQL mutation generation", err)
+	}
+	if !primary {
+		return errAuthorityUnavailable
+	}
+	if !ownerMatches {
+		return errStaleMutationAuthority
+	}
+	if !generationMatches {
+		return errMutationGenerationChanged
+	}
+	return nil
+}

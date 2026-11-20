@@ -16,6 +16,7 @@ import (
 var errAuthorityUnavailable = errors.New("poll authority unavailable")
 var errStaleMutationAuthority = errors.New("mutation context is stale or absent")
 var errAuthorityNotClosed = errors.New("poll authority is not closed for activation")
+var errMutationGenerationChanged = errors.New("PostgreSQL mutation generation changed")
 
 const authorityActivationTimeout = 20 * time.Second
 
@@ -257,8 +258,12 @@ func (authority *PollAuthority) run(ctx context.Context, workers ...func(context
 	case err := <-renewDone:
 		cancel()
 		workersDone.Wait()
-		return authority.closeAfterStop(ctx, active, version, hostRevokeTakeover,
-			errors.Join(errAuthorityUnavailable, err))
+		mode := hostRevokeTakeover
+		// This process joined its workers, so generation recovery must not fence its own VM.
+		if errors.Is(err, errMutationGenerationChanged) {
+			mode = hostRevokeGraceful
+		}
+		return authority.closeAfterStop(ctx, active, version, mode, errors.Join(errAuthorityUnavailable, err))
 
 	}
 }
@@ -748,6 +753,9 @@ func (authority *PollAuthority) renew(ctx context.Context, active authorityRecor
 		next, nextVersion, err := authority.renewOnce(ctx, active, version)
 		if err != nil {
 			authority.clearToken()
+			if errors.Is(err, errMutationGenerationChanged) {
+				return err
+			}
 			cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 			guardErr := authority.closeMutationGuards(cleanupCtx, active.Owner, active.Epoch)
 			cancel()
@@ -755,6 +763,25 @@ func (authority *PollAuthority) renew(ctx context.Context, active authorityRecor
 		}
 		active, version = next, nextVersion
 	}
+}
+
+func (authority *PollAuthority) verifyMutationGenerations(ctx context.Context) error {
+	authority.mu.RLock()
+	token := authority.token
+	authority.mu.RUnlock()
+	if token == nil {
+		return errStaleMutationAuthority
+	}
+	ctx, cancel := context.WithTimeout(ctx, authority.stores[0].writeTimeout)
+	defer cancel()
+	for index, expected := range token.guards {
+		row := authority.authorityPools[index].QueryRow(ctx, mutationGenerationQuery,
+			token.owner, token.epoch, expected.generation, expected.resource)
+		if err := verifyMutationGeneration(row); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (authority *PollAuthority) renewOnce(ctx context.Context, active authorityRecord, version string) (authorityRecord, string, error) {
@@ -801,7 +828,7 @@ func (authority *PollAuthority) renewOnce(ctx context.Context, active authorityR
 	if err != nil {
 		return authorityRecord{}, "", err
 	}
-	return next, updated, nil
+	return next, updated, authority.verifyMutationGenerations(ctx)
 }
 
 func (authority *PollAuthority) activateGuards(ctx context.Context, record authorityRecord) error {
