@@ -43,8 +43,9 @@ func (host *recoveryHostFence) Grant(_ context.Context, identity hostFenceIdenti
 	defer host.mu.Unlock()
 	current, exists := host.grants[identity.DomainUUID]
 	currentIdentity := host.identities[identity.DomainUUID]
-	if exists && (current.Epoch > int64(identity.Epoch) || current.Epoch == int64(identity.Epoch) && current.RenewalSeq > int64(identity.RenewalSeq) ||
-		current.Epoch == int64(identity.Epoch) && current.RenewalSeq == int64(identity.RenewalSeq) && currentIdentity != identity) {
+	if exists && (current.Epoch > int64(identity.Epoch) || current.Epoch == int64(identity.Epoch) &&
+		(host.inactive[identity.DomainUUID] || current.RenewalSeq > int64(identity.RenewalSeq) ||
+			current.RenewalSeq == int64(identity.RenewalSeq) && currentIdentity != identity)) {
 		return authorityGrant{}, errAuthorityConflict
 	}
 	grant := authorityGrant{DomainUUID: identity.DomainUUID, HostBootID: "fixture-boot-" + identity.DomainUUID,
@@ -556,12 +557,8 @@ func TestPollAuthorityRecoveryIntegrationActivationAndFailover(t *testing.T) {
 	})
 
 	t.Run("pending before or after grant publication is recovered without reset", func(t *testing.T) {
-		for _, afterPublication := range []bool{false, true} {
-			name := "before-host-grants-published"
-			if afterPublication {
-				name = "after-host-grants-published"
-			}
-			t.Run(name, func(t *testing.T) {
+		for _, phase := range []string{"unpublished", "partially armed and expired", "published"} {
+			t.Run(phase, func(t *testing.T) {
 				cfg, store := openRecoveryFixture(t)
 				kube, host := newRecoveryAuthorityKubernetes(recoveryClosedRecord(0)), newRecoveryHostFence()
 				pending := authorityRecord{Epoch: 1, Owner: "crashed-owner", OwnerDomainUUID: recoveryDomains()[0], State: authorityPending, RenewalSeq: 1}
@@ -576,7 +573,17 @@ func TestPollAuthorityRecoveryIntegrationActivationAndFailover(t *testing.T) {
 					}
 					grants = append(grants, grant)
 				}
-				if afterPublication {
+				if phase == "partially armed and expired" {
+					host.expireAll()
+					host.mu.Lock()
+					for _, domain := range recoveryDomains()[1:] {
+						delete(host.grants, domain)
+						delete(host.identities, domain)
+						delete(host.inactive, domain)
+					}
+					host.mu.Unlock()
+				}
+				if phase == "published" {
 					pending.GrantSet = grants
 				}
 				kube.seed(pending)

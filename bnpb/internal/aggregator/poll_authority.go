@@ -474,15 +474,33 @@ func (authority *PollAuthority) completePendingGrants(ctx context.Context, recor
 		if _, exists := grantForDomain(record.GrantSet, domain); exists {
 			continue
 		}
-		grant, err := authority.host.Grant(ctx, authority.identity(record, domain))
-		if err != nil {
+		if err := authority.completePendingGrant(ctx, record, domain); err != nil {
 			return err
-		}
-		if !validGrant(grant, domain, record.Epoch, record.RenewalSeq, "") {
-			return errAuthorityConflict
 		}
 	}
 	return nil
+}
+
+func (authority *PollAuthority) completePendingGrant(ctx context.Context, record authorityRecord, domain string) error {
+	current, err := authority.host.Current(ctx, domain)
+	if err != nil && !errors.Is(err, errHostGrantInactive) {
+		return err
+	}
+	// A closed grant must be revoked idempotently, never armed at the same epoch.
+	if current.Epoch >= record.Epoch || err == nil {
+		if !closingGrantMatches(record, domain, current) {
+			return errAuthorityConflict
+		}
+		return nil
+	}
+	if current.DomainUUID != "" && current.DomainUUID != domain {
+		return errAuthorityConflict
+	}
+	grant, err := authority.host.Grant(ctx, authority.identity(record, domain))
+	if err == nil && !validGrant(grant, domain, record.Epoch, record.RenewalSeq, "") {
+		return errAuthorityConflict
+	}
+	return err
 }
 
 func (authority *PollAuthority) revokeHostGrants(ctx context.Context, record authorityRecord, mode hostRevokeMode) error {
@@ -507,17 +525,21 @@ func (authority *PollAuthority) revokeHostGrants(ctx context.Context, record aut
 }
 
 func (authority *PollAuthority) currentClosingGrant(ctx context.Context, record authorityRecord, domain string) (authorityGrant, error) {
-	expected, hasExpected := grantForDomain(record.GrantSet, domain)
 	current, err := authority.host.Current(ctx, domain)
 	if err != nil && !errors.Is(err, errHostGrantInactive) {
 		return authorityGrant{}, fmt.Errorf("read host high-water for %q: %w", domain, err)
 	}
-	if current.DomainUUID != domain || current.HostBootID == "" || current.Epoch != record.Epoch ||
-		current.RenewalSeq < record.RenewalSeq || current.DeadlineBootTimeNS < 0 ||
-		hasExpected && current.HostBootID != expected.HostBootID {
+	if !closingGrantMatches(record, domain, current) {
 		return authorityGrant{}, fmt.Errorf("host high-water conflicts with closing authority for %q: %w", domain, errAuthorityConflict)
 	}
 	return current, nil
+}
+
+func closingGrantMatches(record authorityRecord, domain string, current authorityGrant) bool {
+	expected, hasExpected := grantForDomain(record.GrantSet, domain)
+	return current.DomainUUID == domain && current.HostBootID != "" && current.Epoch == record.Epoch &&
+		current.RenewalSeq >= record.RenewalSeq && current.DeadlineBootTimeNS >= 0 &&
+		(!hasExpected || current.HostBootID == expected.HostBootID)
 }
 
 func (authority *PollAuthority) confirmHostRevoked(ctx context.Context, domain string, expected authorityGrant) error {
