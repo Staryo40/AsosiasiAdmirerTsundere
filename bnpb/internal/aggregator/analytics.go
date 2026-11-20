@@ -167,12 +167,7 @@ func analyticsReadBudget(cfg Config, writeTimeout time.Duration) time.Duration {
 	if budget <= 0 {
 		budget = cfg.DBReadTimeout
 	}
-	if writeTimeout > 0 {
-		// A rollback can take one second. Reserve up to two seconds for cleanup
-		// and emission, without exhausting very short server write deadlines.
-		budget = min(budget, max(writeTimeout-2*time.Second, writeTimeout/4))
-	}
-	return budget
+	return readWorkBudget(budget, writeTimeout)
 }
 
 func aggregateAnalyticsGroups(results []logicalReadResult[[]analyticsGroup]) (analyticsCounts, error) {

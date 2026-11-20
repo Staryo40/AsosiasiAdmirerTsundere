@@ -417,9 +417,17 @@ func applyInitialSchema(ctx context.Context, tx pgx.Tx) error {
 	return err
 }
 
+const rollbackTimeout = time.Second
+
+type rollbackDeadlineKey struct{}
+
 // Native pgx cancellation does not roll back a transaction; cleanup needs its own bounded context.
 func rollbackTransaction(ctx context.Context, tx pgx.Tx) error {
-	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Second)
+	deadline := time.Now().Add(rollbackTimeout)
+	if requestDeadline, ok := ctx.Value(rollbackDeadlineKey{}).(time.Time); ok && requestDeadline.Before(deadline) {
+		deadline = requestDeadline
+	}
+	cleanupCtx, cancel := context.WithDeadline(context.WithoutCancel(ctx), deadline)
 	defer cancel()
 	if err := tx.Rollback(cleanupCtx); err != nil && !errors.Is(err, pgx.ErrTxClosed) {
 		return storeError("rollback", err)

@@ -64,7 +64,7 @@ func TestAnalyticsMatchesAuditActiveEventsAndMarksMissingShard(t *testing.T) {
 	cfg.DBReadTimeout = 3 * time.Second
 	cfg.ReadMaxInFlight = 2
 	mux := http.NewServeMux()
-	registerAuditRoutes4(mux, parent, cfg)
+	registerAuditRoutes4(mux, parent, cfg, 10*time.Second)
 	registerSnapshotRoutes(mux, parent, cfg, 10*time.Second)
 	fetchAnalytics := func(from, to time.Time) analyticsResponse {
 		return fetchAnalyticsWindow(t, mux, cfg.InternalKey, analyticsQuery{From: from, To: to, Bucket: "hour"})

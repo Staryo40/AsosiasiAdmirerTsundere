@@ -34,8 +34,7 @@ func (api auditAPI) events(w http.ResponseWriter, r *http.Request) {
 		auditWriteError(w, http.StatusBadRequest, "invalid_query", "invalid query parameters")
 		return
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), api.cfg.DBReadTimeout)
-	defer cancel()
+	ctx := r.Context()
 	results := fanoutLogicalReads(ctx, api.store.logicalReadStores(), func(ctx context.Context, unit logicalReadStore) ([]HazardEvent, error) {
 		return unit.Store.readAuditEvents(ctx, query)
 	})
@@ -153,8 +152,7 @@ func (api auditAPI) checksum(w http.ResponseWriter, r *http.Request) {
 		auditWriteError(w, http.StatusBadRequest, "invalid_query", "invalid query parameters")
 		return
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), api.cfg.Audit.ChecksumTimeout)
-	defer cancel()
+	ctx := r.Context()
 	asOf := time.Now().UTC()
 	response := auditChecksumResponse{Source: query.Source, Algorithm: "sha256", AsOf: asOf, UnavailableUnits: []string{}}
 	var streams [logicalShardCount]auditStream

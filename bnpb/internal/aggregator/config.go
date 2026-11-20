@@ -11,6 +11,11 @@ import (
 	"unicode"
 )
 
+const (
+	defaultDBReadTimeout = 200 * time.Millisecond
+	readResponseHeadroom = time.Second
+)
+
 type SourceConfig struct {
 	BaseURL      string
 	HTTPTimeout  time.Duration
@@ -141,6 +146,14 @@ func loadCatalogConfig(lookup func(string) (string, bool)) (CatalogConfig, error
 	return CatalogConfig{Token: token}, nil
 }
 
+func readWorkBudget(configuredBudget, writeTimeout time.Duration) time.Duration {
+	if writeTimeout <= 0 {
+		return configuredBudget
+	}
+	// Reserve time for rollback and JSON emission; keep some work time on short deadlines.
+	return min(configuredBudget, max(writeTimeout-rollbackTimeout-readResponseHeadroom, writeTimeout/4))
+}
+
 func loadBudgets(lookup func(string) (string, bool), cfg *Config) error {
 	for _, setting := range []struct {
 		name              string
@@ -156,7 +169,7 @@ func loadBudgets(lookup func(string) (string, bool), cfg *Config) error {
 		{"BNPB_RETRY_MAX_BACKOFF", 15 * time.Second, 5 * time.Minute, &cfg.RetryMaxBackoff},
 		{"BNPB_WARNING_RECONCILE_INTERVAL", time.Minute, time.Hour, &cfg.WarningReconcileInterval},
 		{"BNPB_SOURCE_STALE_AFTER", 20 * time.Second, 5 * time.Minute, &cfg.SourceStaleAfter},
-		{"BNPB_DB_READ_TIMEOUT", 200 * time.Millisecond, time.Minute, &cfg.DBReadTimeout},
+		{"BNPB_DB_READ_TIMEOUT", defaultDBReadTimeout, time.Minute, &cfg.DBReadTimeout},
 		{"BNPB_DB_WRITE_TIMEOUT", 2 * time.Second, time.Minute, &cfg.DBWriteTimeout},
 		{"BNPB_PUBLISH_TIMEOUT", 5 * time.Second, time.Minute, &cfg.PublishTimeout},
 	} {

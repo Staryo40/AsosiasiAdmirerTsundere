@@ -173,7 +173,7 @@ func newRoutedCatalogFixture(t *testing.T, ctx context.Context) (Config, *httpte
 
 	followerAuthority := openRecoveryAuthority(t, cfg, store, kube, host, "catalog-cli-follower")
 	followerMux := http.NewServeMux()
-	registerAuditRoutes4(followerMux, store, cfg)
+	registerAuditRoutes4(followerMux, store, cfg, 0)
 	registerCatalogRoutes(followerMux, store, cfg, followerAuthority)
 	posts := new(atomic.Int32)
 	follower := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

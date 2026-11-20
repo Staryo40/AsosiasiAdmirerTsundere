@@ -30,7 +30,7 @@ func TestCatalogIntegrationRejectsRetainedSourceReferenceReuse(t *testing.T) {
 	registerCatalogRoutes(mux, store, cfg, nil)
 	auditMux := http.NewServeMux()
 	cfg.Audit.Token = "audit-secret"
-	registerAuditRoutes4(auditMux, store, cfg)
+	registerAuditRoutes4(auditMux, store, cfg, 0)
 	auditChecksum := func() auditChecksumResponse {
 		t.Helper()
 		request := httptest.NewRequest(http.MethodGet, "/internal/audit/checksum", nil)

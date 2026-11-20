@@ -1,6 +1,7 @@
 package aggregator
 
 import (
+	"context"
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/json"
@@ -33,12 +34,36 @@ type auditErrorDetail struct {
 	Message string `json:"message"`
 }
 
-func registerAuditRoutes4(mux *http.ServeMux, store *Store, cfg Config) {
+func registerAuditRoutes4(mux *http.ServeMux, store *Store, cfg Config, writeTimeout time.Duration) {
 	api := auditAPI{store: store, cfg: cfg, slots: make(chan struct{}, cfg.ReadMaxInFlight)}
-	mux.Handle("GET /internal/audit/events", api.authenticate(http.HandlerFunc(api.events)))
-	mux.Handle("GET /internal/audit/checksum", api.authenticate(http.HandlerFunc(api.checksum)))
-	mux.Handle("GET /internal/audit/location", api.authenticate(http.HandlerFunc(api.location)))
-	mux.Handle("GET /internal/audit/unprocessed", api.authenticate(http.HandlerFunc(api.unprocessed)))
+	readBudget := cfg.DBReadTimeout
+	if readBudget <= 0 {
+		readBudget = defaultDBReadTimeout
+	}
+	register := func(path string, handler http.HandlerFunc, budget time.Duration) {
+		mux.Handle("GET /internal/audit/"+path, api.authenticate(withAuditReadBudget(handler, budget, writeTimeout)))
+	}
+	register("events", api.events, readBudget)
+	register("checksum", api.checksum, cfg.Audit.ChecksumTimeout)
+	register("location", api.location, readBudget)
+	register("unprocessed", api.unprocessed, readBudget)
+}
+
+func withAuditReadBudget(next http.HandlerFunc, configuredBudget, writeTimeout time.Duration) http.Handler {
+	budget := readWorkBudget(configuredBudget, writeTimeout)
+	cleanupWindow := writeTimeout - min(readResponseHeadroom, writeTimeout/4)
+	limitRollback := writeTimeout > 0 && cleanupWindow-budget < rollbackTimeout
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		ctx := r.Context()
+		if limitRollback {
+			// A short write timeout cannot fit a full rollback and still leave room to emit JSON.
+			ctx = context.WithValue(ctx, rollbackDeadlineKey{}, start.Add(cleanupWindow))
+		}
+		ctx, cancel := context.WithDeadline(ctx, start.Add(budget))
+		defer cancel()
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
 }
 
 func (api auditAPI) authenticate(next http.Handler) http.Handler {

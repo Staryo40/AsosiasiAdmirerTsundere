@@ -95,7 +95,7 @@ func TestAuditAuthenticationAndErrorEnvelope(t *testing.T) {
 	cfg := Config{ReadMaxInFlight: 1}
 	cfg.Audit.Token = "correct"
 	mux := http.NewServeMux()
-	registerAuditRoutes4(mux, nil, cfg)
+	registerAuditRoutes4(mux, nil, cfg, 0)
 	cases := []struct {
 		name, authorization string
 		status              int
@@ -123,7 +123,7 @@ func TestAuditAuthenticationAndErrorEnvelope(t *testing.T) {
 	assertAuditError(t, response, http.StatusBadRequest, "invalid_query")
 	cfg.Audit.Token = ""
 	mux = http.NewServeMux()
-	registerAuditRoutes4(mux, nil, cfg)
+	registerAuditRoutes4(mux, nil, cfg, 0)
 	request = httptest.NewRequest(http.MethodGet, "/internal/audit/events", nil)
 	request.Header.Set("Authorization", "Bearer ")
 	response = httptest.NewRecorder()
@@ -139,7 +139,7 @@ func TestAuditAuthenticationAndErrorEnvelope(t *testing.T) {
 	handler.ServeHTTP(response, request)
 	assertAuditError(t, response, http.StatusTooManyRequests, "too_many_requests")
 	mux = http.NewServeMux()
-	registerAuditRoutes4(mux, nil, cfg)
+	registerAuditRoutes4(mux, nil, cfg, 0)
 	request = httptest.NewRequest(http.MethodGet, "/internal/audit/unprocessed", nil)
 	request.Header.Set("Authorization", "Bearer correct")
 	response = httptest.NewRecorder()

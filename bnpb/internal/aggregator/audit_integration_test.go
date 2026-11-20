@@ -39,7 +39,7 @@ func TestAuditCrossLogicalShardPagesAndChecksum(t *testing.T) {
 	cfg.DBReadTimeout = 2 * time.Second
 	cfg.ReadMaxInFlight = 2
 	mux := http.NewServeMux()
-	registerAuditRoutes4(mux, parent, cfg)
+	registerAuditRoutes4(mux, parent, cfg, 0)
 	fetch := func(path string) *httptest.ResponseRecorder {
 		request := httptest.NewRequest(http.MethodGet, path, nil)
 		request.Header.Set("Authorization", "Bearer audit-secret")
@@ -164,7 +164,7 @@ func TestAuditRejectsChangedStoreIdentity(t *testing.T) {
 		insertGlobalReadFixture(t, ownerCtx, store.shards[shardID], id, refs[shardID], stamp)
 	}
 	mux := http.NewServeMux()
-	registerAuditRoutes4(mux, store, cfg)
+	registerAuditRoutes4(mux, store, cfg, 0)
 	fetch := func(path string, body any) {
 		t.Helper()
 		request := httptest.NewRequest(http.MethodGet, path, nil)
@@ -232,7 +232,7 @@ func TestAuditEventsPageLimitsAndEmptyChecksum(t *testing.T) {
 	cfg := testConfig(t)
 	cfg.Audit.Token = "audit-secret"
 	mux := http.NewServeMux()
-	registerAuditRoutes4(mux, store, cfg)
+	registerAuditRoutes4(mux, store, cfg, 0)
 	fetch := func(path string) *httptest.ResponseRecorder {
 		request := httptest.NewRequest(http.MethodGet, path, nil)
 		request.Header.Set("Authorization", "Bearer audit-secret")
@@ -261,7 +261,7 @@ func TestAuditEventsPageLimitsAndEmptyChecksum(t *testing.T) {
 	emptyCfg := testConfig(t)
 	emptyCfg.Audit.Token = "audit-secret"
 	emptyMux := http.NewServeMux()
-	registerAuditRoutes4(emptyMux, empty, emptyCfg)
+	registerAuditRoutes4(emptyMux, empty, emptyCfg, 0)
 	request := httptest.NewRequest(http.MethodGet, "/internal/audit/checksum", nil)
 	request.Header.Set("Authorization", "Bearer audit-secret")
 	response := httptest.NewRecorder()

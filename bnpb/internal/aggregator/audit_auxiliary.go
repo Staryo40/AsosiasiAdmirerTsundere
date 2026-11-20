@@ -2,7 +2,6 @@ package aggregator
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"io"
 	"log/slog"
@@ -82,13 +81,7 @@ func (api auditAPI) unprocessed(w http.ResponseWriter, request *http.Request) {
 		forward.Set("cursor", value[0])
 	}
 	endpoint.RawQuery = forward.Encode()
-	budget := api.cfg.DBReadTimeout
-	if budget <= 0 {
-		budget = 200 * time.Millisecond
-	}
-	ctx, cancel := context.WithTimeout(request.Context(), budget)
-	defer cancel()
-	outgoing, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint.String(), nil)
+	outgoing, err := http.NewRequestWithContext(request.Context(), http.MethodGet, endpoint.String(), nil)
 	if err != nil {
 		auditWriteError(w, http.StatusServiceUnavailable, "unavailable", "unprocessed metadata service is unavailable")
 		return
