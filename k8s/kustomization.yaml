@@ -1,0 +1,75 @@
+# Whole BNPB system: kubectl apply -k k8s (setup steps in KUBERNETES-DEPLOYMENT.md).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: sistem-informasi-kebencanaan-bnpb
+
+labels:
+  - pairs:
+      app.kubernetes.io/part-of: bnpb
+    includeSelectors: false
+
+resources:
+  - namespace.yaml
+  - serviceaccount.yaml
+  - mocks.yaml
+  - store.yaml
+  - broker.yaml
+  - aggregator.yaml
+  - auth.yaml
+  - api.yaml
+  - consumers.yaml
+  - network-policies.yaml
+
+configMapGenerator:
+  - name: bnpb-common
+    envs: [config/bnpb-common.env]
+  - name: bnpb-identities
+    envs: [config/identities.env]
+  - name: bmkg-config
+    envs: [config/bmkg.env]
+  - name: pvmbg-config
+    envs: [config/pvmbg.env]
+  - name: aggregator-config
+    envs: [config/aggregator.env]
+  - name: auth-config
+    envs: [config/auth.env]
+  - name: api-config
+    envs: [config/api.env]
+  - name: consumer-config
+    envs: [config/consumer.env]
+
+# k8s/secrets.env is git-ignored; generate it from secrets.env.example.
+secretGenerator:
+  - name: bnpb-secrets
+    envs: [secrets.env]
+
+# One private Docker Hub repository; the tag names the component.
+images:
+  - name: aat/bmkg
+    newName: docker.io/salmaanhaniif11/aat-bnpb
+    newTag: bmkg
+  - name: aat/pvmbg
+    newName: docker.io/salmaanhaniif11/aat-bnpb
+    newTag: pvmbg
+  - name: aat/bnpb-aggregator
+    newName: docker.io/salmaanhaniif11/aat-bnpb
+    newTag: aggregator
+  - name: aat/bnpb-api
+    newName: docker.io/salmaanhaniif11/aat-bnpb
+    newTag: api
+  - name: aat/bnpb-auth
+    newName: docker.io/salmaanhaniif11/aat-bnpb
+    newTag: auth
+  - name: aat/bnpb-consumer-1
+    newName: docker.io/salmaanhaniif11/aat-bnpb
+    newTag: consumer-1
+  - name: aat/bnpb-consumer-2
+    newName: docker.io/salmaanhaniif11/aat-bnpb
+    newTag: consumer-2
+  - name: aat/bnpb-consumer-3
+    newName: docker.io/salmaanhaniif11/aat-bnpb
+    newTag: consumer-3
+  - name: aat/broker-init
+    newName: docker.io/salmaanhaniif11/aat-bnpb
+    newTag: broker-init

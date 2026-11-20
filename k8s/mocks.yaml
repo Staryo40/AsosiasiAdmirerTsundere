@@ -1,0 +1,126 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: bmkg
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: bmkg
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: bmkg
+        role: mock
+    spec:
+      containers:
+        - name: bmkg
+          image: aat/bmkg
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8081
+          envFrom:
+            - configMapRef:
+                name: bmkg-config
+          env:
+            - name: BMKG_API_KEY
+              valueFrom:
+                secretKeyRef: {name: bnpb-secrets, key: BMKG_API_KEY}
+          resources:
+            requests: {memory: 64Mi}
+            limits: {memory: 128Mi}
+          readinessProbe:
+            httpGet: {path: /health, port: http}
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: {path: /health, port: http}
+            initialDelaySeconds: 10
+            periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: bmkg
+spec:
+  selector:
+    app.kubernetes.io/name: bmkg
+  ports:
+    - name: http
+      port: 8081
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pvmbg
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: pvmbg
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: pvmbg
+        role: mock
+    spec:
+      containers:
+        - name: pvmbg
+          image: aat/pvmbg
+          imagePullPolicy: IfNotPresent
+          # The image default (75% heap) leaves no room for metaspace and threads
+          # under the 128Mi mock limit from Lampiran B.
+          command:
+            - java
+            - -XX:MaxRAMPercentage=45
+            - -XX:+UseSerialGC
+            - -XX:MaxMetaspaceSize=48m
+            - -XX:ReservedCodeCacheSize=16m
+            - -XX:TieredStopAtLevel=1
+            - -Xss512k
+            - -jar
+            - pvmbg.jar
+          ports:
+            - name: http
+              containerPort: 8082
+          envFrom:
+            - configMapRef:
+                name: pvmbg-config
+          env:
+            - name: PVMBG_READER_CLIENT_ID
+              valueFrom:
+                configMapKeyRef: {name: bnpb-identities, key: BNPB_PVMBG_READER_CLIENT_ID}
+            - name: PVMBG_READER_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef: {name: bnpb-secrets, key: PVMBG_READER_CLIENT_SECRET}
+            - name: PVMBG_JWT_SECRET
+              valueFrom:
+                secretKeyRef: {name: bnpb-secrets, key: PVMBG_JWT_SECRET}
+            - name: PVMBG_ADMIN_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef: {name: bnpb-secrets, key: PVMBG_ADMIN_CLIENT_SECRET}
+          resources:
+            requests: {memory: 64Mi}
+            limits: {memory: 128Mi}
+          # /health answers 503 during a simulated outage; the Aggregator must
+          # still reach PVMBG and observe that 503, so probes only check TCP.
+          readinessProbe:
+            tcpSocket: {port: http}
+            periodSeconds: 5
+          livenessProbe:
+            tcpSocket: {port: http}
+            initialDelaySeconds: 30
+            periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pvmbg
+spec:
+  selector:
+    app.kubernetes.io/name: pvmbg
+  ports:
+    - name: http
+      port: 8082
+      targetPort: http
