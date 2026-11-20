@@ -1,12 +1,18 @@
 package com.staryo.service
 
+import com.staryo.enums.PayloadFault
 import com.staryo.model.*
 import com.staryo.repository.VolcanicReportRepository
 import com.staryo.state.AppState
 import com.staryo.state.DelayRange
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.encodeToJsonElement
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import java.time.Instant
 import java.time.format.DateTimeParseException
 
@@ -19,17 +25,36 @@ class VolcanicReportService(
 ) {
     private val json = Json
 
-    fun getReports(sinceRaw: String?): JsonElement {
+    fun getReports(sinceRaw: String?): RenderedReports {
         val reports = repository.findSince(sinceRaw?.let(::parseInstant))
-        return when (state.schemaVersion) {
-            1 -> json.encodeToJsonElement(reports.map { it.toV1() })
-            else -> json.encodeToJsonElement(reports)
+        val body = json.encodeToString(JsonElement.serializer(), shapeReports(reports, state.schemaVersion))
+        return RenderedReports(body.toByteArray(), state.payloadFault)
+    }
+
+    // 1 and 2 are compatible; 3-5 each break exactly one rule on top of the v1 shape.
+    private fun shapeReports(reports: List<VolcanicReportV2>, version: Int): JsonElement = when (version) {
+        1 -> json.encodeToJsonElement(reports.map { it.toV1() })
+        2 -> json.encodeToJsonElement(reports)
+        else -> JsonArray(reports.map { breakSchema(json.encodeToJsonElement(it.toV1()).jsonObject, version) })
+    }
+
+    private fun breakSchema(report: JsonObject, version: Int): JsonObject {
+        val fields = report.toMutableMap()
+        when (version) {
+            3 -> fields.remove("alert_level")?.let { fields["level"] = it }
+            4 -> fields["eruption_count_24h"]?.let { fields["eruption_count_24h"] = JsonPrimitive(it.jsonPrimitive.content) }
+            5 -> fields.remove("reported_at")
         }
+        return JsonObject(fields)
     }
 
     fun setSchemaVersion(version: Int) {
-        if (version !in 1..2) throw InvalidRequestException("schema version must be 1 or 2")
+        if (version !in 1..5) throw InvalidRequestException("schema version must be between 1 and 5")
         state.schemaVersion = version
+    }
+
+    fun setPayloadFault(fault: PayloadFault) {
+        state.payloadFault = fault
     }
 
     fun setOutage(enabled: Boolean) {

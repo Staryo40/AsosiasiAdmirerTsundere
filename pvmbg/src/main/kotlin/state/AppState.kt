@@ -1,5 +1,6 @@
 package com.staryo.state
 
+import com.staryo.enums.PayloadFault
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
@@ -11,6 +12,8 @@ class AppState(initialDelay: DelayRange = DelayRange.NONE) {
     val changes: StateFlow<Long> = _changes
 
     @Volatile var schemaVersion: Int = 1
+
+    @Volatile var payloadFault: PayloadFault = PayloadFault.NONE
 
     @Volatile var outage: Boolean = false
         set(value) {

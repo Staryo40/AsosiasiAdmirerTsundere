@@ -47,7 +47,8 @@ fun Application.configureRouting(
             authorized(Scope.READ) {
                 get {
                     val sinceQuery = call.request.queryParameters["since"]
-                    call.respond(service.getReports(sinceQuery))
+                    val reports = service.getReports(sinceQuery)
+                    call.respondOutputStream(ContentType.Application.Json) { reports.writeTo(this) }
                 }
             }
         }
@@ -58,6 +59,13 @@ fun Application.configureRouting(
                     val version = call.receive<SchemaVersionRequest>().version
                     service.setSchemaVersion(version)
                     Events.info("schema_version_changed", "version" to version, "client_id" to call.clientId())
+                    call.respond(HttpStatusCode.NoContent)
+                }
+
+                post("/payload-fault") {
+                    val mode = call.receive<PayloadFaultRequest>().mode
+                    service.setPayloadFault(mode)
+                    Events.info("payload_fault_changed", "mode" to mode.name.lowercase(), "client_id" to call.clientId())
                     call.respond(HttpStatusCode.NoContent)
                 }
 
