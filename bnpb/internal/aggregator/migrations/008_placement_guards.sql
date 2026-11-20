@@ -39,4 +39,4 @@ CREATE TRIGGER shard_placement_no_delete BEFORE DELETE ON shard_placements
 CREATE TRIGGER shard_placement_no_truncate BEFORE TRUNCATE ON shard_placements
     FOR EACH STATEMENT EXECUTE FUNCTION protect_shard_placement();
 
-INSERT INTO schema_migrations (version) VALUES (7);
+INSERT INTO schema_migrations (version) VALUES (8);

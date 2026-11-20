@@ -1,0 +1,224 @@
+# Each consumer keeps its own SQLite state in /data on a node-local volume.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: consumer-1
+spec:
+  serviceName: consumer-1
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: consumer-1
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: consumer-1
+        role: consumer
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8085"
+        prometheus.io/path: "/metrics"
+    spec:
+      containers:
+        - name: consumer-1
+          image: aat/bnpb-consumer-1
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8085
+          envFrom:
+            - configMapRef:
+                name: bnpb-common
+            - configMapRef:
+                name: consumer-config
+          env:
+            - name: BNPB_CONSUMER_1_RABBITMQ_USER
+              valueFrom:
+                configMapKeyRef: {name: bnpb-identities, key: BNPB_CONSUMER_1_RABBITMQ_USER}
+            - name: BNPB_CONSUMER_1_RABBITMQ_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: bnpb-secrets, key: BNPB_CONSUMER_1_RABBITMQ_PASSWORD}
+          resources:
+            requests: {memory: 128Mi}
+            limits: {memory: 256Mi}
+          readinessProbe:
+            httpGet: {path: /health, port: http}
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: {path: /health, port: http}
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          volumeMounts:
+            - name: data
+              mountPath: /data
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: [ReadWriteOnce]
+        storageClassName: local-path
+        resources:
+          requests:
+            storage: 1Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: consumer-1
+spec:
+  selector:
+    app.kubernetes.io/name: consumer-1
+  ports:
+    - name: http
+      port: 8085
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: consumer-2
+spec:
+  serviceName: consumer-2
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: consumer-2
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: consumer-2
+        role: consumer
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8086"
+        prometheus.io/path: "/metrics"
+    spec:
+      containers:
+        - name: consumer-2
+          image: aat/bnpb-consumer-2
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8086
+          envFrom:
+            - configMapRef:
+                name: bnpb-common
+            - configMapRef:
+                name: consumer-config
+          env:
+            - name: BNPB_CONSUMER_2_RABBITMQ_USER
+              valueFrom:
+                configMapKeyRef: {name: bnpb-identities, key: BNPB_CONSUMER_2_RABBITMQ_USER}
+            - name: BNPB_CONSUMER_2_RABBITMQ_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: bnpb-secrets, key: BNPB_CONSUMER_2_RABBITMQ_PASSWORD}
+          resources:
+            requests: {memory: 128Mi}
+            limits: {memory: 256Mi}
+          readinessProbe:
+            httpGet: {path: /health, port: http}
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: {path: /health, port: http}
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          volumeMounts:
+            - name: data
+              mountPath: /data
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: [ReadWriteOnce]
+        storageClassName: local-path
+        resources:
+          requests:
+            storage: 1Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: consumer-2
+spec:
+  selector:
+    app.kubernetes.io/name: consumer-2
+  ports:
+    - name: http
+      port: 8086
+      targetPort: http
+---
+# Demo consumer for "add a consumer without touching the producer":
+# kubectl -n sistem-informasi-kebencanaan-bnpb scale statefulset consumer-3 --replicas=1
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: consumer-3
+spec:
+  serviceName: consumer-3
+  replicas: 0
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: consumer-3
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: consumer-3
+        role: consumer
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8087"
+        prometheus.io/path: "/metrics"
+    spec:
+      containers:
+        - name: consumer-3
+          image: aat/bnpb-consumer-3
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8087
+          envFrom:
+            - configMapRef:
+                name: bnpb-common
+            - configMapRef:
+                name: consumer-config
+          env:
+            - name: BNPB_CONSUMER_3_RABBITMQ_USER
+              valueFrom:
+                configMapKeyRef: {name: bnpb-identities, key: BNPB_CONSUMER_3_RABBITMQ_USER}
+            - name: BNPB_CONSUMER_3_RABBITMQ_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: bnpb-secrets, key: BNPB_CONSUMER_3_RABBITMQ_PASSWORD}
+          resources:
+            requests: {memory: 128Mi}
+            limits: {memory: 256Mi}
+          readinessProbe:
+            httpGet: {path: /health, port: http}
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: {path: /health, port: http}
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          volumeMounts:
+            - name: data
+              mountPath: /data
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: [ReadWriteOnce]
+        storageClassName: local-path
+        resources:
+          requests:
+            storage: 1Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: consumer-3
+spec:
+  selector:
+    app.kubernetes.io/name: consumer-3
+  ports:
+    - name: http
+      port: 8087
+      targetPort: http

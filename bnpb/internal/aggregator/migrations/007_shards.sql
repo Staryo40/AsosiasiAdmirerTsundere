@@ -68,4 +68,4 @@ $$;
 CREATE TRIGGER shard_placement_guard BEFORE INSERT OR UPDATE ON shard_placements
     FOR EACH ROW EXECUTE FUNCTION protect_shard_placement();
 
-INSERT INTO schema_migrations (version) VALUES (6);
+INSERT INTO schema_migrations (version) VALUES (7);

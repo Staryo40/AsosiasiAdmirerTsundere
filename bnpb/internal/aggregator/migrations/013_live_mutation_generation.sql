@@ -77,4 +77,4 @@ BEGIN
 END;
 $mutation_generation$;
 
-INSERT INTO schema_migrations (version) VALUES (12);
+INSERT INTO schema_migrations (version) VALUES (13);

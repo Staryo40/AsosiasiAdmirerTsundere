@@ -71,4 +71,4 @@ CREATE TRIGGER store_identity_immutable BEFORE UPDATE OR DELETE ON store_identit
 CREATE TRIGGER store_identity_no_truncate BEFORE TRUNCATE ON store_identity
     FOR EACH STATEMENT EXECUTE FUNCTION prevent_store_identity_mutation();
 
-INSERT INTO schema_migrations (version) VALUES (8);
+INSERT INTO schema_migrations (version) VALUES (9);

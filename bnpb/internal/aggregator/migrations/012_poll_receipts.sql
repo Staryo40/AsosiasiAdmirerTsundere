@@ -14,4 +14,4 @@ CREATE TRIGGER pending_poll_receipts_mutation_fence
 CREATE TRIGGER pending_poll_receipts_truncate_fence
     BEFORE TRUNCATE ON pending_poll_receipts
     FOR EACH STATEMENT EXECUTE FUNCTION require_mutation_authority();
-INSERT INTO schema_migrations (version) VALUES (11);
+INSERT INTO schema_migrations (version) VALUES (12);

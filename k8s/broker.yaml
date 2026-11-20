@@ -1,0 +1,136 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: rabbitmq-conf
+data:
+  # Mirrors bnpb/broker/rabbitmq.conf (kustomize cannot load files outside k8s/).
+  rabbitmq.conf: |
+    max_message_size = 536870912
+    log.console = true
+    log.console.formatter = json
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: rabbitmq
+spec:
+  serviceName: rabbitmq
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: rabbitmq
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: rabbitmq
+        role: broker
+    spec:
+      terminationGracePeriodSeconds: 60
+      containers:
+        - name: rabbitmq
+          image: rabbitmq:4.3.5-management-alpine
+          ports:
+            - name: amqp
+              containerPort: 5672
+            - name: management
+              containerPort: 15672
+          env:
+            - name: RABBITMQ_DEFAULT_USER
+              valueFrom:
+                configMapKeyRef: {name: bnpb-identities, key: RABBITMQ_DEFAULT_USER}
+            - name: RABBITMQ_DEFAULT_PASS
+              valueFrom:
+                secretKeyRef: {name: bnpb-secrets, key: RABBITMQ_DEFAULT_PASS}
+          resources:
+            requests: {memory: 512Mi}
+            limits: {memory: 1Gi}
+          # In-container checks: the NetworkPolicy on this pod must not be able
+          # to fail its own probes.
+          readinessProbe:
+            exec:
+              command: [nc, -z, 127.0.0.1, "5672"]
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          livenessProbe:
+            exec:
+              command: [nc, -z, 127.0.0.1, "5672"]
+            initialDelaySeconds: 60
+            periodSeconds: 15
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/rabbitmq
+            - name: conf
+              mountPath: /etc/rabbitmq/rabbitmq.conf
+              subPath: rabbitmq.conf
+              readOnly: true
+      volumes:
+        - name: conf
+          configMap:
+            name: rabbitmq-conf
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: [ReadWriteOnce]
+        storageClassName: local-path
+        resources:
+          requests:
+            storage: 2Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: rabbitmq
+spec:
+  selector:
+    app.kubernetes.io/name: rabbitmq
+  ports:
+    - name: amqp
+      port: 5672
+      targetPort: amqp
+    - name: management
+      port: 15672
+      targetPort: management
+---
+# Idempotent provisioning (bnpb/broker/provision.sh). A Job's pod template is
+# immutable; removing the finished Job lets the next apply re-create and re-run it.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: broker-init
+spec:
+  backoffLimit: 6
+  ttlSecondsAfterFinished: 120
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: broker-init
+        role: other
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: broker-init
+          image: aat/broker-init
+          imagePullPolicy: IfNotPresent
+          envFrom:
+            - configMapRef:
+                name: bnpb-identities
+          env:
+            - name: RABBITMQ_DEFAULT_PASS
+              valueFrom:
+                secretKeyRef: {name: bnpb-secrets, key: RABBITMQ_DEFAULT_PASS}
+            - name: BNPB_RABBITMQ_PUBLISHER_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: bnpb-secrets, key: BNPB_RABBITMQ_PUBLISHER_PASSWORD}
+            - name: BNPB_CONSUMER_1_RABBITMQ_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: bnpb-secrets, key: BNPB_CONSUMER_1_RABBITMQ_PASSWORD}
+            - name: BNPB_CONSUMER_2_RABBITMQ_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: bnpb-secrets, key: BNPB_CONSUMER_2_RABBITMQ_PASSWORD}
+            - name: BNPB_CONSUMER_3_RABBITMQ_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: bnpb-secrets, key: BNPB_CONSUMER_3_RABBITMQ_PASSWORD}
+          resources:
+            requests: {memory: 128Mi}
+            limits: {memory: 256Mi}

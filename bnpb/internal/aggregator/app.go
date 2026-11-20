@@ -32,15 +32,21 @@ func Initialize(ctx context.Context, mux *http.ServeMux, platform config.Config,
 		store.Close()
 		return nil, err
 	}
-	app := application{sources: newSourceClients(cfg, logger), store: store}
+	pantai := newPantaiClient(cfg, logger)
+	app := application{sources: newSourceClients(cfg, logger), pantai: pantai, store: store}
 	mux.HandleFunc("GET /ready", app.ready)
 	mux.HandleFunc("GET /readyz", app.readyProbe)
-	registerSnapshotRoutes(mux, store, cfg, platform.WriteTimeout)
+	snapshot := registerSnapshotRoutes(mux, store, cfg, platform.WriteTimeout)
+	registerCoastalRoutes(mux, snapshot)
 	registerAuditRoutes4(mux, store, cfg, platform.WriteTimeout)
+	if cfg.PantaiAuthToken != "" {
+		store.attachPantaiBreaker(app.pantai)
+	}
 	dispatcher := &outboxDispatcher{store: store, publisher: newAMQPPublisher(cfg), cfg: cfg, logger: logger}
 	workers, err := app.ownerWorkers(ctx, cfg, logger, dispatcher.run)
 	if err != nil {
 		app.sources.closeIdleConnections()
+		pantai.closeIdleConnections()
 		store.Close()
 		return nil, err
 	}
@@ -55,6 +61,7 @@ func Initialize(ctx context.Context, mux *http.ServeMux, platform config.Config,
 
 type application struct {
 	sources sourceClients
+	pantai  *pantaiClient
 	store   *Store
 }
 
@@ -70,6 +77,9 @@ func (app application) start(ctx context.Context, workers ...func(context.Contex
 		<-ctx.Done()
 		group.Wait()
 		app.sources.closeIdleConnections()
+		if app.pantai != nil {
+			app.pantai.closeIdleConnections()
+		}
 		close(done)
 	}()
 	return func(shutdownCtx context.Context) error {

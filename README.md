@@ -4,6 +4,8 @@ TsundereDISTRIBUTED is a disaster-coordination platform that aggregates agency r
 
 This repository contains the Milestone 1 application and ongoing Milestone 2 implementation. The local Compose stack remains a development environment; no verified Kubernetes deployment command or external M2 acceptance is claimed.
 
+Milestone 2 runs the same system on a two-node Kubernetes (k3s) cluster; see [Running on Kubernetes (Milestone 2)](#running-on-kubernetes-milestone-2). Docker Compose remains the way to develop and run the acceptance suites locally.
+
 ## Table of Contents
 
 - [Technology and Frameworks](#technology-and-frameworks)
@@ -11,6 +13,7 @@ This repository contains the Milestone 1 application and ongoing Milestone 2 imp
 - [Program Requirements](#program-requirements)
 - [Configuration](#configuration)
 - [Running the Application](#running-the-application)
+- [Running on Kubernetes (Milestone 2)](#running-on-kubernetes-milestone-2)
 - [Acceptance Testing (P01–P05)](#acceptance-testing-p01p05)
 - [Endpoints](#endpoints)
 - [Creators](#creators)
@@ -47,17 +50,22 @@ Simplified file layout:
 │   ├── internal/           # per-service packages + shared platform/
 │   ├── broker/             # RabbitMQ provisioning
 │   └── contracts/v1/       # OpenAPI contract + schemas
+├── k8s/                    # Kubernetes manifests (Kustomize) for Milestone 2
+│   ├── config/             # ConfigMap sources (*.env)
+│   └── secrets.env.example # Secret keys (fill secrets.env locally; not tracked)
 ├── testing/                # acceptance suites (Python), per Problem
 │   ├── P01/ P02/ P03/ P04/ P05/
 │   └── common/             # shared test helpers
 ├── docs/architecture.svg   # diagram used above
+├── KUBERNETES-DEPLOYMENT.md # step-by-step k3s install and deploy
+├── paradigma-design.md     # visual paradigm for the analytics dashboard (A2-06)
 ├── configure_env.py        # cross-platform local configuration setup
 ├── compose.yaml            # root orchestration (includes all three)
 ├── compose.override.yaml   # host-exposed inspection ports
 └── README.md
 ```
 
-Each of `bmkg/`, `pvmbg/`, and `bnpb/` also has its own `README.md` with component-specific detail, and its own `compose.yaml` so it can be developed and run standalone.
+Each of `bmkg/`, `pvmbg/`, and `bnpb/` also has its own `README.md` with component-specific detail, and its own `compose.yaml` so it can be developed and run standalone. Kubernetes deploy is documented in [`KUBERNETES-DEPLOYMENT.md`](KUBERNETES-DEPLOYMENT.md) and summarized under [Running on Kubernetes (Milestone 2)](#running-on-kubernetes-milestone-2).
 
 ## Program Requirements
 
@@ -409,6 +417,107 @@ docker compose ps                        # status of every service
 docker compose logs -f <service-name>     # follow one service's logs
 docker compose logs -f api auth aggregator bmkg pvmbg   # follow the main data-flow path
 ```
+
+## Running on Kubernetes (Milestone 2)
+
+The same system runs on a Kubernetes cluster (k3s) with at least two nodes that have separate kernels, in the
+`sistem-informasi-kebencanaan-bnpb` namespace. The full step-by-step guide, from two bare Linux machines to a
+running system, is in [`KUBERNETES-DEPLOYMENT.md`](KUBERNETES-DEPLOYMENT.md). In short:
+
+1. Install k3s on both nodes and point `kubectl` at the cluster (guide sections 1–2).
+2. Create `k8s/secrets.env` from [`k8s/secrets.env.example`](k8s/secrets.env.example) (section 3).
+3. Build the images, push them to the registry or import them into each node, and create the pull secret (section 4).
+4. Deploy the whole system with **one command** from the repository root:
+
+   ```text
+   kubectl apply -k k8s
+   kubectl -n sistem-informasi-kebencanaan-bnpb get pods -o wide -w
+   ```
+
+   Every pod must become `Running` and `Ready`; the one-shot `broker-init` job ends as `Completed`.
+5. Install the Tester Agent with the official manifest (section 6).
+
+### Topology declaration
+
+| Item | Value |
+| --- | --- |
+| Number of nodes | 2 |
+| `node-a` | VM (VirtualBox), Ubuntu Server 24.04, 4 vCPU, 6 GB RAM, 20 GB disk. Control plane and worker. |
+| `node-b` | VM (VirtualBox, linked clone of `node-a`), Ubuntu Server 24.04, 4 vCPU, 5 GB RAM. Worker only. |
+| Physical host | Both nodes run on **the same physical host**: AMD Ryzen 7 7435HS (8 cores / 16 threads), 19.7 GB usable RAM, Windows 11. |
+| Node network | VirtualBox host-only network `192.168.56.0/24` (`node-a` `.10`, `node-b` `.11`) plus a NAT adapter for internet access. |
+| Kubernetes | k3s with the default SQLite datastore, flannel pinned to the host-only interface, Traefik and ServiceLB disabled. |
+
+The nodes share one physical host, so the "nodes on different physical hosts" bonus is **not** claimed. Node-failure
+scenarios only target `node-b`, the worker that is not the control plane.
+
+### Platform requirements and where they are implemented
+
+| Requirement | Implementation |
+| --- | --- |
+| Namespace `sistem-informasi-kebencanaan-bnpb` | [`k8s/namespace.yaml`](k8s/namespace.yaml) |
+| Pod label `role` | Every pod sets `role` to `aggregator`, `store`, `broker`, `consumer`, `api`, `mock`, or `other`. |
+| `resources.requests` / `limits` (Appendix B) | Set on every container, see the table below. |
+| Credentials as Secret, configuration as ConfigMap | `k8s/secrets.env` generates the Secrets, `k8s/config/*.env` generate the ConfigMaps (see `kustomization.yaml`). |
+| `role=store` data on the node's local disk | PostgreSQL is a StatefulSet on a `local-path` PersistentVolume. |
+| Storage reachable only by its owner (Platform.8) | [`k8s/network-policies.yaml`](k8s/network-policies.yaml): PostgreSQL accepts only the Aggregator, RabbitMQ only the Aggregator, the consumers, and `broker-init`. |
+| Tester Agent not obstructed (TA.2) | The NetworkPolicies select only the PostgreSQL and RabbitMQ pods. No other policy, taint, or quota is applied. |
+| Readiness and liveness probes, spread across nodes | Aggregator and API replicas use `topologySpreadConstraints` and probes; the Aggregator also has a PodDisruptionBudget. |
+
+| Component | Role | Replicas | Memory requests / limits |
+| --- | --- | --- | --- |
+| Aggregator | `aggregator` | 3 | 256Mi / 512Mi |
+| PostgreSQL | `store` | 1 | 512Mi / 1Gi |
+| RabbitMQ | `broker` | 1 | 512Mi / 1Gi |
+| consumer-1, consumer-2, consumer-3 | `consumer` | 1, 1, 0 (scaled on demand) | 128Mi / 256Mi |
+| Auth | `api` | 1 (tokens are held in process memory, so it must stay a single instance) | 128Mi / 256Mi |
+| Client-Facing API | `api` | 2 | 128Mi / 256Mi |
+| Mock BMKG, Mock PVMBG | `mock` | 1 each | 64Mi / 128Mi |
+| `broker-init` (one-shot Job) | `other` | n/a | 128Mi / 256Mi |
+
+### Configuration variables
+
+The variable names are the same as in the Compose setup ([Complete variable list](#complete-variable-list)). On Kubernetes they come from two places:
+
+| Source | Content | Tracked by Git |
+| --- | --- | --- |
+| `k8s/config/*.env` | Non-secret settings: listen addresses, upstream URLs, poll intervals and timeouts, token TTLs, client IDs. Turned into ConfigMaps by Kustomize. | Yes |
+| `k8s/secrets.env` | Passwords, API keys, JWT secret, and client secrets. Turned into Secrets by Kustomize. Keys are listed in [`k8s/secrets.env.example`](k8s/secrets.env.example). | **No** (git-ignored) |
+
+Edit a value in `k8s/config/*.env`, run `kubectl apply -k k8s`, and Kustomize rolls the affected pods.
+
+### Endpoints
+
+| Service | Address |
+| --- | --- |
+| Client-Facing API | `http://<node-ip>:30080` (`/auth/login`, `/auth/refresh`, `/v1/hazards`, `/v1/hazards/{hazard_id}`, `/v1/coastal/status`, `/health`) |
+| Analytics dashboard (UI) | `http://<node-ip>:30081` |
+| Aggregator (internal read API, Audit API) | `http://<node-ip>:30083` |
+| RabbitMQ management | `kubectl -n sistem-informasi-kebencanaan-bnpb port-forward svc/rabbitmq 15672`, then <http://localhost:15672> |
+| Prometheus | `http://<node-ip>:30900` (after `kubectl apply -k k8s/monitoring`) |
+| Grafana | `http://<node-ip>:30300` (anonymous Viewer; admin / `bnpb-observability`) |
+
+`<node-ip>` is the IP of either node. The public endpoints are described in [`bnpb/README.md`](bnpb/README.md). Observability lives in the `monitoring` namespace; see [`KUBERNETES-DEPLOYMENT.md`](KUBERNETES-DEPLOYMENT.md#6-observability).
+
+### Triggering the scenarios
+
+All commands use the `sistem-informasi-kebencanaan-bnpb` namespace; set it once with
+`kubectl config set-context --current --namespace=sistem-informasi-kebencanaan-bnpb`.
+
+| Scenario | Command |
+| --- | --- |
+| List practice scenarios | `kubectl exec -n tester-agent daemonset/tester-agent -- /app list` |
+| Run a practice scenario | `kubectl exec -n tester-agent daemonset/tester-agent -- /app run practice <scenario-name>` |
+| Read what the Tester Agent did | `kubectl logs -n tester-agent daemonset/tester-agent -f` |
+| Scale the Aggregator (for example 3 → 5 → 2) | `kubectl scale deployment aggregator --replicas=5` |
+| Rolling update of one component | `kubectl rollout restart deployment/<name>`, then `kubectl rollout status deployment/<name>` |
+| Add consumer-3 live, without touching the producer | `kubectl scale statefulset consumer-3 --replicas=1` |
+| Kill one pod | `kubectl delete pod <pod-name>` |
+| Observe pod placement and health | `kubectl get pods -o wide -w` |
+| Follow all replicas of a component | `kubectl logs -l app.kubernetes.io/name=aggregator --prefix -f` |
+
+Node-failure, clock-skew, and network-partition scenarios are performed by the Tester Agent during the exam, or by hand
+on `node-b` (for example `sudo poweroff` on the VM).
 
 ## Acceptance Testing (P01–P05)
 

@@ -188,8 +188,8 @@ func TestM2RepairMetadataOnExistingVersion12(t *testing.T) {
 func assertSchemaRepairMetadata(t *testing.T, pool *pgxpool.Pool, wantRepair bool) {
 	t.Helper()
 	var version, count, minimum int
-	if err := pool.QueryRow(t.Context(), schemaHistoryQuery).Scan(&version, &count, &minimum); err != nil || version != 12 || count != 12 || minimum != 1 {
-		t.Fatalf("schema history: version=%d count=%d minimum=%d, %v; want 1 through 12", version, count, minimum, err)
+	if err := pool.QueryRow(t.Context(), schemaHistoryQuery).Scan(&version, &count, &minimum); err != nil || version != currentSchemaVersion || count != currentSchemaVersion || minimum != 1 {
+		t.Fatalf("schema history: version=%d count=%d minimum=%d, %v; want 1 through %d", version, count, minimum, err, currentSchemaVersion)
 	}
 	var repairTable bool
 	var columnType string
@@ -252,6 +252,13 @@ func TestM2DatabasePairsAndNewSourceNetworkReads(t *testing.T) {
 				t.Fatalf("new-source response: %d, %v", response.StatusCode, err)
 			}
 			state, exists := envelope.Sources[source]
+			if source == SensorPantai {
+				// Sensor Pantai has a real coastal poll endpoint; only Satelit stays unconfigured.
+				if !exists || (state.ErrorCategory != nil && *state.ErrorCategory == "source_not_configured") {
+					t.Fatalf("coastal freshness must come from poll state: %+v", state)
+				}
+				continue
+			}
 			if !exists || !state.HasCachedData || state.Status != "stale" || state.ErrorCategory == nil || *state.ErrorCategory != "source_not_configured" || state.LastSuccessfulPoll != nil || len(state.Endpoints) != 0 {
 				t.Fatalf("invented/missing freshness: %+v", state)
 			}

@@ -133,10 +133,15 @@ func (session *consumerSession) close() {
 }
 
 func (worker *consumer) declareTopology(ctx context.Context, channel *amqp.Channel) error {
+	priorityQueue := amqp.Table{"x-queue-type": "quorum", "x-max-priority": int32(10)}
 	quorum := amqp.Table{"x-queue-type": "quorum"}
 	for _, name := range []string{worker.cfg.Queue, worker.cfg.Queue + ".failed"} {
+		args := priorityQueue
+		if name != worker.cfg.Queue {
+			args = quorum
+		}
 		finish := amqplog.Start(ctx, worker.logger, "queue_declare")
-		_, err := channel.QueueDeclare(name, true, false, false, false, quorum)
+		_, err := channel.QueueDeclare(name, true, false, false, false, args)
 		finish(err)
 		if err != nil {
 			return err

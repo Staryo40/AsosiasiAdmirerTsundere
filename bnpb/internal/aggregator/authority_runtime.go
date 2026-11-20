@@ -18,7 +18,7 @@ func (app application) ownerWorkers(ctx context.Context, cfg Config, logger *slo
 		return nil, err
 	}
 	if !routed {
-		return append(app.pollWorkers(cfg, logger), dispatch), nil
+		return append(app.pollWorkers(cfg, logger), app.pantaiWorker(cfg, app.pantai, logger), dispatch), nil
 	}
 	stores := []*Store{app.store, app.store.shards[0], app.store.shards[1], app.store.shards[2]}
 	authorityPools := make([]*pgxpool.Pool, 0, len(stores))
@@ -44,7 +44,7 @@ func (app application) ownerWorkers(ctx context.Context, cfg Config, logger *slo
 		return nil, err
 	}
 	app.store.authority = authority
-	activeWorkers := append(app.pollWorkers(cfg, logger), dispatch)
+	activeWorkers := append(app.pollWorkers(cfg, logger), app.pantaiWorker(cfg, app.pantai, logger), dispatch)
 	return []func(context.Context){func(ctx context.Context) {
 		retryAuthorityRun(ctx, func(ctx context.Context) error {
 			return authority.run(ctx, activeWorkers...)

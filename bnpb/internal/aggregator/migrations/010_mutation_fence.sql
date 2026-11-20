@@ -124,4 +124,4 @@ CREATE TRIGGER outbox_truncate_fence BEFORE TRUNCATE ON outbox
 CREATE TRIGGER handled_inputs_truncate_fence BEFORE TRUNCATE ON handled_inputs
     FOR EACH STATEMENT EXECUTE FUNCTION require_mutation_authority();
 
-INSERT INTO schema_migrations (version) VALUES (9);
+INSERT INTO schema_migrations (version) VALUES (10);

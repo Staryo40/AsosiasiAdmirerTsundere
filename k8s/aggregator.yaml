@@ -1,0 +1,123 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: aggregator
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: aggregator
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: aggregator
+        role: aggregator
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8083"
+        prometheus.io/path: "/metrics"
+    spec:
+      terminationGracePeriodSeconds: 30
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          # ScheduleAnyway: a lost node must not block replacement replicas.
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: aggregator
+      containers:
+        - name: aggregator
+          image: aat/bnpb-aggregator
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8083
+          envFrom:
+            - configMapRef:
+                name: bnpb-common
+            - configMapRef:
+                name: aggregator-config
+          env:
+            - name: POSTGRES_USER
+              valueFrom:
+                configMapKeyRef: {name: bnpb-identities, key: POSTGRES_USER}
+            - name: POSTGRES_DB
+              valueFrom:
+                configMapKeyRef: {name: bnpb-identities, key: POSTGRES_DB}
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: bnpb-secrets, key: POSTGRES_PASSWORD}
+            - name: BNPB_CANONICAL_DATABASE_URL
+              value: postgres://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@postgres:5432/$(POSTGRES_DB)?sslmode=disable
+            - name: AMQP_PUBLISHER_USER
+              valueFrom:
+                configMapKeyRef: {name: bnpb-identities, key: BNPB_RABBITMQ_PUBLISHER_USER}
+            - name: AMQP_PUBLISHER_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: bnpb-secrets, key: BNPB_RABBITMQ_PUBLISHER_PASSWORD}
+            - name: BNPB_AMQP_URL
+              value: amqp://$(AMQP_PUBLISHER_USER):$(AMQP_PUBLISHER_PASSWORD)@rabbitmq:5672
+            - name: BNPB_BMKG_API_KEY
+              valueFrom:
+                secretKeyRef: {name: bnpb-secrets, key: BMKG_API_KEY}
+            - name: BNPB_PVMBG_READER_CLIENT_ID
+              valueFrom:
+                configMapKeyRef: {name: bnpb-identities, key: BNPB_PVMBG_READER_CLIENT_ID}
+            - name: BNPB_PVMBG_READER_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef: {name: bnpb-secrets, key: PVMBG_READER_CLIENT_SECRET}
+            - name: BNPB_AGGREGATOR_INTERNAL_KEY
+              valueFrom:
+                secretKeyRef: {name: bnpb-secrets, key: BNPB_AGGREGATOR_INTERNAL_KEY}
+            - name: BNPB_PANTAI_AUTH_TOKEN
+              valueFrom:
+                secretKeyRef: {name: pantai-token, key: token}
+          resources:
+            requests: {memory: 256Mi}
+            limits: {memory: 512Mi}
+          # /ready fails when the Canonical Store is unreachable, so the Service
+          # stops routing to that replica (P2.1).
+          readinessProbe:
+            httpGet: {path: /ready, port: http}
+            periodSeconds: 3
+            failureThreshold: 2
+          livenessProbe:
+            httpGet: {path: /health, port: http}
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          lifecycle:
+            # Endpoint removal propagates asynchronously; keep serving briefly so
+            # rolling updates drop no in-flight requests.
+            preStop:
+              sleep:
+                seconds: 5
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: aggregator
+spec:
+  type: NodePort
+  selector:
+    app.kubernetes.io/name: aggregator
+  ports:
+    - name: http
+      port: 8083
+      targetPort: http
+      nodePort: 30083
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: aggregator
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: aggregator

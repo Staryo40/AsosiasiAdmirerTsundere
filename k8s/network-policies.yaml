@@ -1,0 +1,62 @@
+# Platform.8: a storage is reachable only by its owning service. Selecting a
+# pod in a policy denies every ingress not listed, including other namespaces.
+# Only store and broker pods are selected, so the Tester Agent and the mocks'
+# admin endpoints stay reachable (TA.2).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: postgres-owned-by-aggregator
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: postgres
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: aggregator
+      ports:
+        - port: 5432
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: rabbitmq-clients-only
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: rabbitmq
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchExpressions:
+              - key: app.kubernetes.io/name
+                operator: In
+                values: [aggregator, consumer-1, consumer-2, consumer-3, broker-init]
+      ports:
+        - port: 5672
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: broker-init
+      ports:
+        - port: 15672
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: sensor-pantai-aggregator-only
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: sensor-pantai
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: aggregator
+      ports:
+        - port: 8080

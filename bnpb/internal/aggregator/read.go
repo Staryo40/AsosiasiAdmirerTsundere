@@ -33,7 +33,7 @@ type readErrorEnvelope struct {
 	AsOf    *time.Time             `json:"as_of,omitempty"`
 }
 
-func registerSnapshotRoutes(mux *http.ServeMux, store *Store, cfg Config, writeTimeout time.Duration) {
+func registerSnapshotRoutes(mux *http.ServeMux, store *Store, cfg Config, writeTimeout time.Duration) snapshotAPI {
 	api := snapshotAPI{store: store, cfg: cfg, slots: make(chan struct{}, cfg.ReadMaxInFlight)}
 	mux.Handle("GET /internal/hazards", api.authenticate(http.HandlerFunc(api.list)))
 	mux.Handle("GET /internal/hazards/{hazard_id}", api.authenticate(http.HandlerFunc(api.detail)))
@@ -41,6 +41,7 @@ func registerSnapshotRoutes(mux *http.ServeMux, store *Store, cfg Config, writeT
 	analytics.slots = make(chan struct{}, 1)
 	analytics.analyticsBudget = analyticsReadBudget(cfg, writeTimeout)
 	mux.Handle("GET /internal/analytics", analytics.authenticate(http.HandlerFunc(analytics.analytics)))
+	return api
 }
 
 func (api snapshotAPI) authenticate(next http.Handler) http.Handler {

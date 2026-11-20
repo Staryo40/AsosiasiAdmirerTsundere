@@ -326,7 +326,7 @@ func readFreshness(ctx context.Context, tx pgx.Tx, selected []Source, cfg Config
 	}
 	sources := make(map[Source]sourceState, len(selected))
 	for _, source := range selected {
-		if source == Satelit || source == SensorPantai {
+		if source == Satelit {
 			state, err := readUnconfiguredSource(ctx, tx, source)
 			if err != nil {
 				return nil, asOf, err
@@ -350,7 +350,7 @@ func readEndpointSnapshots(ctx context.Context, tx pgx.Tx, selected []Source) (m
 	rows, err := tx.Query(ctx, `SELECT endpoint, source, last_successful_poll, stale_since, last_attempt_at,
         error_category, EXISTS (SELECT 1 FROM hazard_events h WHERE h.source = p.source)
         FROM poll_state p WHERE source = ANY($1::text[])
-        ORDER BY CASE endpoint WHEN 'seismic' THEN 1 WHEN 'warnings' THEN 2 ELSE 3 END`, names)
+        ORDER BY CASE endpoint WHEN 'seismic' THEN 1 WHEN 'warnings' THEN 2 WHEN 'coastal' THEN 3 ELSE 4 END`, names)
 	if err != nil {
 		return nil, storeError("read poll state", err)
 	}
@@ -376,6 +376,8 @@ func sourceEndpoints(source Source) []Endpoint {
 		return []Endpoint{SeismicEndpoint, WarningEndpoint}
 	case PVMBG:
 		return []Endpoint{VolcanicEndpoint}
+	case SensorPantai:
+		return []Endpoint{CoastalEndpoint}
 	default:
 		return nil
 	}

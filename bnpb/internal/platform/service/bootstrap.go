@@ -71,6 +71,7 @@ func runApplication(ctx context.Context, options applicationOptions, initialize 
 	cfg, logger := options.cfg, options.logger
 	mux := http.NewServeMux()
 	httpserver.RegisterHealth(mux, options.service)
+	httpserver.RegisterMetrics(mux, options.service)
 	shutdown, err := initialize(ctx, mux, cfg, logger)
 	if err != nil || ctx.Err() != nil {
 		startupErr := errors.Join(err, ctx.Err())

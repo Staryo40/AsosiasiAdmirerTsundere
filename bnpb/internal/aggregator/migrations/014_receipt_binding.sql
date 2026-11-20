@@ -21,4 +21,4 @@ CREATE TRIGGER receipt_bindings_immutable BEFORE UPDATE OR DELETE ON receipt_bin
 CREATE TRIGGER receipt_bindings_no_truncate BEFORE TRUNCATE ON receipt_bindings
     FOR EACH STATEMENT EXECUTE FUNCTION prevent_receipt_binding_mutation();
 
-INSERT INTO schema_migrations (version) VALUES (13);
+INSERT INTO schema_migrations (version) VALUES (14);

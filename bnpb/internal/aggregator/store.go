@@ -28,37 +28,40 @@ var snapshotIndexSchema string
 //go:embed migrations/004_outbox_sequence.sql
 var outboxSequenceSchema string
 
-//go:embed migrations/005_canonical_enums.sql
+//go:embed migrations/005_coastal.sql
+var coastalSchema string
+
+//go:embed migrations/006_canonical_enums.sql
 var m2EnumSchema string
 
-//go:embed migrations/006_shards.sql
+//go:embed migrations/007_shards.sql
 var shardSchema string
 
-//go:embed migrations/007_placement_guards.sql
+//go:embed migrations/008_placement_guards.sql
 var placementGuardSchema string
 
-//go:embed migrations/008_handled_inputs.sql
+//go:embed migrations/009_handled_inputs.sql
 var handledInputsSchema string
 
-//go:embed migrations/009_mutation_fence.sql
+//go:embed migrations/010_mutation_fence.sql
 var mutationFenceSchema string
 
-//go:embed migrations/010_audit_indexes.sql
+//go:embed migrations/011_audit_indexes.sql
 var auditIndexSchema string
 
-//go:embed migrations/011_poll_receipts.sql
+//go:embed migrations/012_poll_receipts.sql
 var pollReceiptSchema string
 
-//go:embed migrations/012_live_mutation_generation.sql
+//go:embed migrations/013_live_mutation_generation.sql
 var liveMutationGenerationSchema string
 
-//go:embed migrations/013_shard_repair.sql
+//go:embed migrations/014_shard_repair.sql
 var shardRepairSchema string
 
-//go:embed migrations/013_receipt_binding.sql
+//go:embed migrations/014_receipt_binding.sql
 var receiptBindingSchema string
 
-const currentSchemaVersion = 13
+const currentSchemaVersion = 14
 
 const schemaHistoryQuery = `SELECT COALESCE(max(version), 0), count(*),
     COALESCE(min(version), 0) FROM schema_migrations`
@@ -76,6 +79,9 @@ type Store struct {
 	storeIdentity             storeIdentity
 	startupUnverified         atomic.Bool
 	physicalCopies            []*pgxpool.Pool
+	coastalStale              time.Duration
+	coastal                   coastalIngest
+	pantaiClient              *pantaiClient
 }
 
 func OpenStore(ctx context.Context, cfg Config, logger *slog.Logger) (*Store, error) {
@@ -174,7 +180,7 @@ func openStore(ctx context.Context, cfg Config, logger *slog.Logger, identity st
 		identity.shardID = &expectedShard
 	}
 	store := &Store{readTimeout: cfg.DBReadTimeout, writeTimeout: cfg.DBWriteTimeout,
-		chunkRecords: cfg.IngestChunkRecords, maxBytes: cfg.MaxResponseBytes, storeIdentity: identity}
+		chunkRecords: cfg.IngestChunkRecords, maxBytes: cfg.MaxResponseBytes, coastalStale: cfg.SourceStaleAfter, storeIdentity: identity}
 	connect := func(address string, maximum int) (*pgxpool.Pool, error) {
 		connectCtx, cancel := context.WithTimeout(ctx, cfg.DBWriteTimeout)
 		defer cancel()
@@ -392,9 +398,9 @@ func applyPendingMigrations(ctx context.Context, tx pgx.Tx, version int) error {
 		version int
 		sql     string
 	}{{2, outboxIdentitySchema}, {3, snapshotIndexSchema}, {4, outboxSequenceSchema},
-		{5, m2EnumSchema}, {6, shardSchema}, {7, placementGuardSchema}, {8, handledInputsSchema},
-		{9, mutationFenceSchema}, {10, auditIndexSchema}, {11, pollReceiptSchema}, {12, liveMutationGenerationSchema},
-		{13, receiptBindingSchema}} {
+		{5, coastalSchema}, {6, m2EnumSchema}, {7, shardSchema}, {8, placementGuardSchema}, {9, handledInputsSchema},
+		{10, mutationFenceSchema}, {11, auditIndexSchema}, {12, pollReceiptSchema}, {13, liveMutationGenerationSchema},
+		{14, receiptBindingSchema}} {
 		if version < migration.version {
 			if _, err := tx.Exec(ctx, migration.sql); err != nil {
 				return err
