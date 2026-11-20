@@ -26,7 +26,7 @@ func timerName(domain string, epoch, seq uint64) string {
 func timerArguments(executable, stateDir, domain string, epoch, seq uint64, hardDeadline int64) []string {
 	unit := strings.TrimSuffix(timerName(domain, epoch, seq), ".timer")
 	fenceAt := hardDeadline - int64(FenceLead)
-	return []string{"--unit=" + unit, "--on-boot=" + time.Duration(fenceAt).String(), "--timer-property=WakeSystem=yes", "--timer-property=AccuracySec=1s", "--timer-property=RandomizedDelaySec=0", "--", executable, "fence-expire", "--state-dir", stateDir, "--domain", domain, "--epoch", fmt.Sprint(epoch), "--seq", fmt.Sprint(seq)}
+	return []string{"--unit=" + unit, "--on-boot=" + time.Duration(fenceAt).String(), "--timer-property=WakeSystem=yes", "--timer-property=AccuracySec=1s", "--timer-property=RandomizedDelaySec=0", "--property=Restart=on-failure", "--", executable, "fence-expire", "--state-dir", stateDir, "--domain", domain, "--epoch", fmt.Sprint(epoch), "--seq", fmt.Sprint(seq)}
 }
 
 const (
@@ -39,6 +39,9 @@ const (
 var domainPattern = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 
 var errRevokeIdentityConflict = errors.New("revoke identity does not match active grant")
+var errDurableStateUnavailable = errors.New("durable host state is unavailable")
+var errDomainPersistence = errors.New("could not persist domain state")
+var errGrantExpiring = errors.New("expired grant requires a new epoch")
 
 type Grant struct {
 	DomainUUID     string `json:"domain_uuid"`
@@ -65,12 +68,13 @@ const (
 )
 
 type domainState struct {
-	HighEpoch       uint64 `json:"high_epoch"`
-	HighSeq         uint64 `json:"high_seq"`
-	Owner           string `json:"owner,omitempty"`
-	OwnerDomainUUID string `json:"owner_domain_uuid,omitempty"`
-	Closed          bool   `json:"closed"`
-	Grant           *Grant `json:"grant,omitempty"`
+	HighEpoch       uint64     `json:"high_epoch"`
+	HighSeq         uint64     `json:"high_seq"`
+	Owner           string     `json:"owner,omitempty"`
+	OwnerDomainUUID string     `json:"owner_domain_uuid,omitempty"`
+	Closed          bool       `json:"closed"`
+	Closing         RevokeMode `json:"closing,omitempty"`
+	Grant           *Grant     `json:"grant,omitempty"`
 }
 
 type diskState struct {
@@ -84,12 +88,13 @@ type hostOps interface {
 	arm(context.Context, string, string, uint64, uint64, int64) error
 	timerArmed(context.Context, string, uint64, uint64) (bool, error)
 	fence(context.Context, string) error
+	closeGuard(context.Context, GuardTarget, Identity) error
 	lockState(context.Context, string) (func(), error)
 	persistState(string, diskState) error
 }
 
 type Host struct {
-	mu       sync.Mutex
+	mu       sync.Mutex // Protects the in-process high-water cache while the state file lock is held.
 	stateDir string
 	token    []byte
 	domains  map[string]struct{}
@@ -149,32 +154,18 @@ func openWithOps(stateDir, token string, domains []string, ops hostOps, configur
 	if state.BootID == "" || state.BootID != bootID {
 		return nil, errors.New("missing or changed host boot ID; explicit fail-closed recovery required")
 	}
+	h.state = state
 	for domain, record := range state.Domains {
 		if _, ok := allow[domain]; !ok {
 			return nil, errors.New("state contains a non-allowlisted domain")
 		}
-		if record.Closed || record.Grant == nil {
+		if record.Grant == nil {
 			continue
 		}
-		now, clockErr := ops.boottimeNS()
-		if clockErr != nil {
-			return nil, errors.New("host boottime unavailable")
-		}
-		armed, timerErr := ops.timerArmed(context.Background(), domain, record.HighEpoch, record.HighSeq)
-		if record.Grant.DeadlineBootNS > now && timerErr == nil && armed {
-			continue
-		}
-		if err := ops.fence(context.Background(), domain); err != nil {
-			return nil, errors.New("fail-closed startup fence failed")
-		}
-		record.Grant = nil
-		record.Closed = true
-		state.Domains[domain] = record
-		if err := ops.persistState(stateDir, state); err != nil {
-			return nil, errors.New("persist fail-closed startup fence")
+		if err := h.checkStartupGrant(domain); err != nil {
+			return nil, err
 		}
 	}
-	h.state = state
 	return h, nil
 }
 
@@ -199,10 +190,12 @@ func readState(path string) (diskState, error) {
 		if !domainPattern.MatchString(domain) || domain != strings.ToLower(domain) || record.HighEpoch == 0 && record.HighSeq != 0 || record.HighEpoch != 0 && record.HighSeq == 0 {
 			return diskState{}, errors.New("durable lease high-water state is invalid")
 		}
-		if record.Closed && record.Grant != nil || !record.Closed && record.HighEpoch > 0 && record.Grant == nil {
-			return diskState{}, errors.New("durable lease state has an invalid closed/grant combination")
+		if record.Closed && (record.Closing != "" || record.Grant != nil) ||
+			record.Closing != "" && (record.Closing != RevokeGraceful && record.Closing != RevokeTakeover || record.HighEpoch == 0 || record.Grant == nil) ||
+			!record.Closed && record.HighEpoch > 0 && record.Grant == nil {
+			return diskState{}, errors.New("durable lease state has an invalid closure/grant combination")
 		}
-		if record.Grant != nil && (record.Grant.DomainUUID != domain || record.Grant.Epoch != record.HighEpoch || record.Grant.RenewalSeq != record.HighSeq || record.Grant.HostBootID != state.BootID || record.Owner == "" || record.OwnerDomainUUID == "" || record.Grant.DeadlineBootNS <= 0) {
+		if record.Grant != nil && (record.Grant.DomainUUID != domain || record.Grant.Epoch != record.HighEpoch || record.Grant.RenewalSeq != record.HighSeq || record.Grant.HostBootID != state.BootID || record.Owner == "" || !domainPattern.MatchString(record.OwnerDomainUUID) || record.Grant.DeadlineBootNS <= 0) {
 			return diskState{}, errors.New("durable grant identity does not match its high-water state")
 		}
 	}
@@ -281,42 +274,151 @@ func persistStateWithDirectorySync(dir string, state diskState, syncDir func(str
 	return syncDir(dir)
 }
 
-func (h *Host) save(next diskState) error {
-	if err := h.ops.persistState(h.stateDir, next); err != nil {
-		return err
+func (h *Host) lockDomain(ctx context.Context, domain string) (func(), error) {
+	return h.ops.lockState(ctx, filepath.Join(h.stateDir, "domain-"+domain+".lock"))
+}
+
+func (h *Host) lockLeaseState(ctx context.Context) (func(), error) {
+	unlock, err := h.ops.lockState(ctx, filepath.Join(h.stateDir, "lease-state.lock"))
+	if err != nil {
+		return nil, err
 	}
-	h.state = next
-	return nil
+	h.mu.Lock()
+	if err := h.refreshState(); err != nil {
+		h.mu.Unlock()
+		unlock()
+		return nil, err
+	}
+	return func() {
+		h.mu.Unlock()
+		unlock()
+	}, nil
 }
 
 func (h *Host) refreshState() error {
 	state, err := readState(filepath.Join(h.stateDir, "lease-state.json"))
 	if err != nil {
-		return err
+		return fmt.Errorf("%w: %w", errDurableStateUnavailable, err)
 	}
-	if state.BootID != h.state.BootID {
-		return errors.New("host boot ID changed; fail-closed recovery required")
+	if h.state.BootID != "" && state.BootID != h.state.BootID {
+		return fmt.Errorf("%w: host boot ID changed; fail-closed recovery required", errDurableStateUnavailable)
 	}
 	for domain, previous := range h.state.Domains {
 		current, ok := state.Domains[domain]
 		if !ok || current.HighEpoch < previous.HighEpoch || current.HighEpoch == previous.HighEpoch && current.HighSeq < previous.HighSeq {
-			return errors.New("durable lease high-water state regressed")
+			return fmt.Errorf("%w: lease high-water state regressed", errDurableStateUnavailable)
 		}
-		if previous.Closed && current.HighEpoch == previous.HighEpoch && !current.Closed {
-			return errors.New("closed grant was reopened")
+		if current.HighEpoch == previous.HighEpoch && (previous.Closed && !current.Closed ||
+			previous.Closing != "" && (current.HighSeq != previous.HighSeq || current.Closing == "" && !current.Closed) ||
+			previous.Closing == RevokeTakeover && current.Closing == RevokeGraceful) {
+			return fmt.Errorf("%w: closing grant was reopened", errDurableStateUnavailable)
 		}
 	}
 	h.state = state
 	return nil
 }
 
-func (h *Host) failClosedGrant(ctx context.Context, domain string, record domainState) error {
-	if err := h.ops.fence(ctx, domain); err != nil {
+func (h *Host) readDomain(ctx context.Context, domain string) (string, domainState, error) {
+	unlock, err := h.lockLeaseState(ctx)
+	if err != nil {
+		return "", domainState{}, err
+	}
+	defer unlock()
+	return h.state.BootID, h.state.Domains[domain], nil
+}
+
+// The domain lock keeps the target record stable across I/O. Reload siblings
+// while holding the state lock so their commits are not overwritten.
+func (h *Host) writeDomain(ctx context.Context, domain string, record domainState) error {
+	unlock, err := h.lockLeaseState(ctx)
+	if err != nil {
 		return err
 	}
-	next := cloneState(h.state)
-	next.Domains[domain] = domainState{HighEpoch: record.HighEpoch, HighSeq: record.HighSeq, Owner: record.Owner, OwnerDomainUUID: record.OwnerDomainUUID, Closed: true}
-	return h.save(next)
+	defer unlock()
+	return h.saveDomainLocked(domain, record)
+}
+
+func (h *Host) recordGrant(ctx context.Context, domain string, record domainState) error {
+	unlock, err := h.lockLeaseState(ctx)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	if current := h.state.Domains[domain]; current.Grant != nil {
+		now, err := h.ops.boottimeNS()
+		if err != nil || current.Grant.DeadlineBootNS-int64(FenceLead) <= now {
+			return errGrantExpiring
+		}
+	}
+	return h.saveDomainLocked(domain, record)
+}
+
+func (h *Host) saveDomainLocked(domain string, record domainState) error {
+	previous, existed := h.state.Domains[domain]
+	h.state.Domains[domain] = record
+	if err := h.ops.persistState(h.stateDir, h.state); err != nil {
+		if existed {
+			h.state.Domains[domain] = previous
+		} else {
+			delete(h.state.Domains, domain)
+		}
+		return fmt.Errorf("%w: %w", errDomainPersistence, err)
+	}
+	return nil
+}
+
+func (h *Host) markClosing(ctx context.Context, domain string, record domainState, mode RevokeMode) error {
+	if record.Closing == RevokeTakeover || record.Closing == mode {
+		return nil
+	}
+	record.Closing = mode
+	return h.writeDomain(ctx, domain, record)
+}
+
+func (h *Host) finishClosing(ctx context.Context, domain string, record domainState) error {
+	record.Closing = ""
+	record.Closed = true
+	record.Grant = nil
+	return h.writeDomain(ctx, domain, record)
+}
+
+func (h *Host) failClosedGrant(ctx context.Context, domain string, record domainState) error {
+	fenceCtx, cancel := closureContext(ctx)
+	defer cancel()
+	markErr := h.markClosing(fenceCtx, domain, record, RevokeTakeover)
+	if err := h.fenceGrantDomains(fenceCtx, domain, record.OwnerDomainUUID); err != nil {
+		return errors.Join(markErr, err)
+	}
+	if markErr != nil {
+		return markErr
+	}
+	return h.finishClosing(fenceCtx, domain, record)
+}
+
+func (h *Host) checkStartupGrant(domain string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), expiryBudget)
+	defer cancel()
+	unlock, err := h.lockDomain(ctx, domain)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	_, record, err := h.readDomain(ctx, domain)
+	if err != nil || record.Grant == nil {
+		return err
+	}
+	if record.Closing != "" {
+		return h.closeExpiredGrant(ctx, domain, record)
+	}
+	now, err := h.ops.boottimeNS()
+	if err != nil {
+		return errors.New("host boottime unavailable")
+	}
+	armed, timerErr := h.ops.timerArmed(ctx, domain, record.HighEpoch, record.HighSeq)
+	if record.Grant.DeadlineBootNS > now && timerErr == nil && armed {
+		return nil
+	}
+	return h.failClosedGrant(ctx, domain, record)
 }
 
 func (h *Host) timerReady(ctx context.Context, domain string, epoch, seq uint64, deadline int64) error {
@@ -376,22 +478,24 @@ func (h *Host) createGrant(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid grant request")
 		return
 	}
-	h.mu.Lock()
-	defer h.mu.Unlock()
+	domain := strings.ToLower(request.DomainUUID)
 	ctx, cancel := context.WithTimeout(r.Context(), operationLimit)
 	defer cancel()
-	unlock, err := h.ops.lockState(ctx, h.stateDir)
+	unlock, err := h.lockDomain(ctx, domain)
 	if err != nil {
 		writeError(w, http.StatusServiceUnavailable, "durable host state is unavailable")
 		return
 	}
 	defer unlock()
-	if err := h.refreshState(); err != nil {
+	bootID, current, err := h.readDomain(ctx, domain)
+	if err != nil {
 		writeError(w, http.StatusServiceUnavailable, "durable host state is unavailable")
 		return
 	}
-	domain := strings.ToLower(request.DomainUUID)
-	current := h.state.Domains[domain]
+	if current.Closing != "" {
+		writeError(w, http.StatusConflict, "previous grant is closing")
+		return
+	}
 	ownerDomain := strings.ToLower(request.OwnerDomainUUID)
 	if request.Epoch < current.HighEpoch || request.Epoch == current.HighEpoch && request.RenewalSeq < current.HighSeq {
 		writeError(w, http.StatusConflict, "stale grant")
@@ -403,9 +507,15 @@ func (h *Host) createGrant(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		now, clockErr := h.ops.boottimeNS()
+		if clockErr != nil || current.Grant.DeadlineBootNS-int64(FenceLead) <= now {
+			writeError(w, http.StatusServiceUnavailable, "grant is expiring")
+			return
+		}
 		armed, timerErr := h.ops.timerArmed(ctx, domain, current.HighEpoch, current.HighSeq)
-		if clockErr != nil || current.Grant.DeadlineBootNS-int64(FenceLead) <= now || timerErr != nil || !armed {
-			_ = h.failClosedGrant(ctx, domain, current)
+		if timerErr != nil || !armed {
+			if ctx.Err() == nil {
+				_ = h.failClosedGrant(ctx, domain, current)
+			}
 			writeError(w, http.StatusServiceUnavailable, "grant timer is unavailable")
 			return
 		}
@@ -433,7 +543,7 @@ func (h *Host) createGrant(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	deadline := now + int64(LeaseTTL)
-	grant := &Grant{DomainUUID: domain, HostBootID: h.state.BootID, Epoch: request.Epoch, RenewalSeq: request.RenewalSeq, DeadlineBootNS: deadline, Owner: request.Owner}
+	grant := &Grant{DomainUUID: domain, HostBootID: bootID, Epoch: request.Epoch, RenewalSeq: request.RenewalSeq, DeadlineBootNS: deadline, Owner: request.Owner}
 	if err := h.ops.arm(ctx, h.stateDir, domain, grant.Epoch, grant.RenewalSeq, deadline); err != nil {
 		writeError(w, http.StatusServiceUnavailable, "independent fence timer could not be armed")
 		return
@@ -442,15 +552,22 @@ func (h *Host) createGrant(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "independent fence timer is not safely armed")
 		return
 	}
-	next := cloneState(h.state)
-	next.Domains[domain] = domainState{HighEpoch: grant.Epoch, HighSeq: grant.RenewalSeq, Owner: request.Owner, OwnerDomainUUID: ownerDomain, Grant: grant}
-	if err := h.save(next); err != nil {
-		_ = h.failClosedGrant(ctx, domain, next.Domains[domain])
+	next := domainState{HighEpoch: grant.Epoch, HighSeq: grant.RenewalSeq, Owner: request.Owner, OwnerDomainUUID: ownerDomain, Grant: grant}
+	if err := h.recordGrant(ctx, domain, next); err != nil {
+		if errors.Is(err, errGrantExpiring) {
+			writeError(w, http.StatusConflict, errGrantExpiring.Error())
+			return
+		}
+		if errors.Is(err, errDomainPersistence) {
+			_ = h.failClosedGrant(ctx, domain, next)
+		}
 		writeError(w, http.StatusServiceUnavailable, "grant could not be durably recorded")
 		return
 	}
 	if err := h.timerReady(ctx, domain, grant.Epoch, grant.RenewalSeq, deadline); err != nil {
-		_ = h.failClosedGrant(ctx, domain, next.Domains[domain])
+		if ctx.Err() == nil {
+			_ = h.failClosedGrant(ctx, domain, next)
+		}
 		writeError(w, http.StatusServiceUnavailable, "grant timer was lost before activation")
 		return
 	}
@@ -468,23 +585,25 @@ func (h *Host) getGrant(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "domain is not allowed")
 		return
 	}
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	lockCtx, cancel := context.WithTimeout(r.Context(), operationLimit)
+	ctx, cancel := context.WithTimeout(r.Context(), operationLimit)
 	defer cancel()
-	unlock, err := h.ops.lockState(lockCtx, h.stateDir)
+	unlock, err := h.lockDomain(ctx, domain)
 	if err != nil {
 		writeError(w, http.StatusServiceUnavailable, "durable host state is unavailable")
 		return
 	}
 	defer unlock()
-	if err := h.refreshState(); err != nil {
+	bootID, record, err := h.readDomain(ctx, domain)
+	if err != nil {
 		writeError(w, http.StatusServiceUnavailable, "durable host state is unavailable")
 		return
 	}
-	record, ok := h.state.Domains[domain]
-	if !ok || record.Closed || record.Grant == nil {
-		writeJSON(w, http.StatusNotFound, h.inactiveGrant(domain, record, "no active grant"))
+	if record.Closing != "" {
+		writeError(w, http.StatusServiceUnavailable, "grant closure is uncertain")
+		return
+	}
+	if record.Grant == nil {
+		writeJSON(w, http.StatusNotFound, inactiveGrant(bootID, domain, record, "no active grant"))
 		return
 	}
 	now, err := h.ops.boottimeNS()
@@ -493,16 +612,16 @@ func (h *Host) getGrant(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if record.Grant.DeadlineBootNS <= now {
-		writeJSON(w, http.StatusGone, h.inactiveGrant(domain, record, "grant expired"))
+		writeJSON(w, http.StatusGone, inactiveGrant(bootID, domain, record, "grant expired"))
 		return
 	}
-	armed, err := h.ops.timerArmed(r.Context(), domain, record.HighEpoch, record.HighSeq)
+	armed, err := h.ops.timerArmed(ctx, domain, record.HighEpoch, record.HighSeq)
 	if err != nil || !armed {
-		if fenceErr := h.failClosedGrant(r.Context(), domain, record); fenceErr != nil {
+		if ctx.Err() != nil || h.failClosedGrant(ctx, domain, record) != nil {
 			writeError(w, http.StatusServiceUnavailable, "grant timer state is unavailable and fail-closed fencing failed")
 			return
 		}
-		writeJSON(w, http.StatusGone, h.inactiveGrant(domain, record, "grant timer is not active"))
+		writeJSON(w, http.StatusGone, inactiveGrant(bootID, domain, record, "grant timer is not active"))
 		return
 	}
 	writeJSON(w, http.StatusOK, record.Grant)
@@ -517,11 +636,11 @@ type inactiveGrantResponse struct {
 	DeadlineBootTime int64  `json:"deadline_boottime_ns"`
 }
 
-func (h *Host) inactiveGrant(domain string, record domainState, message string) inactiveGrantResponse {
+func inactiveGrant(bootID, domain string, record domainState, message string) inactiveGrantResponse {
 	response := inactiveGrantResponse{Error: message}
 	if record.HighEpoch > 0 && record.HighSeq > 0 {
 		response.DomainUUID = domain
-		response.HostBootID = h.state.BootID
+		response.HostBootID = bootID
 		response.Epoch = record.HighEpoch
 		response.RenewalSeq = record.HighSeq
 		if record.Grant != nil {
@@ -552,20 +671,21 @@ func (h *Host) Revoke(ctx context.Context, identity Identity, mode RevokeMode) e
 	if !h.validIdentity(identity) || (mode != RevokeGraceful && mode != RevokeTakeover) {
 		return errors.New("invalid revoke request")
 	}
-	h.mu.Lock()
-	defer h.mu.Unlock()
+	domain := strings.ToLower(identity.DomainUUID)
 	lockCtx, cancel := context.WithTimeout(ctx, operationLimit)
 	defer cancel()
-	unlock, err := h.ops.lockState(lockCtx, h.stateDir)
+	unlock, err := h.lockDomain(lockCtx, domain)
 	if err != nil {
-		return failClosedWithoutState(ctx, h.ops, strings.ToLower(identity.DomainUUID), errors.New("durable host state is unavailable"))
+		return err
 	}
 	defer unlock()
-	if err := h.refreshState(); err != nil {
-		return failClosedWithoutState(ctx, h.ops, strings.ToLower(identity.DomainUUID), errors.New("durable host state is unavailable"))
+	_, current, err := h.readDomain(lockCtx, domain)
+	if errors.Is(err, errDurableStateUnavailable) {
+		return failClosedWithoutState(ctx, h.ops, domain, err)
 	}
-	domain := strings.ToLower(identity.DomainUUID)
-	current := h.state.Domains[domain]
+	if err != nil {
+		return err
+	}
 	exact := current.HighEpoch == identity.Epoch && current.HighSeq == identity.RenewalSeq && current.Owner == identity.Owner && current.OwnerDomainUUID == strings.ToLower(identity.OwnerDomainUUID)
 	if current.Closed && current.Grant == nil && exact {
 		return h.retireClosedGrant(ctx, domain, current)
@@ -573,32 +693,30 @@ func (h *Host) Revoke(ctx context.Context, identity Identity, mode RevokeMode) e
 	if !exact || current.Grant == nil || current.Closed {
 		return errRevokeIdentityConflict
 	}
-	guardErr := h.revokeResources(ctx, domain, identity)
-	if guardErr != nil {
-		fenceCtx, cancelFence := boundedContext(ctx)
-		if err := h.ops.fence(fenceCtx, domain); err != nil {
-			cancelFence()
-			return errors.New("guard closure is uncertain and domain fencing failed")
-		}
-		cancelFence()
+	if current.Closing == RevokeTakeover {
+		mode = RevokeTakeover
 	}
-	if mode == RevokeTakeover {
-		fenceCtx, cancelFence := boundedContext(ctx)
-		if err := h.ops.fence(fenceCtx, strings.ToLower(identity.OwnerDomainUUID)); err != nil {
-			cancelFence()
-			return errors.New("owner execution domain could not be fenced")
-		}
-		cancelFence()
-	}
-	next := cloneState(h.state)
-	next.Domains[domain] = domainState{HighEpoch: current.HighEpoch, HighSeq: current.HighSeq, Owner: current.Owner, OwnerDomainUUID: current.OwnerDomainUUID, Closed: true}
-	if err := h.save(next); err != nil {
-		return errors.New("closed grant could not be durably recorded")
-	}
-	if err := h.retireClosedGrant(ctx, domain, next.Domains[domain]); err != nil {
+	if err := h.markClosing(lockCtx, domain, current, mode); err != nil {
 		return err
 	}
-	return nil
+	identity.DomainUUID = domain
+	actionCtx, cancelAction := closureContext(ctx)
+	defer cancelAction()
+	return h.revokeClosingGrant(actionCtx, identity, current, mode)
+}
+
+func (h *Host) revokeClosingGrant(ctx context.Context, identity Identity, record domainState, mode RevokeMode) error {
+	if mode == RevokeTakeover {
+		if err := h.protectExpiredGrant(ctx, identity); err != nil {
+			return err
+		}
+	} else if err := h.closeGrantResource(ctx, identity); err != nil {
+		return err
+	}
+	if err := h.finishClosing(ctx, identity.DomainUUID, record); err != nil {
+		return err
+	}
+	return h.retireClosedGrant(ctx, identity.DomainUUID, record)
 }
 
 func (h *Host) retireClosedGrant(ctx context.Context, domain string, record domainState) error {
@@ -644,16 +762,4 @@ func writeJSON(w http.ResponseWriter, status int, payload any) {
 
 func writeError(w http.ResponseWriter, status int, message string) {
 	writeJSON(w, status, map[string]string{"error": message})
-}
-
-func cloneState(state diskState) diskState {
-	next := diskState{BootID: state.BootID, Domains: make(map[string]domainState, len(state.Domains))}
-	for domain, record := range state.Domains {
-		if record.Grant != nil {
-			grant := *record.Grant
-			record.Grant = &grant
-		}
-		next.Domains[domain] = record
-	}
-	return next
 }

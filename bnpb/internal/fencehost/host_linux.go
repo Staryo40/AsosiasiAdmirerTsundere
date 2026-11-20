@@ -11,17 +11,21 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
 	"golang.org/x/sys/unix"
 )
 
-func nativeStateLock(ctx context.Context, stateDir string) (func(), error) {
-	if err := os.MkdirAll(stateDir, 0700); err != nil {
+func (nativeOps) lockState(ctx context.Context, path string) (func(), error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 		return nil, fmt.Errorf("create host state directory: %w", err)
 	}
-	file, err := os.OpenFile(filepath.Join(stateDir, "lease-state.lock"), os.O_CREATE|os.O_RDWR, 0600)
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0600)
 	if err != nil {
 		return nil, fmt.Errorf("open host state lock: %w", err)
 	}
@@ -34,6 +38,10 @@ func nativeStateLock(ctx context.Context, stateDir string) (func(), error) {
 	for {
 		err = unix.Flock(int(file.Fd()), unix.LOCK_EX|unix.LOCK_NB)
 		if err == nil {
+			if err := ctx.Err(); err != nil {
+				_ = file.Close()
+				return nil, err
+			}
 			return func() {
 				_ = unix.Flock(int(file.Fd()), unix.LOCK_UN)
 				_ = file.Close()
@@ -50,14 +58,6 @@ func nativeStateLock(ctx context.Context, stateDir string) (func(), error) {
 		case <-ticker.C:
 		}
 	}
-}
-
-func readLockedState(stateDir string) (diskState, error) {
-	return readState(filepath.Join(stateDir, "lease-state.json"))
-}
-
-func (nativeOps) lockState(ctx context.Context, stateDir string) (func(), error) {
-	return nativeStateLock(ctx, stateDir)
 }
 
 func (nativeOps) persistState(stateDir string, state diskState) error {
@@ -162,83 +162,114 @@ func Expire(stateDir, domain string, epoch, seq uint64) error {
 	if !domainPattern.MatchString(domain) {
 		return errors.New("invalid expiry domain UUID")
 	}
-	failClosed := func(message string) error {
-		ctx, cancel := context.WithTimeout(context.Background(), nativeCommandBudget)
-		defer cancel()
-		if err := (nativeOps{}).fence(ctx, strings.ToLower(domain)); err != nil {
-			return errors.New(message + "; validated-domain fence failed")
-		}
-		return errors.New(message + "; domain fenced without changing high-water state")
+	host := &Host{stateDir: stateDir, ops: nativeOps{}, bindings: expiryBindings(stateDir)}
+	err := host.Expire(context.Background(), domain, epoch, seq)
+	if errors.Is(err, errStaleExpiry) {
+		// systemd retries failures, but this timer can no longer protect anything.
+		return nil
 	}
+	return err
+}
+
+func expiryBindings(stateDir string) map[string]DomainResources {
 	body, err := os.ReadFile(filepath.Join(stateDir, "resource-bindings.json"))
 	if err != nil {
-		return failClosed("persisted resource bindings are unavailable")
+		return nil
 	}
 	var bindings ResourceBindings
 	if json.Unmarshal(body, &bindings) != nil || len(bindings.Domains) == 0 {
-		return failClosed("persisted resource bindings are invalid")
+		return nil
 	}
 	allowed := make([]string, 0, len(bindings.Domains))
 	for _, binding := range bindings.Domains {
 		allowed = append(allowed, binding.DomainUUID)
 	}
 	if err := bindings.Validate(allowed); err != nil {
-		return failClosed("persisted resource bindings are invalid")
+		return nil
 	}
-	host := &Host{stateDir: stateDir, ops: nativeOps{}, bindings: map[string]DomainResources{}, domains: map[string]struct{}{}}
+	byDomain := make(map[string]DomainResources, len(bindings.Domains))
 	for _, binding := range bindings.Domains {
-		key := strings.ToLower(binding.DomainUUID)
-		host.bindings[key] = binding
-		host.domains[key] = struct{}{}
+		byDomain[strings.ToLower(binding.DomainUUID)] = binding
 	}
-	if _, ok := host.domains[strings.ToLower(domain)]; !ok {
-		return failClosed("timer domain is not configured")
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), nativeCommandBudget*2)
-	defer cancel()
-	return host.Expire(ctx, domain, epoch, seq)
+	return byDomain
 }
 
 func Recover(stateDir string, domains []string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), nativeCommandBudget)
 	defer cancel()
-	unlock, err := nativeStateLock(ctx, stateDir)
-	if err != nil {
-		return err
-	}
-	defer unlock()
-	state, err := readLockedState(stateDir)
-	if err != nil {
-		return err
-	}
-	ops := nativeOps{}
-	bootID, err := ops.bootID()
-	if err != nil {
-		return err
-	}
+	host := &Host{stateDir: stateDir, ops: nativeOps{}}
 	configured := make(map[string]struct{}, len(domains))
+	ordered := make([]string, 0, len(domains))
 	for _, domain := range domains {
 		if !domainPattern.MatchString(domain) {
 			return fmt.Errorf("invalid domain UUID %q", domain)
 		}
 		key := strings.ToLower(domain)
+		if _, seen := configured[key]; !seen {
+			ordered = append(ordered, key)
+		}
 		configured[key] = struct{}{}
-		if err := ops.fence(ctx, key); err != nil {
-			return fmt.Errorf("fail-closed recovery fence %s: %w", key, err)
+	}
+	sort.Strings(ordered)
+	for _, domain := range ordered {
+		unlock, err := host.lockDomain(ctx, domain)
+		if err != nil {
+			return err
+		}
+		defer unlock()
+	}
+	return host.recoverDomains(ctx, ordered, configured)
+}
+
+func (h *Host) recoverDomains(ctx context.Context, domains []string, configured map[string]struct{}) error {
+	// Every configured domain is already locked, so only the disk operations
+	// need the shared state lock.
+	unlock, err := h.lockLeaseState(ctx)
+	if err != nil {
+		return err
+	}
+	err = h.validateRecoveryDomains(configured)
+	unlock()
+	if err != nil {
+		return err
+	}
+	bootID, err := h.ops.bootID()
+	if err != nil {
+		return err
+	}
+	for _, domain := range domains {
+		if err := h.ops.fence(ctx, domain); err != nil {
+			return fmt.Errorf("fail-closed recovery fence %s: %w", domain, err)
 		}
 	}
-	for domain := range state.Domains {
+	return h.recordRecovery(ctx, configured, bootID)
+}
+
+func (h *Host) recordRecovery(ctx context.Context, configured map[string]struct{}, bootID string) error {
+	unlock, err := h.lockLeaseState(ctx)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	if err := h.validateRecoveryDomains(configured); err != nil {
+		return err
+	}
+	for domain := range configured {
+		record := h.state.Domains[domain]
+		record.Grant = nil
+		record.Closing = ""
+		record.Closed = true
+		h.state.Domains[domain] = record
+	}
+	h.state.BootID = bootID
+	return h.ops.persistState(h.stateDir, h.state)
+}
+
+func (h *Host) validateRecoveryDomains(configured map[string]struct{}) error {
+	for domain := range h.state.Domains {
 		if _, ok := configured[domain]; !ok {
 			return fmt.Errorf("recovery allowlist omits persisted domain %s", domain)
 		}
 	}
-	next := cloneState(state)
-	for domain := range configured {
-		record := next.Domains[domain]
-		record.Grant = nil
-		record.Closed = true
-		next.Domains[domain] = record
-	}
-	next.BootID = bootID
-	return persistState(stateDir, next)
+	return nil
 }

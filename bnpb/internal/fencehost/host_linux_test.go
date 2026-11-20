@@ -1,11 +1,44 @@
 package fencehost
 
 import (
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
+
+func TestNativeDomainLocksAreIndependentAcrossHostInstances(t *testing.T) {
+	dir := t.TempDir()
+	first := Host{stateDir: dir, ops: nativeOps{}}
+	second := Host{stateDir: dir, ops: nativeOps{}}
+	unlock, err := first.lockDomain(t.Context(), testDomain)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer unlock()
+
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	unlockSibling, err := second.lockDomain(ctx, testStorageDomain)
+	if err != nil {
+		t.Fatalf("sibling operation blocked on the wrong domain lock: %v", err)
+	}
+	unlockSibling()
+
+	contended, cancelContended := context.WithTimeout(t.Context(), 50*time.Millisecond)
+	defer cancelContended()
+	unlockContended, err := second.lockDomain(contended, testDomain)
+	if err == nil {
+		unlockContended()
+		t.Fatal("second host acquired the already locked domain")
+	}
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("unexpected lock error: %v", err)
+	}
+}
 
 func TestNativeFenceVerifiesShutOff(t *testing.T) {
 	const fakeVirsh = `#!/bin/sh

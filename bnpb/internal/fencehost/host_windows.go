@@ -7,16 +7,12 @@ import (
 	"errors"
 )
 
-func (nativeOps) lockState(ctx context.Context, stateDir string) (func(), error) {
-	return nativeStateLock(ctx, stateDir)
+func (nativeOps) lockState(context.Context, string) (func(), error) {
+	return nil, errors.New("host state serialization requires Linux flock")
 }
 
 func (nativeOps) persistState(stateDir string, state diskState) error {
 	return persistState(stateDir, state)
-}
-
-func nativeStateLock(context.Context, string) (func(), error) {
-	return nil, errors.New("host state serialization requires Linux flock")
 }
 
 func (nativeOps) bootID() (string, error)    { return "", errors.New("host fencing requires Linux") }

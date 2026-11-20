@@ -21,25 +21,41 @@ const (
 )
 
 type fakeOps struct {
-	boot          string
-	now           int64
-	nowErr        error
-	armed         []int64
-	fenced        []string
-	armErr        error
-	fenceFail     string
-	timerChecks   int
-	timerFailAt   int
-	timerErrorAt  int
-	stateLockOnce sync.Once
-	stateLock     chan struct{}
+	boot         string
+	now          int64
+	nowErr       error
+	armed        []int64
+	fenced       []string
+	armErr       error
+	fenceFail    string
+	timerChecks  int
+	timerFailAt  int
+	timerErrorAt int
+	lockMu       sync.Mutex
+	locks        map[string]chan struct{}
 }
 
-func (f *fakeOps) lockState(ctx context.Context, _ string) (func(), error) {
-	f.stateLockOnce.Do(func() { f.stateLock = make(chan struct{}, 1) })
+func (f *fakeOps) lockState(ctx context.Context, path string) (func(), error) {
+	f.lockMu.Lock()
+	if f.locks == nil {
+		f.locks = make(map[string]chan struct{})
+	}
+	lock := f.locks[path]
+	if lock == nil {
+		lock = make(chan struct{}, 1)
+		f.locks[path] = lock
+	}
+	f.lockMu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	select {
-	case f.stateLock <- struct{}{}:
-		return func() { <-f.stateLock }, nil
+	case lock <- struct{}{}:
+		if err := ctx.Err(); err != nil {
+			<-lock
+			return nil, err
+		}
+		return func() { <-lock }, nil
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	}
@@ -74,6 +90,10 @@ func (f *fakeOps) fence(_ context.Context, domain string) error {
 		return errors.New("fence result is unknown")
 	}
 	return nil
+}
+
+func (*fakeOps) closeGuard(ctx context.Context, target GuardTarget, identity Identity) error {
+	return (nativeOps{}).closeGuard(ctx, target, identity)
 }
 
 func initializedHost(t *testing.T, ops *fakeOps) *Host {
@@ -514,7 +534,7 @@ func TestTimerArgumentsArmIndependentWakeSystemFence(t *testing.T) {
 	// A 20-second lease gets an independent fence timer with a 10-second lead.
 	deadline := int64(20 * time.Second)
 	got := timerArguments("/usr/local/bin/fence-host", "/var/lib/fence-host", testDomain, 11, 3, deadline)
-	want := []string{"--unit=bnpb-fence-12345678123412341234123456789abc-11-3", "--on-boot=10s", "--timer-property=WakeSystem=yes", "--timer-property=AccuracySec=1s", "--timer-property=RandomizedDelaySec=0", "--", "/usr/local/bin/fence-host", "fence-expire", "--state-dir", "/var/lib/fence-host", "--domain", testDomain, "--epoch", "11", "--seq", "3"}
+	want := []string{"--unit=bnpb-fence-12345678123412341234123456789abc-11-3", "--on-boot=10s", "--timer-property=WakeSystem=yes", "--timer-property=AccuracySec=1s", "--timer-property=RandomizedDelaySec=0", "--property=Restart=on-failure", "--", "/usr/local/bin/fence-host", "fence-expire", "--state-dir", "/var/lib/fence-host", "--domain", testDomain, "--epoch", "11", "--seq", "3"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("unexpected host timer command: %v", got)
 	}

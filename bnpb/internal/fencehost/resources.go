@@ -172,7 +172,7 @@ func (h *Host) revokeResources(ctx context.Context, domain string, identity Iden
 	for _, target := range binding.Guards {
 		target := target
 		wg.Add(1)
-		go func() { defer wg.Done(); errs <- closeGuard(ctx, target, identity) }()
+		go func() { defer wg.Done(); errs <- h.ops.closeGuard(ctx, target, identity) }()
 	}
 	wg.Wait()
 	close(errs)
@@ -184,7 +184,7 @@ func (h *Host) revokeResources(ctx context.Context, domain string, identity Iden
 	return nil
 }
 
-func closeGuard(ctx context.Context, target GuardTarget, identity Identity) error {
+func (nativeOps) closeGuard(ctx context.Context, target GuardTarget, identity Identity) error {
 	pool, err := pgxpool.New(ctx, target.DatabaseURL)
 	if err != nil {
 		return err
