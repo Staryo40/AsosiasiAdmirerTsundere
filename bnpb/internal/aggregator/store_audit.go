@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -98,7 +99,7 @@ func readAuditEventPage(ctx context.Context, tx pgx.Tx, query auditQuery) ([]Haz
 		clauses = append(clauses, fmt.Sprintf(`(ingested_at, hazard_id COLLATE "C") > ($%d, $%d::text COLLATE "C")`, len(args)-1, len(args)))
 	}
 	args = append(args, query.Limit+1)
-	sql := "SELECT " + hazardColumns + " FROM hazard_events WHERE " + joinSQL(clauses) + fmt.Sprintf(` ORDER BY ingested_at ASC, hazard_id COLLATE "C" ASC LIMIT $%d`, len(args))
+	sql := "SELECT " + hazardColumns + " FROM hazard_events WHERE " + strings.Join(clauses, " AND ") + fmt.Sprintf(` ORDER BY ingested_at ASC, hazard_id COLLATE "C" ASC LIMIT $%d`, len(args))
 	rows, err := tx.Query(ctx, sql, args...)
 	if err != nil {
 		return nil, storeError("read audit events", err)
@@ -116,17 +117,6 @@ func readAuditEventPage(ctx context.Context, tx pgx.Tx, query auditQuery) ([]Haz
 		return nil, storeError("read audit events", rows.Err())
 	}
 	return items, nil
-}
-
-func joinSQL(items []string) string {
-	if len(items) == 0 {
-		return "TRUE"
-	}
-	result := items[0]
-	for _, item := range items[1:] {
-		result += " AND " + item
-	}
-	return result
 }
 
 func mergeAuditEvents(batches [][]HazardEvent, max int) []HazardEvent {

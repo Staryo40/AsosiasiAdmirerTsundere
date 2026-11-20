@@ -68,7 +68,7 @@ type Store struct {
 	readTimeout, writeTimeout time.Duration
 	chunkRecords              int
 	maxBytes                  int64
-	shards                    [3]*Store
+	shards                    [logicalShardCount]*Store
 	storeIdentity             storeIdentity
 	startupUnverified         atomic.Bool
 	physicalCopies            []*pgxpool.Pool

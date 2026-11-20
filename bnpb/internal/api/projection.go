@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"errors"
+	"slices"
 	"time"
 )
 
@@ -113,23 +114,11 @@ func validPartialMetadata(payload []byte, partial bool, unavailableUnits []strin
 	}
 	if raw, exists := fields["unavailable_units"]; exists {
 		var decoded []string
-		if json.Unmarshal(raw, &decoded) != nil || decoded == nil || !equalStrings(decoded, unavailableUnits) {
+		if json.Unmarshal(raw, &decoded) != nil || decoded == nil || !slices.Equal(decoded, unavailableUnits) {
 			return false
 		}
 	}
 	return partial == (len(unavailableUnits) > 0)
-}
-
-func equalStrings(left, right []string) bool {
-	if len(left) != len(right) {
-		return false
-	}
-	for index := range left {
-		if left[index] != right[index] {
-			return false
-		}
-	}
-	return true
 }
 
 func summarize(event hazardEvent) hazardSummary {

@@ -93,7 +93,7 @@ func (store *Store) listHazards(requestCtx context.Context, query hazardQuery, c
 	stores := store.logicalReadStores()
 	selected := query.filters.selectedSources()
 	results := fanoutLogicalReads(ctx, stores, func(ctx context.Context, unit logicalReadStore) (shardHazards, error) {
-		value := shardHazards{Rows: make([]HazardEvent, 0, query.limit+1), Cached: make(map[Source]bool, len(selected))}
+		value := shardHazards{Cached: make(map[Source]bool, len(selected))}
 		err := unit.Store.primarySnapshot(ctx, func(ctx context.Context, tx pgx.Tx) error {
 			var err error
 			value.Rows, err = readHazardPage(ctx, tx, query)
@@ -233,7 +233,7 @@ func (store *Store) sourceMetadata(ctx context.Context, selected []Source, cfg C
 		return readErr
 	})
 	if err != nil {
-		// AI-assisted fix: even a failed control snapshot must leave reachable shard rows servable.
+
 		states, asOf = unavailableSourceMetadata(selected)
 	}
 	return states, asOf, err

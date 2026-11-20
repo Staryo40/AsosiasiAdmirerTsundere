@@ -2,8 +2,6 @@ package aggregator
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"math"
@@ -101,6 +99,8 @@ type mutationGuardToken struct {
 	resource   string
 	generation int64
 }
+
+// Mutation tokens and their guard slices are immutable after installation.
 type mutationToken struct {
 	owner  string
 	epoch  int64
@@ -151,20 +151,9 @@ func NewPollAuthority(ctx context.Context, cfg PollAuthorityConfig) (*PollAuthor
 		host: cfg.Host, renewalInterval: cfg.RenewalInterval}, nil
 }
 
-func NewAuthorityOwnerID() (string, error) {
-	var random [16]byte
-	if _, err := rand.Read(random[:]); err != nil {
-		return "", fmt.Errorf("create authority owner ID: %w", err)
-	}
-	return hex.EncodeToString(random[:]), nil
-}
-
 func (authority *PollAuthority) currentContext(ctx context.Context) (context.Context, error) {
 	authority.mu.RLock()
 	token := authority.token
-	if token != nil {
-		token = &mutationToken{owner: token.owner, epoch: token.epoch, guards: append([]mutationGuardToken(nil), token.guards...)}
-	}
 	authority.mu.RUnlock()
 	if token == nil || token.owner != authority.owner {
 		return nil, errStaleMutationAuthority
@@ -374,8 +363,7 @@ func (authority *PollAuthority) pendingWithinGrace(record *authorityRecord, now 
 func (authority *PollAuthority) armHostGrants(ctx context.Context, record authorityRecord) ([]authorityGrant, error) {
 	grants := make([]authorityGrant, 0, len(authority.domains))
 	for _, domain := range authority.domains {
-		grant, err := authority.host.Grant(ctx, hostFenceIdentity{DomainUUID: domain, Epoch: uint64(record.Epoch),
-			RenewalSeq: uint64(record.RenewalSeq), Owner: record.Owner, OwnerDomainUUID: record.OwnerDomainUUID})
+		grant, err := authority.host.Grant(ctx, authority.identity(record, domain))
 		if err != nil {
 			return nil, errors.Join(errAuthorityUnavailable, fmt.Errorf("arm host grant for %q: %w", domain, err))
 		}
@@ -565,11 +553,6 @@ func (authority *PollAuthority) retryCloseMutationGuards(ctx context.Context, ow
 func (authority *PollAuthority) identity(record authorityRecord, domain string) hostFenceIdentity {
 	return hostFenceIdentity{DomainUUID: domain, Epoch: uint64(record.Epoch), RenewalSeq: uint64(record.RenewalSeq),
 		Owner: record.Owner, OwnerDomainUUID: record.OwnerDomainUUID}
-}
-
-func hostBootFor(grants []authorityGrant, domain string) string {
-	grant, _ := grantForDomain(grants, domain)
-	return grant.HostBootID
 }
 
 func (authority *PollAuthority) validateDatabaseRoles(ctx context.Context, highWater int64) error {

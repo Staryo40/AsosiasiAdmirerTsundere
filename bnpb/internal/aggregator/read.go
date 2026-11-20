@@ -114,10 +114,6 @@ func (api snapshotAPI) detail(w http.ResponseWriter, request *http.Request) {
 		writeReadError(w, request, http.StatusNotFound, "not_found")
 		return
 	}
-	if errors.Is(err, errHazardUnavailable) {
-		writeReadError(w, request, http.StatusServiceUnavailable, "store_unavailable")
-		return
-	}
 	if err != nil {
 		writeReadError(w, request, http.StatusServiceUnavailable, "store_unavailable")
 		return
