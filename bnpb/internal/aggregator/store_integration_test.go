@@ -111,7 +111,12 @@ func m2LegacyPool(t *testing.T, cfg Config) *pgxpool.Pool {
 func m2Rows(t *testing.T, pool *pgxpool.Pool, table string) string {
 	t.Helper()
 	var contents string
-	err := pool.QueryRow(t.Context(), "SELECT COALESCE(jsonb_agg(to_jsonb(t) - 'logical_shard_id' ORDER BY (to_jsonb(t) - 'logical_shard_id')::text), '[]')::text FROM "+pgx.Identifier{table}.Sanitize()+" t").Scan(&contents)
+	// Migrations 005 and 014 add the coastal poll row and bookkeeping columns; none is legacy data.
+	filter := ""
+	if table == "poll_state" {
+		filter = " WHERE t.endpoint <> 'coastal'"
+	}
+	err := pool.QueryRow(t.Context(), "SELECT COALESCE(jsonb_agg(to_jsonb(t) - 'logical_shard_id' - 'resume_token' - 'retirement_evidence_sha256' ORDER BY (to_jsonb(t) - 'logical_shard_id' - 'resume_token' - 'retirement_evidence_sha256')::text), '[]')::text FROM "+pgx.Identifier{table}.Sanitize()+" t"+filter).Scan(&contents)
 	if err != nil {
 		t.Fatal(err)
 	}

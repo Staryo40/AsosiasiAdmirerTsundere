@@ -86,7 +86,7 @@ func TestPlacementStorageRevisionInvalidatesCAS(t *testing.T) {
 func TestPlacementVersionSixUpgradePreservesInventory(t *testing.T) {
 	cfg := m2IsolatedConfig(t)
 	legacy := m2LegacyPool(t, cfg)
-	for _, migration := range []string{m2EnumSchema, shardSchema} {
+	for _, migration := range []string{coastalSchema, m2EnumSchema, shardSchema} {
 		if _, err := legacy.Exec(t.Context(), migration); err != nil {
 			t.Fatal(err)
 		}

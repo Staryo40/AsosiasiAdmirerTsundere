@@ -149,6 +149,7 @@ func readCatalogCLIFixture(t *testing.T) (string, string, []byte) {
 func newRoutedCatalogFixture(t *testing.T, ctx context.Context) (Config, *httptest.Server, *atomic.Int32) {
 	t.Helper()
 	cfg := routedM2Config(t)
+	cfg.DBReadTimeout = 2 * time.Second
 	for _, address := range []*string{&cfg.DatabaseURL, &cfg.ShardURLs[0], &cfg.ShardURLs[1], &cfg.ShardURLs[2], &cfg.WriterURL, &cfg.ShardWriterURLs[0], &cfg.ShardWriterURLs[1], &cfg.ShardWriterURLs[2]} {
 		*address = withSyntheticMeasurementSettings(t, *address)
 	}

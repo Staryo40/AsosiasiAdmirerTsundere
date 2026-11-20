@@ -103,18 +103,19 @@ func grantM2WriterPrivileges(t *testing.T, cfg Config, store *Store) {
 		roleName := writerURL.User.Username()
 		role := pgx.Identifier{roleName}.Sanitize()
 		schema := pgx.Identifier{schemaName}.Sanitize()
+		guard := pgx.Identifier{schemaName, "mutation_guard"}.Sanitize()
 		for _, statement := range []string{
 			"GRANT pg_read_all_stats TO " + role,
 			"GRANT USAGE ON SCHEMA " + schema + " TO " + role,
 			"GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA " + schema + " TO " + role,
-			"REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON mutation_guard FROM " + role,
-			"GRANT SELECT ON mutation_guard TO " + role,
+			"REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON " + guard + " FROM " + role,
+			"GRANT SELECT ON " + guard + " TO " + role,
 			"GRANT EXECUTE ON FUNCTION " + schema + ".begin_mutation_guard(text,bigint,bigint,text) TO " + role,
 			"GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA " + schema + " TO " + role,
 		} {
 			if _, err := admin.Exec(t.Context(), statement); err != nil {
 				_ = admin.Close(t.Context())
-				t.Fatal(err)
+				t.Fatalf("grant writer privilege %q in schema %q: %v", statement, schemaName, err)
 			}
 		}
 		if err := admin.Close(t.Context()); err != nil {
