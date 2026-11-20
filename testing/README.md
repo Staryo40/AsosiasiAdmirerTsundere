@@ -113,7 +113,7 @@ Gunakan berkas JSONL yang sama untuk loader dan pembanding. Contoh dari `bnpb/`:
 ```text
 go run ./cmd/catalog-load -artifact HIST.jsonl -base-url AGGREGATOR_URL -token-file CATALOG_TOKEN_FILE -audit-token-file AUDIT_TOKEN_FILE -expected-checksum ASSISTANT_SHA256 -resources-manifest resources.json -run-output H.json
 go run ./cmd/placement-compare -input HIST.jsonl -resources resources.json > HC.json
-go run ./cmd/catalog-load -artifact BURST.jsonl -base-url AGGREGATOR_URL -token-file CATALOG_TOKEN_FILE -audit-token-file AUDIT_TOKEN_FILE -expected-checksum POST_BURST_SHA256 -resources-manifest resources.json -run-output B.json
+go run ./cmd/catalog-load -artifact BURST.jsonl -baseline-artifact HIST.jsonl -base-url AGGREGATOR_URL -token-file CATALOG_TOKEN_FILE -audit-token-file AUDIT_TOKEN_FILE -expected-checksum POST_BURST_SHA256 -resources-manifest resources.json -run-output B.json
 go run ./cmd/placement-compare -input BURST.jsonl -resources resources.json -burst-area "NAMA WILAYAH" > BC.json
 ```
 
@@ -124,10 +124,12 @@ Jika dua manifest sudah telanjur memakai checksum berbeda, berikan manifest asli
 Dari root aplikasi, gabungkan bukti:
 
 ```text
-python testing/evidence_catalogue.py --historical-report H.json --burst-report B.json --historical-compare HC.json --burst-compare BC.json --resources resources.json --historical-metrics H.jsonl --burst-metrics B.jsonl --placement placement.json --reference ASSISTANT_SHA256 --out testing/results/catalogue.json
+python testing/evidence_catalogue.py --historical-artifact HIST.jsonl --burst-artifact BURST.jsonl --historical-report H.json --burst-report B.json --historical-compare HC.json --burst-compare BC.json --resources resources.json --historical-metrics H.jsonl --burst-metrics B.jsonl --placement placement.json --reference ASSISTANT_SHA256 --out testing/results/catalogue.json
 ```
 
 `placement.json`: `nodes` berisi nama node Kubernetes sebenarnya. `historical` dan `burst` masing-masing berisi snapshot `before` dan `after` yang mengapit waktu submit, dengan `observed_at`, `revision`, dan `copies[]` (`shard_id`, `unit`, `node`, `role`, `state`). Ambil snapshot dari inventaris aktual; jangan mengganti identitas node dengan alias lokal. Setiap JSONL metrik memerlukan sampel tiap node dalam waktu submit: `timestamp`, `node`, `cpu_percent`, `disk_read_bytes_per_second`, `disk_write_bytes_per_second`, `network_receive_bytes_per_second`, `network_transmit_bytes_per_second`, dan `disk_write_latency_ms`. Gunakan metrik node A2. Angka pembanding `fixed_hash`/`longitude_band` tetap analitis; perubahan jumlah revisi canonical bukan ukuran I/O disk.
+
+Loader memvalidasi seluruh envelope checksum Lampiran A, termasuk `as_of` UTC, `partial:false` eksplisit, dan `unavailable_units:[]` yang bukan null. Populasi akhir dihitung secara independen dari ID unik pada artefak yang dikirim dan artefak dasar historis untuk run burst. Laporan memuat `expected_population` dan mempertahankan kedua nilai `as_of`. Collector wajib menerima kedua artefak JSONL asli dan mencocokkan hash berkas, jumlah, serta identitas populasinya; acknowledgment HTTP atau digest dari endpoint saja tidak cukup. Resume idempoten tidak harus menambah jumlah record, tetapi bukti distribusi penulisan baru tetap memerlukan run pengukuran tersendiri.
 
 ### 4. RabbitMQ dan metadata Anggota 3
 

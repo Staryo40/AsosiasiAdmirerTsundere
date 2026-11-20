@@ -12,6 +12,7 @@ import (
 func main() {
 	var options catalogload.Options
 	flag.StringVar(&options.Artifact, "artifact", "", "JSONL or JSON-array seismic artifact path")
+	flag.StringVar(&options.BaselineArtifact, "baseline-artifact", "", "optional already-loaded JSONL or JSON-array seismic artifact included in the expected population")
 	flag.StringVar(&options.BaseURL, "base-url", "", "Aggregator base URL")
 	flag.StringVar(&options.TokenFile, "token-file", "", "dedicated catalog Bearer token file")
 	flag.StringVar(&options.AuditTokenFile, "audit-token-file", "", "dedicated Audit Bearer token file")

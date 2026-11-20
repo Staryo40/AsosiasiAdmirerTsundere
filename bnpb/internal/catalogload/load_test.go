@@ -14,11 +14,27 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
 
 const completeMeasurements = `{"partial":false,"missing_settings":[],"unavailable_units":[],"items":[{"unit":"db","node":"n1","role":"primary","settings_complete":true,"tables":[{"name":"outbox","row_count":0,"relation_bytes":0,"stats_inserted":0,"stats_updated":0},{"name":"hazard_events","row_count":0,"relation_bytes":0,"stats_inserted":0,"stats_updated":0},{"name":"handled_inputs","row_count":0,"relation_bytes":0,"stats_inserted":0,"stats_updated":0},{"name":"source_warnings","row_count":0,"relation_bytes":0,"stats_inserted":0,"stats_updated":0},{"name":"source_seismic","row_count":0,"relation_bytes":0,"stats_inserted":0,"stats_updated":0}]}]}`
+
+const fixtureAsOf = "2026-11-20T01:02:03.123456789Z"
+
+func fixtureDigest(input string) string {
+	sum := sha256.Sum256([]byte(input))
+	return hex.EncodeToString(sum[:])
+}
+
+func fixtureAudit(w http.ResponseWriter, count int64, checksum string) {
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"source": "BMKG", "count": count, "checksum": checksum, "algorithm": "sha256",
+		"as_of": fixtureAsOf, "partial": false, "unavailable_units": []string{},
+	})
+}
 
 func TestIsPartialRequiresCompleteOwnedTableMeasurements(t *testing.T) {
 	t.Parallel()
@@ -43,16 +59,19 @@ func TestIsPartialRequiresCompleteOwnedTableMeasurements(t *testing.T) {
 
 func TestRunRetriesIdenticalAPIReceipt(t *testing.T) {
 	t.Parallel()
-	emptyHash := hex.EncodeToString(sha256.New().Sum(nil))
+	expected := fixtureDigest("event-1")
 	var postBodies []string
 	var postAuth, auditAuth, catalogAuth string
-	source := "BMKG"
+	var acknowledged atomic.Bool
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.URL.Path == "/internal/audit/checksum":
 			auditAuth = r.Header.Get("Authorization")
-			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(auditChecksum{Source: &source, Count: 0, Checksum: emptyHash, Algorithm: "sha256"})
+			if acknowledged.Load() {
+				fixtureAudit(w, 1, expected)
+			} else {
+				fixtureAudit(w, 0, fixtureDigest(""))
+			}
 		case r.URL.Path == "/internal/storage/measurements":
 			catalogAuth = r.Header.Get("Authorization")
 			w.Header().Set("Content-Type", "application/json")
@@ -67,6 +86,7 @@ func TestRunRetriesIdenticalAPIReceipt(t *testing.T) {
 			}
 			var batch batchRequest
 			_ = json.Unmarshal(body, &batch)
+			acknowledged.Store(true)
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(map[string]any{"accepted": len(batch.Records), "input_id": batch.InputID, "input_offset": batch.InputOffset})
 		default:
@@ -88,7 +108,7 @@ func TestRunRetriesIdenticalAPIReceipt(t *testing.T) {
 		t.Fatal(err)
 	}
 	manifest := filepath.Join(dir, "resources.json")
-	if err := os.WriteFile(manifest, []byte(`{"reference_checksum":"`+emptyHash+`","resources":{"cpu":"observed-fixture","memory":"observed-fixture"}}`), 0600); err != nil {
+	if err := os.WriteFile(manifest, []byte(`{"reference_checksum":"`+expected+`","resources":{"cpu":"observed-fixture","memory":"observed-fixture"}}`), 0600); err != nil {
 		t.Fatal(err)
 	}
 	output := filepath.Join(dir, "report.json")
@@ -110,7 +130,8 @@ func TestRunRetriesIdenticalAPIReceipt(t *testing.T) {
 	if postAuth != "Bearer catalog-secret" || catalogAuth != "Bearer catalog-secret" || auditAuth != "Bearer audit-secret" {
 		t.Fatalf("credentials crossed API boundaries: POST=%q catalog=%q audit=%q", postAuth, catalogAuth, auditAuth)
 	}
-	if report.Rows != 1 || report.ArtifactSHA256 != hex.EncodeToString(wantHash[:]) || !report.DatasetAvailable {
+	if report.Rows != 1 || report.ArtifactSHA256 != hex.EncodeToString(wantHash[:]) || !report.DatasetAvailable ||
+		report.ExpectedPopulation.Count != 1 || report.ExpectedPopulation.Checksum != expected || report.AuditAfter.Checksum != expected {
 		t.Fatalf("unexpected report: %+v", report)
 	}
 	if report.SubmissionStartedAt.IsZero() || report.SubmissionStartedAt.Location() != time.UTC ||
@@ -127,8 +148,8 @@ func TestRunUsesOriginalSnapshotWhenSourceChangesDuringPreflight(t *testing.T) {
 	snapshotDir := t.TempDir()
 	t.Setenv("TMPDIR", snapshotDir)
 	t.Setenv("TMP", snapshotDir)
-	emptyHash := hex.EncodeToString(sha256.New().Sum(nil))
-	source := "BMKG"
+	expected := fixtureDigest("original")
+	var acknowledged atomic.Bool
 	dir := t.TempDir()
 	artifact := filepath.Join(dir, "seismic.jsonl")
 	original := []byte("{\"event_id\":\"original\",\"occurred_at\":\"2025-01-01T00:00:00Z\"}\n")
@@ -147,7 +168,7 @@ func TestRunUsesOriginalSnapshotWhenSourceChangesDuringPreflight(t *testing.T) {
 		t.Fatal(err)
 	}
 	manifest := filepath.Join(dir, "resources.json")
-	if err := os.WriteFile(manifest, []byte(`{"reference_checksum":"`+emptyHash+`","resources":{"cpu":"synthetic-fixture"}}`), 0600); err != nil {
+	if err := os.WriteFile(manifest, []byte(`{"reference_checksum":"`+expected+`","resources":{"cpu":"synthetic-fixture"}}`), 0600); err != nil {
 		t.Fatal(err)
 	}
 	output := filepath.Join(dir, "report.json")
@@ -159,8 +180,11 @@ func TestRunUsesOriginalSnapshotWhenSourceChangesDuringPreflight(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/internal/audit/checksum":
-			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(auditChecksum{Source: &source, Count: 0, Checksum: emptyHash, Algorithm: "sha256"})
+			if acknowledged.Load() {
+				fixtureAudit(w, 1, expected)
+			} else {
+				fixtureAudit(w, 0, fixtureDigest(""))
+			}
 		case "/internal/storage/measurements":
 			if err := rewriteSource(); err != nil {
 				t.Errorf("mutate source during preflight: %v", err)
@@ -181,6 +205,7 @@ func TestRunUsesOriginalSnapshotWhenSourceChangesDuringPreflight(t *testing.T) {
 			if batch.InputID != wantID || batch.InputOffset != 0 || len(batch.Records) != 1 || string(batch.Records[0]) != strings.TrimSpace(string(original)) {
 				t.Errorf("catalog POST did not use the original snapshot and receipt ID: %+v", batch)
 			}
+			acknowledged.Store(true)
 			_ = json.NewEncoder(w).Encode(map[string]any{"accepted": len(batch.Records), "input_id": batch.InputID, "input_offset": batch.InputOffset})
 		default:
 			http.NotFound(w, r)
@@ -193,7 +218,7 @@ func TestRunUsesOriginalSnapshotWhenSourceChangesDuringPreflight(t *testing.T) {
 		t.Fatal(err)
 	}
 	if report.Artifact != artifact || report.ArtifactSHA256 != wantID || report.Rows != 1 ||
-		report.ReferenceChecksum != emptyHash || !report.DatasetAvailable {
+		report.ReferenceChecksum != expected || !report.DatasetAvailable {
 		t.Fatalf("unexpected snapshot report: %+v", report)
 	}
 	encoded, err := os.ReadFile(output)
@@ -205,6 +230,7 @@ func TestRunUsesOriginalSnapshotWhenSourceChangesDuringPreflight(t *testing.T) {
 		t.Fatal(err)
 	}
 	if saved.ArtifactSHA256 != wantID || saved.Rows != 1 || !saved.DatasetAvailable ||
+		saved.AuditBefore.AsOf != fixtureAsOf || saved.AuditAfter.AsOf != fixtureAsOf ||
 		!saved.SubmissionStartedAt.Equal(report.SubmissionStartedAt) || !saved.SubmissionFinishedAt.Equal(report.SubmissionFinishedAt) {
 		t.Fatalf("unexpected saved snapshot report: %+v", saved)
 	}
@@ -235,7 +261,7 @@ func TestLoadArrayKeepsBatchRowOffset(t *testing.T) {
 	defer server.Close()
 	base, _ := url.Parse(server.URL)
 	var rows int64
-	if err := loadArray(context.Background(), br, server.Client(), base, "token", "artifact-hash", &rows); err != nil {
+	if err := loadArtifact(context.Background(), br, server.Client(), base, "token", "artifact-hash", &rows); err != nil {
 		t.Fatal(err)
 	}
 	if rows != 2 || sent.InputOffset != 0 || len(sent.Records) != 2 {
@@ -280,12 +306,7 @@ func TestLoadFormatsFlushByConservativeBodyBytes(t *testing.T) {
 				t.Fatal(err)
 			}
 			var rows int64
-			reader := bufio.NewReader(strings.NewReader(input))
-			if format == "JSONL" {
-				err = loadJSONL(context.Background(), reader, '{', server.Client(), base, "token", "artifact-hash", &rows)
-			} else {
-				err = loadArray(context.Background(), reader, server.Client(), base, "token", "artifact-hash", &rows)
-			}
+			err = loadArtifact(context.Background(), strings.NewReader(input), server.Client(), base, "token", "artifact-hash", &rows)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -318,5 +339,158 @@ func TestSendBatchRejectsOversizedSingleRecordBeforePost(t *testing.T) {
 	}
 	if requests != 0 {
 		t.Fatalf("oversized batch attempted %d POST requests", requests)
+	}
+}
+
+func TestChecksumRequiresCompleteAppendixAEnvelope(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name, key string
+		value     any
+		remove    bool
+	}{
+		{name: "healthy"},
+		{name: "explicit zero offset", key: "as_of", value: "2026-11-20T01:02:03+00:00"},
+		{name: "missing source", key: "source", remove: true},
+		{name: "wrong source", key: "source", value: "PVMBG"},
+		{name: "null source", key: "source"},
+		{name: "missing count", key: "count", remove: true},
+		{name: "null count", key: "count"},
+		{name: "negative count", key: "count", value: -1},
+		{name: "fraction count", key: "count", value: 0.5},
+		{name: "bool count", key: "count", value: false},
+		{name: "missing checksum", key: "checksum", remove: true},
+		{name: "uppercase checksum", key: "checksum", value: strings.ToUpper(fixtureDigest(""))},
+		{name: "nonempty digest for zero count", key: "checksum", value: fixtureDigest("missing")},
+		{name: "missing algorithm", key: "algorithm", remove: true},
+		{name: "wrong algorithm", key: "algorithm", value: "SHA256"},
+		{name: "missing timestamp", key: "as_of", remove: true},
+		{name: "null timestamp", key: "as_of"},
+		{name: "numeric timestamp", key: "as_of", value: 1},
+		{name: "non-UTC timestamp", key: "as_of", value: "2026-11-20T01:02:03+07:00"},
+		{name: "invalid timestamp", key: "as_of", value: "2026-11-31T01:02:03Z"},
+		{name: "missing partial", key: "partial", remove: true},
+		{name: "null partial", key: "partial"},
+		{name: "string partial", key: "partial", value: "false"},
+		{name: "partial checksum", key: "partial", value: true},
+		{name: "missing unavailable units", key: "unavailable_units", remove: true},
+		{name: "null unavailable units", key: "unavailable_units"},
+		{name: "non-array unavailable units", key: "unavailable_units", value: map[string]any{}},
+		{name: "non-empty unavailable units", key: "unavailable_units", value: []string{"store-a"}},
+		{name: "unknown key", key: "Partial", value: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fixture := httptest.NewRecorder()
+			fixtureAudit(fixture, 0, fixtureDigest(""))
+			var envelope map[string]any
+			if err := json.Unmarshal(fixture.Body.Bytes(), &envelope); err != nil {
+				t.Fatal(err)
+			}
+			if tc.remove {
+				delete(envelope, tc.key)
+			} else if tc.key != "" {
+				envelope[tc.key] = tc.value
+			}
+			raw, err := json.Marshal(envelope)
+			if err != nil {
+				t.Fatal(err)
+			}
+			wantValid := tc.name == "healthy" || tc.name == "explicit zero offset"
+			audit, err := parseAuditChecksum(raw)
+			if (err == nil) != wantValid {
+				t.Fatalf("valid=%t, want %t for %s: %v", err == nil, wantValid, raw, err)
+			}
+			if wantValid && audit.AsOf != envelope["as_of"] {
+				t.Fatalf("as_of was not preserved: %+v", audit)
+			}
+		})
+	}
+
+	fixture := httptest.NewRecorder()
+	fixtureAudit(fixture, 0, fixtureDigest(""))
+	duplicate := strings.TrimSuffix(strings.TrimSpace(fixture.Body.String()), "}") + `,"partial":false}`
+	if _, err := parseAuditChecksum([]byte(duplicate)); err == nil {
+		t.Fatal("accepted a duplicate Appendix A key")
+	}
+}
+
+func TestRunVerifiesFinalPopulationIndependentlyOfReceipt(t *testing.T) {
+	t.Parallel()
+	const baseline = `[{"event_id":"é"}]`
+	const artifact = "{\"event_id\":\"a \"}\n{\"event_id\":\"é\"}\n{\"event_id\":\"a \"}\n"
+	expected := fixtureDigest("a \né")
+	for _, tc := range []struct {
+		name, reportedIDs, reference, wantError string
+		finalCount                              int64
+		resume                                  bool
+	}{
+		{name: "new distinct ID plus duplicate rows", reportedIDs: "a \né", reference: expected, finalCount: 2},
+		{name: "idempotent resume with unchanged totals", reportedIDs: "a \né", reference: expected, finalCount: 2, resume: true},
+		{name: "acknowledged without new population", reportedIDs: "é", reference: expected, finalCount: 1, wantError: "post-load Audit population"},
+		{name: "right digest but wrong count", reportedIDs: "a \né", reference: expected, finalCount: 3, wantError: "post-load Audit population"},
+		{name: "right count but wrong digest", reportedIDs: "a \ny", reference: expected, finalCount: 2, wantError: "post-load Audit population"},
+		{name: "reference matches only existing population", reportedIDs: "é", reference: fixtureDigest("é"), finalCount: 1, wantError: "supplied reference"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			for name, contents := range map[string]string{
+				"baseline.json": baseline, "upload.jsonl": artifact, "catalog.token": "catalog",
+				"audit.token": "audit", "resources.json": `{"resources":{"cpu":"fixture"}}`,
+			} {
+				if err := os.WriteFile(filepath.Join(dir, name), []byte(contents), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			var acknowledged atomic.Bool
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/internal/audit/checksum":
+					if acknowledged.Load() || tc.resume {
+						fixtureAudit(w, tc.finalCount, fixtureDigest(tc.reportedIDs))
+					} else {
+						fixtureAudit(w, 1, fixtureDigest("é"))
+					}
+				case "/internal/storage/measurements":
+					_, _ = w.Write([]byte(completeMeasurements))
+				case "/internal/catalog/seismic":
+					var batch batchRequest
+					if err := json.NewDecoder(r.Body).Decode(&batch); err != nil || len(batch.Records) != 3 {
+						t.Errorf("unexpected batch: %+v, %v", batch, err)
+					}
+					acknowledged.Store(true)
+					_ = json.NewEncoder(w).Encode(map[string]any{"accepted": len(batch.Records), "input_id": batch.InputID, "input_offset": batch.InputOffset})
+				default:
+					http.NotFound(w, r)
+				}
+			}))
+			defer server.Close()
+			options := Options{
+				Artifact: filepath.Join(dir, "upload.jsonl"), BaselineArtifact: filepath.Join(dir, "baseline.json"),
+				BaseURL: server.URL, TokenFile: filepath.Join(dir, "catalog.token"),
+				AuditTokenFile: filepath.Join(dir, "audit.token"), ExpectedChecksum: tc.reference,
+				ResourcesManifest: filepath.Join(dir, "resources.json"), RunOutput: filepath.Join(dir, "report.json"),
+			}
+			report, err := Run(t.Context(), options)
+			if tc.wantError != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.wantError) || report.DatasetAvailable {
+					t.Fatalf("Run failed to reject invalid population: %+v, %v", report, err)
+				}
+				if acknowledged.Load() != (tc.reference == expected) {
+					t.Fatal("reference validation and batch acknowledgement happened in the wrong order")
+				}
+				if _, err := os.Stat(options.RunOutput); !os.IsNotExist(err) {
+					t.Fatalf("unsuccessful Run wrote a report: %v", err)
+				}
+				return
+			}
+			if err != nil || !acknowledged.Load() || !report.DatasetAvailable || report.Rows != 3 ||
+				report.ExpectedPopulation.Count != 2 || report.ExpectedPopulation.Checksum != expected ||
+				report.BaselineArtifactSHA256 != fixtureDigest(baseline) {
+				t.Fatalf("unexpected successful population report: %+v, %v", report, err)
+			}
+			if tc.resume && report.AuditBefore.Count != report.AuditAfter.Count {
+				t.Fatalf("resume unexpectedly added logical records: %+v", report)
+			}
+		})
 	}
 }

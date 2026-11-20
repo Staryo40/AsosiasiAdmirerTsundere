@@ -26,37 +26,32 @@ const (
 )
 
 type Options struct {
-	Artifact, BaseURL, TokenFile, AuditTokenFile   string
-	ExpectedChecksum, ResourcesManifest, RunOutput string
-	Client                                         *http.Client
+	Artifact, BaselineArtifact, BaseURL, TokenFile, AuditTokenFile string
+	ExpectedChecksum, ResourcesManifest, RunOutput                 string
+	Client                                                         *http.Client
 }
 
 type resourceManifest struct {
 	ReferenceChecksum string                     `json:"reference_checksum"`
 	Resources         map[string]json.RawMessage `json:"resources"`
 }
-type auditChecksum struct {
-	Source           *string  `json:"source"`
-	Count            int64    `json:"count"`
-	Checksum         string   `json:"checksum"`
-	Algorithm        string   `json:"algorithm"`
-	Partial          bool     `json:"partial"`
-	UnavailableUnits []string `json:"unavailable_units"`
-}
+
 type Report struct {
-	Artifact             string          `json:"artifact"`
-	ArtifactSHA256       string          `json:"artifact_sha256"`
-	InputFormat          string          `json:"input_format"`
-	Rows                 int64           `json:"rows"`
-	AuditBefore          auditChecksum   `json:"audit_before"`
-	AuditAfter           auditChecksum   `json:"audit_after"`
-	ReferenceChecksum    string          `json:"reference_checksum"`
-	Resources            json.RawMessage `json:"resources_manifest"`
-	MeasurementsBefore   json.RawMessage `json:"measurements_before"`
-	MeasurementsAfter    json.RawMessage `json:"measurements_after"`
-	SubmissionStartedAt  time.Time       `json:"submission_started_at"`
-	SubmissionFinishedAt time.Time       `json:"submission_finished_at"`
-	DatasetAvailable     bool            `json:"dataset_available"`
+	Artifact               string             `json:"artifact"`
+	ArtifactSHA256         string             `json:"artifact_sha256"`
+	InputFormat            string             `json:"input_format"`
+	Rows                   int64              `json:"rows"`
+	BaselineArtifactSHA256 string             `json:"baseline_artifact_sha256,omitempty"`
+	ExpectedPopulation     populationIdentity `json:"expected_population"`
+	AuditBefore            auditChecksum      `json:"audit_before"`
+	AuditAfter             auditChecksum      `json:"audit_after"`
+	ReferenceChecksum      string             `json:"reference_checksum"`
+	Resources              json.RawMessage    `json:"resources_manifest"`
+	MeasurementsBefore     json.RawMessage    `json:"measurements_before"`
+	MeasurementsAfter      json.RawMessage    `json:"measurements_after"`
+	SubmissionStartedAt    time.Time          `json:"submission_started_at"`
+	SubmissionFinishedAt   time.Time          `json:"submission_finished_at"`
+	DatasetAvailable       bool               `json:"dataset_available"`
 }
 
 type batchRequest struct {
@@ -107,6 +102,16 @@ func Run(ctx context.Context, options Options) (Report, error) {
 	if err != nil {
 		return report, err
 	}
+	expected, baselineSHA256, err := expectedPopulation(snapshot, options.BaselineArtifact)
+	if err != nil {
+		return report, err
+	}
+	if expected.Checksum != reference {
+		return report, errors.New("expected artifact population checksum does not match supplied reference")
+	}
+	if _, err := snapshot.Seek(0, io.SeekStart); err != nil {
+		return report, err
+	}
 	client := options.Client
 	if client == nil {
 		client = &http.Client{Timeout: 10 * time.Second}
@@ -117,13 +122,15 @@ func Run(ctx context.Context, options Options) (Report, error) {
 	}
 	base.Path = strings.TrimRight(base.Path, "/")
 	base.RawQuery, base.Fragment = "", ""
-	report = Report{Artifact: options.Artifact, ArtifactSHA256: artifactSHA256, InputFormat: "JSONL or JSON array of raw seismic-event objects", ReferenceChecksum: reference, Resources: manifestBytes, DatasetAvailable: false}
-	before, err := getJSON[auditChecksum](ctx, client, endpoint(base, "/internal/audit/checksum?source=BMKG"), auditToken)
+	report = Report{
+		Artifact: options.Artifact, ArtifactSHA256: artifactSHA256,
+		InputFormat:            "JSONL or JSON array of raw seismic-event objects",
+		BaselineArtifactSHA256: baselineSHA256, ExpectedPopulation: expected,
+		ReferenceChecksum: reference, Resources: manifestBytes,
+	}
+	before, err := readAuditChecksum(ctx, client, base, auditToken)
 	if err != nil {
 		return report, fmt.Errorf("read complete pre-load Audit checksum: %w", err)
-	}
-	if err := validateChecksum(before); err != nil {
-		return report, fmt.Errorf("pre-load Audit: %w", err)
 	}
 	report.AuditBefore = before
 	measureBefore, err := getRaw(ctx, client, endpoint(base, "/internal/storage/measurements"), catalogToken)
@@ -140,17 +147,15 @@ func Run(ctx context.Context, options Options) (Report, error) {
 	if err != nil {
 		return report, err
 	}
-	after, err := getJSON[auditChecksum](ctx, client, endpoint(base, "/internal/audit/checksum?source=BMKG"), auditToken)
+	after, err := readAuditChecksum(ctx, client, base, auditToken)
 	if err != nil {
 		return report, fmt.Errorf("read complete post-load Audit checksum: %w", err)
 	}
-	if err := validateChecksum(after); err != nil {
-		return report, fmt.Errorf("post-load Audit: %w", err)
-	}
-	if !strings.EqualFold(after.Checksum, reference) {
-		return report, fmt.Errorf("post-load Audit checksum does not match supplied reference")
-	}
 	report.AuditAfter = after
+	if after.Count != expected.Count || after.Checksum != expected.Checksum {
+		return report, fmt.Errorf("post-load Audit population does not match expected artifact count and checksum (count %d, expected %d)",
+			after.Count, expected.Count)
+	}
 	measureAfter, err := getRaw(ctx, client, endpoint(base, "/internal/storage/measurements"), catalogToken)
 	if err != nil {
 		return report, fmt.Errorf("post-load measurements unavailable: %w", err)
@@ -171,18 +176,11 @@ func Run(ctx context.Context, options Options) (Report, error) {
 }
 
 func snapshotArtifact(path string, snapshot *os.File) (string, error) {
-	source, err := os.Open(path)
+	source, info, err := openArtifact(path)
 	if err != nil {
 		return "", err
 	}
 	defer source.Close()
-	info, err := source.Stat()
-	if err != nil {
-		return "", err
-	}
-	if !info.Mode().IsRegular() {
-		return "", errors.New("artifact must be a regular file")
-	}
 	hash := sha256.New()
 	// Copy at most one byte past the original size to detect growth as well as truncation.
 	copied, err := io.Copy(io.MultiWriter(snapshot, hash), io.LimitReader(source, info.Size()+1))
@@ -196,6 +194,22 @@ func snapshotArtifact(path string, snapshot *os.File) (string, error) {
 		return "", err
 	}
 	return hex.EncodeToString(hash.Sum(nil)), nil
+}
+
+func openArtifact(path string) (*os.File, os.FileInfo, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, nil, err
+	}
+	info, err := file.Stat()
+	if err == nil && info.Mode().IsRegular() {
+		return file, info, nil
+	}
+	file.Close()
+	if err != nil {
+		return nil, nil, err
+	}
+	return nil, nil, errors.New("artifact must be a regular file")
 }
 
 func readManifest(path string) (resourceManifest, json.RawMessage, error) {
@@ -260,30 +274,65 @@ func endpoint(base *url.URL, path string) string {
 	copy.RawQuery = suffix.RawQuery
 	return copy.String()
 }
-func validateChecksum(value auditChecksum) error {
-	if value.Partial || len(value.UnavailableUnits) > 0 {
-		return errors.New("checksum is partial")
+
+func loadArtifact(ctx context.Context, file io.Reader, client *http.Client, base *url.URL, token, inputID string, total *int64) error {
+	batch := make([]json.RawMessage, 0, batchRecords)
+	batchBytes := 0
+	flush := func() error {
+		if err := sendBatch(ctx, client, base, token, inputID, *total, batch); err != nil {
+			return err
+		}
+		*total += int64(len(batch))
+		batch = batch[:0]
+		batchBytes = 0
+		return nil
 	}
-	if value.Source == nil || *value.Source != "BMKG" || value.Algorithm != "sha256" || !validDigest(value.Checksum) || value.Count < 0 {
-		return errors.New("BMKG checksum response is incomplete or malformed")
+	if err := walkArtifact(file, func(record json.RawMessage) error {
+		recordBytes := conservativeRecordBytes(record)
+		if len(batch) > 0 && batchBytes+1+recordBytes > maxBatchRecordBytes {
+			if err := flush(); err != nil {
+				return err
+			}
+		}
+		if len(batch) > 0 {
+			batchBytes++
+		}
+		batch = append(batch, record)
+		batchBytes += recordBytes
+		if len(batch) == batchRecords {
+			return flush()
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	if len(batch) > 0 {
+		return flush()
+	}
+	if *total == 0 {
+		return errors.New("artifact contains no seismic events")
 	}
 	return nil
 }
 
-func loadArtifact(ctx context.Context, file io.Reader, client *http.Client, base *url.URL, token, inputID string, total *int64) error {
+func walkArtifact(file io.Reader, visit func(json.RawMessage) error) error {
 	br := bufio.NewReaderSize(file, 64<<10)
 	first, err := firstNonSpace(br)
+	if errors.Is(err, io.EOF) {
+		return errors.New("artifact contains no seismic events")
+	}
 	if err != nil {
 		return err
 	}
 	if first == '[' {
-		return loadArray(ctx, br, client, base, token, inputID, total)
+		return walkArray(br, visit)
 	}
 	if first != '{' {
 		return errors.New("unsupported artifact format; only JSONL or JSON arrays of raw seismic-event objects are accepted (CSV is unsupported)")
 	}
-	return loadJSONL(ctx, br, first, client, base, token, inputID, total)
+	return walkJSONL(br, visit)
 }
+
 func firstNonSpace(reader *bufio.Reader) (byte, error) {
 	for {
 		b, err := reader.ReadByte()
@@ -298,9 +347,8 @@ func firstNonSpace(reader *bufio.Reader) (byte, error) {
 		}
 	}
 }
-func loadJSONL(ctx context.Context, br *bufio.Reader, _ byte, client *http.Client, base *url.URL, token, id string, total *int64) error {
-	batch := make([]json.RawMessage, 0, batchRecords)
-	batchBytes := 0
+
+func walkJSONL(br *bufio.Reader, visit func(json.RawMessage) error) error {
 	for {
 		line, err := readBoundedLine(br)
 		if err != nil && !errors.Is(err, io.EOF) {
@@ -308,50 +356,17 @@ func loadJSONL(ctx context.Context, br *bufio.Reader, _ byte, client *http.Clien
 		}
 		line = bytes.TrimSpace(line)
 		if len(line) > 0 {
-			if !json.Valid(line) || line[0] != '{' {
+			if line[0] != '{' {
 				return errors.New("JSONL input must contain one JSON object per line")
 			}
-			record := append(json.RawMessage(nil), line...)
-			recordBytes := conservativeRecordBytes(record)
-			if recordBytes > maxBatchRecordBytes {
-				return errors.New("catalog record exceeds request body limit")
-			}
-			if len(batch) > 0 && batchBytes+1+recordBytes > maxBatchRecordBytes {
-				if err := sendBatch(ctx, client, base, token, id, *total, batch); err != nil {
-					return err
-				}
-				*total += int64(len(batch))
-				batch = batch[:0]
-				batchBytes = 0
-			}
-			if len(batch) > 0 {
-				batchBytes++
-			}
-			batch = append(batch, record)
-			batchBytes += recordBytes
-			if len(batch) == batchRecords {
-				if err := sendBatch(ctx, client, base, token, id, *total, batch); err != nil {
-					return err
-				}
-				*total += int64(len(batch))
-				batch = batch[:0]
-				batchBytes = 0
+			if err := visit(line); err != nil {
+				return err
 			}
 		}
 		if errors.Is(err, io.EOF) {
-			break
+			return nil
 		}
 	}
-	if len(batch) > 0 {
-		if err := sendBatch(ctx, client, base, token, id, *total, batch); err != nil {
-			return err
-		}
-		*total += int64(len(batch))
-	}
-	if *total == 0 {
-		return errors.New("artifact contains no seismic events")
-	}
-	return nil
 }
 
 func readBoundedLine(reader *bufio.Reader) ([]byte, error) {
@@ -377,14 +392,13 @@ func conservativeRecordBytes(record json.RawMessage) int {
 	}
 	return len(record) * 6
 }
-func loadArray(ctx context.Context, reader *bufio.Reader, client *http.Client, base *url.URL, token, inputID string, total *int64) error {
+
+func walkArray(reader *bufio.Reader, visit func(json.RawMessage) error) error {
 	decoder := json.NewDecoder(reader)
 	tokenValue, err := decoder.Token()
 	if err != nil || tokenValue != json.Delim('[') {
 		return errors.New("invalid JSON array")
 	}
-	batch := make([]json.RawMessage, 0, batchRecords)
-	batchBytes := 0
 	for decoder.More() {
 		var record json.RawMessage
 		if err := decoder.Decode(&record); err != nil {
@@ -393,30 +407,8 @@ func loadArray(ctx context.Context, reader *bufio.Reader, client *http.Client, b
 		if len(record) == 0 || len(record) > maxRecordBytes || record[0] != '{' {
 			return errors.New("JSON array must contain objects no larger than 128 KiB")
 		}
-		recordBytes := conservativeRecordBytes(record)
-		if recordBytes > maxBatchRecordBytes {
-			return errors.New("catalog record exceeds request body limit")
-		}
-		if len(batch) > 0 && batchBytes+1+recordBytes > maxBatchRecordBytes {
-			if err := sendBatch(ctx, client, base, token, inputID, *total, batch); err != nil {
-				return err
-			}
-			*total += int64(len(batch))
-			batch = batch[:0]
-			batchBytes = 0
-		}
-		if len(batch) > 0 {
-			batchBytes++
-		}
-		batch = append(batch, record)
-		batchBytes += recordBytes
-		if len(batch) == batchRecords {
-			if err := sendBatch(ctx, client, base, token, inputID, *total, batch); err != nil {
-				return err
-			}
-			*total += int64(len(batch))
-			batch = batch[:0]
-			batchBytes = 0
+		if err := visit(record); err != nil {
+			return err
 		}
 	}
 	if _, err := decoder.Token(); err != nil {
@@ -425,15 +417,6 @@ func loadArray(ctx context.Context, reader *bufio.Reader, client *http.Client, b
 	var trailing any
 	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
 		return errors.New("trailing data after JSON array")
-	}
-	if len(batch) > 0 {
-		if err := sendBatch(ctx, client, base, token, inputID, *total, batch); err != nil {
-			return err
-		}
-		*total += int64(len(batch))
-	}
-	if *total == 0 {
-		return errors.New("artifact contains no seismic events")
 	}
 	return nil
 }
@@ -516,23 +499,7 @@ func checkBatchResponse(response *http.Response, inputID string, offset, count i
 	return fmt.Errorf("catalog API returned retryable HTTP %d", response.StatusCode)
 }
 
-func getJSON[T any](ctx context.Context, client *http.Client, address, token string) (T, error) {
-	var decoded T
-	raw, err := getRawWithToken(ctx, client, address, token)
-	if err != nil {
-		return decoded, err
-	}
-	if err := json.Unmarshal(raw, &decoded); err != nil {
-		return decoded, err
-	}
-	return decoded, nil
-}
-
 func getRaw(ctx context.Context, client *http.Client, address, token string) (json.RawMessage, error) {
-	return getRawWithToken(ctx, client, address, token)
-}
-
-func getRawWithToken(ctx context.Context, client *http.Client, address, token string) (json.RawMessage, error) {
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, address, nil)
 	if err != nil {
 		return nil, err

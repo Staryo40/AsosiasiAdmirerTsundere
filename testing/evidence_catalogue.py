@@ -10,6 +10,7 @@ import math
 from pathlib import Path
 import re
 from statistics import mean
+import unicodedata
 
 from evidence_support import now, read_json, read_jsonl, report, run, utc
 
@@ -24,6 +25,7 @@ METRICS = (
     "network_receive_bytes_per_second", "network_transmit_bytes_per_second", "disk_write_latency_ms",
 )
 DIGEST = re.compile(r"[0-9a-f]{64}")
+UTC_TIMESTAMP = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]+)?(?:Z|\+00:00)")
 NODE_LABEL = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?")
 EMPTY_CHECKSUM = hashlib.sha256(b"").hexdigest()
 
@@ -32,6 +34,18 @@ EMPTY_CHECKSUM = hashlib.sha256(b"").hexdigest()
 class Audit:
     count: int
     checksum: str
+    as_of: str
+
+    @property
+    def identity(self):
+        return self.count, self.checksum
+
+
+@dataclass(frozen=True)
+class Artifact:
+    sha256: str
+    rows: int
+    refs: set[bytes]
 
 
 @dataclass(frozen=True)
@@ -40,6 +54,8 @@ class Submission:
     finished: datetime
     artifact_sha256: str
     rows: int
+    baseline_artifact_sha256: str | None
+    expected_population: tuple[int, str]
     reference_checksum: str
     audit_before: Audit
     audit_after: Audit
@@ -96,18 +112,69 @@ def digest(checksum):
 
 
 def complete_audit(audit):
+    need(isinstance(audit, dict) and audit.keys() == {
+        "source", "count", "checksum", "algorithm", "as_of", "partial", "unavailable_units",
+    })
     need(audit["source"] == "BMKG" and audit["algorithm"] == "sha256" and audit["partial"] is False)
-    need(audit["unavailable_units"] in (None, []))  # Go re-encodes a missing slice as null.
-    return Audit(integer(audit["count"]), digest(audit["checksum"]))
+    need(audit["unavailable_units"] == [])
+    as_of = audit["as_of"]
+    need(isinstance(as_of, str) and UTC_TIMESTAMP.fullmatch(as_of) is not None)
+    utc(as_of)
+    count, checksum = integer(audit["count"]), digest(audit["checksum"])
+    need((count == 0) == (checksum == EMPTY_CHECKSUM))
+    return Audit(count, checksum, as_of)
+
+
+def unique_object(pairs):
+    document = dict(pairs)
+    need(len(document) == len(pairs))
+    return document
+
+
+def load_artifact(path):
+    file_hash = hashlib.sha256()
+    rows, refs = 0, set()
+    with Path(path).open("rb") as stream:
+        for raw in iter(lambda: stream.readline((128 << 10) + 1), b""):
+            need(len(raw) <= 128 << 10)
+            file_hash.update(raw)
+            line = raw.decode("utf-8").strip()
+            if not line:
+                continue
+            event = json.loads(line, object_pairs_hook=unique_object)
+            need(isinstance(event, dict))
+            ref = event["event_id"]
+            need(isinstance(ref, str) and bool(ref.strip()) and not any(unicodedata.category(char) == "Cc" for char in ref))
+            ref_bytes = ref.encode("utf-8")
+            need(len(ref_bytes) <= 2048)
+            refs.add(ref_bytes)
+            rows += 1
+    need(rows > 0)
+    return Artifact(file_hash.hexdigest(), rows, refs)
+
+
+def verify_population(submission, artifact, baseline=None):
+    if submission is None or artifact is None:
+        return False
+    baseline_sha256 = baseline.sha256 if baseline else None
+    if (artifact.sha256 != submission.artifact_sha256 or artifact.rows != submission.rows
+            or baseline_sha256 != submission.baseline_artifact_sha256):
+        return False
+    refs = baseline.refs | artifact.refs if baseline else artifact.refs
+    expected = (len(refs), hashlib.sha256(b"\n".join(sorted(refs))).hexdigest())
+    return submission.audit_after.identity == submission.expected_population == expected and submission.reference_checksum == expected[1]
 
 
 def load_submission(path):
-    document = read_json(path)
+    document = json.loads(Path(path).read_text(encoding="utf-8-sig"), object_pairs_hook=unique_object)
     started = utc(document["submission_started_at"])
     finished = utc(document["submission_finished_at"])
     need(document["dataset_available"] is True and started < finished)
+    baseline = digest(document["baseline_artifact_sha256"]) if "baseline_artifact_sha256" in document else None
+    expected = document["expected_population"]
     return Submission(
         started, finished, digest(document["artifact_sha256"]), integer(document["rows"]),
+        baseline, (integer(expected["count"]), digest(expected["checksum"])),
         digest(document["reference_checksum"]), complete_audit(document["audit_before"]),
         complete_audit(document["audit_after"]), document["resources_manifest"],
         document["measurements_before"], document["measurements_after"],
@@ -341,8 +408,12 @@ def summarize_submission(submission):
     elapsed = (submission.finished - submission.started).total_seconds()
     return {
         "artifact_sha256": submission.artifact_sha256, "acknowledged_rows": submission.rows,
-        "audit_before": {"count": submission.audit_before.count, "checksum": submission.audit_before.checksum},
-        "audit_after": {"count": submission.audit_after.count, "checksum": submission.audit_after.checksum},
+        "baseline_artifact_sha256": submission.baseline_artifact_sha256,
+        "expected_population": dict(zip(("count", "checksum"), submission.expected_population)),
+        "audit_before": {"count": submission.audit_before.count, "checksum": submission.audit_before.checksum,
+                         "as_of": submission.audit_before.as_of},
+        "audit_after": {"count": submission.audit_after.count, "checksum": submission.audit_after.checksum,
+                        "as_of": submission.audit_after.as_of},
         "audit_count_delta": submission.audit_after.count - submission.audit_before.count,
         "submission_started_at": submission.started.isoformat(), "submission_finished_at": submission.finished.isoformat(),
         "submission_elapsed_seconds": elapsed, "mean_acknowledged_rows_per_second": submission.rows / elapsed,
@@ -351,7 +422,7 @@ def summarize_submission(submission):
 
 def inspect_stage(args, name, resources, placement_input):
     sources = {}
-    checks = dict.fromkeys(("complete_loader_report", "audit_delta_accounts_for_input", "analytical_comparison_matches_input",
+    checks = dict.fromkeys(("complete_loader_report", "audit_matches_expected_population", "analytical_comparison_matches_input",
                             "confirmed_stable_placement", "complete_rf2_measurements", "rf2_matching_row_counts",
                             "primary_bmkg_rows_match_audit", "primary_deltas_match_fixed_hash",
                             "primary_revisions_on_multiple_nodes", "node_samples_in_submission_window"), False)
@@ -361,11 +432,6 @@ def inspect_stage(args, name, resources, placement_input):
         return stage
     stage.observations["submission"] = summarize_submission(submission)
     checks["complete_loader_report"] = True
-    checks["audit_delta_accounts_for_input"] = (
-        submission.rows > 0 and submission.audit_after.count - submission.audit_before.count == submission.rows
-        and submission.audit_after.checksum != submission.audit_before.checksum
-        and submission.audit_after.checksum == submission.reference_checksum
-    )
     compare_path = getattr(args, f"{name}_compare")
     comparison = read_capture(sources, "comparison", read_comparison, compare_path, submission, resources, name) if resources else None
     checks["analytical_comparison_matches_input"] = comparison is not None
@@ -401,11 +467,12 @@ def check_continuity(historical, burst, reference):
     first, second = historical.submission, burst.submission
     first_placement, second_placement = historical.placement, burst.placement
     return {
-        "historical_audit_matches_independent_reference": bool(first and reference and first.audit_after.checksum == reference),
-        "historical_bmkg_baseline_empty": bool(first and first.audit_before == Audit(0, EMPTY_CHECKSUM)),
+        "historical_audit_matches_independent_reference": bool(
+            first and reference and historical.checks["audit_matches_expected_population"] and first.reference_checksum == reference),
+        "historical_bmkg_baseline_empty": bool(first and first.audit_before.identity == (0, EMPTY_CHECKSUM)),
         "burst_uses_distinct_artifact": bool(first and second and first.artifact_sha256 != second.artifact_sha256),
         "burst_starts_at_historical_audit_baseline": bool(
-            first and second and first.finished <= second.started and first.audit_after == second.audit_before),
+            first and second and first.finished <= second.started and first.audit_after.identity == second.audit_before.identity),
         "placement_unchanged_between_stages": bool(first_placement and second_placement
             and first_placement.copies == second_placement.copies and first_placement.revision == second_placement.revision),
         "burst_starts_at_historical_storage_baseline": bool(historical.after and burst.before
@@ -432,6 +499,7 @@ disk_write_bytes_per_second, network_receive_bytes_per_second, network_transmit_
 """,
     )
     for stage in ("historical", "burst"):
+        parser.add_argument(f"--{stage}-artifact", required=True, metavar="JSONL", help=f"exact {stage} JSONL input shared by loader and comparator")
         parser.add_argument(f"--{stage}-report", required=True, metavar="JSON", help=f"{stage} cmd/catalog-load run report")
         parser.add_argument(f"--{stage}-compare", required=True, metavar="JSON", help=f"{stage} cmd/placement-compare stdout JSON" + (
             " (use -burst-area matching every row in the burst artifact)" if stage == "burst" else ""))
@@ -455,6 +523,11 @@ def main():
     placement = read_capture(sources, "placement", load_placement, args.placement)
     historical = inspect_stage(args, "historical", resources, placement)
     burst = inspect_stage(args, "burst", burst_resources, placement)
+    historical_artifact = read_capture(historical.observations["inputs"], "artifact", load_artifact, args.historical_artifact)
+    burst_artifact = read_capture(burst.observations["inputs"], "artifact", load_artifact, args.burst_artifact)
+    historical.checks["audit_matches_expected_population"] = verify_population(historical.submission, historical_artifact)
+    burst.checks["audit_matches_expected_population"] = historical_artifact is not None and verify_population(
+        burst.submission, burst_artifact, historical_artifact)
     checks = check_continuity(historical, burst, reference)
     checks["resource_envelope_unchanged"] = bool(
         resources and burst_resources and resources[0]["resources"] == burst_resources[0]["resources"]
