@@ -16,6 +16,10 @@ spec:
       labels:
         app.kubernetes.io/name: auth
         role: api
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8084"
+        prometheus.io/path: "/metrics"
     spec:
       containers:
         - name: auth

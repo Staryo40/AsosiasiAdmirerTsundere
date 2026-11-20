@@ -19,6 +19,8 @@ resources:
   - auth.yaml
   - api.yaml
   - consumers.yaml
+  - dashboard.yaml
+  - sensor-pantai.yaml
   - network-policies.yaml
 
 configMapGenerator:
@@ -73,3 +75,6 @@ images:
   - name: aat/broker-init
     newName: docker.io/salmaanhaniif11/aat-bnpb
     newTag: broker-init
+  - name: aat/analytics-dashboard
+    newName: docker.io/salmaanhaniif11/aat-bnpb
+    newTag: analytics-dashboard

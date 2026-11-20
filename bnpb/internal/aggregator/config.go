@@ -17,9 +17,16 @@ type SourceConfig struct {
 	PollInterval time.Duration
 }
 
+type pantaiResilience struct {
+	BreakerFailures  int
+	BreakerCooldown  time.Duration
+	MaxInFlightCalls int
+}
+
 type Config struct {
-	BMKG, PVMBG                                     SourceConfig
-	BMKGAPIKey, PVMBGReaderClientID                 string
+	BMKG, PVMBG, Pantai                             SourceConfig
+	PantaiResilience                                pantaiResilience
+	BMKGAPIKey, PVMBGReaderClientID, PantaiAuthToken string
 	PVMBGReaderClientSecret, InternalKey            string
 	DatabaseURL, AMQPURL, HazardExchange            string
 	PVMBGCycleTimeout, PollOverlap, RetryMaxBackoff time.Duration
@@ -43,6 +50,7 @@ func loadConfig(lookup func(string) (string, bool)) (Config, error) {
 	}{
 		{"BNPB_BMKG_BASE_URL", "http://bmkg:8081", &cfg.BMKG.BaseURL},
 		{"BNPB_PVMBG_BASE_URL", "http://pvmbg:8082", &cfg.PVMBG.BaseURL},
+		{"BNPB_PANTAI_BASE_URL", "http://sensor-pantai:8080", &cfg.Pantai.BaseURL},
 		{"BNPB_BMKG_API_KEY", "", &cfg.BMKGAPIKey},
 		{"BNPB_PVMBG_READER_CLIENT_ID", "", &cfg.PVMBGReaderClientID},
 		{"BNPB_PVMBG_READER_CLIENT_SECRET", "", &cfg.PVMBGReaderClientSecret},
@@ -59,6 +67,9 @@ func loadConfig(lookup func(string) (string, bool)) (Config, error) {
 			return Config{}, fmt.Errorf("%s: required nonempty value without control characters", setting.name)
 		}
 		*setting.target = configured
+	}
+	if token, exists := lookup("BNPB_PANTAI_AUTH_TOKEN"); exists {
+		cfg.PantaiAuthToken = strings.TrimSpace(token)
 	}
 	if err := loadBudgets(lookup, &cfg); err != nil {
 		return Config{}, err
@@ -79,6 +90,9 @@ func loadBudgets(lookup func(string) (string, bool), cfg *Config) error {
 		{"BNPB_PVMBG_HTTP_TIMEOUT", 5 * time.Second, time.Minute, &cfg.PVMBG.HTTPTimeout},
 		{"BNPB_BMKG_POLL_INTERVAL", 3 * time.Second, time.Minute, &cfg.BMKG.PollInterval},
 		{"BNPB_PVMBG_POLL_INTERVAL", 3 * time.Second, time.Minute, &cfg.PVMBG.PollInterval},
+		{"BNPB_PANTAI_POLL_INTERVAL", 3 * time.Second, time.Minute, &cfg.Pantai.PollInterval},
+		{"BNPB_PANTAI_HTTP_TIMEOUT", 2 * time.Second, time.Minute, &cfg.Pantai.HTTPTimeout},
+		{"BNPB_PANTAI_BREAKER_COOLDOWN", 30 * time.Second, 5 * time.Minute, &cfg.PantaiResilience.BreakerCooldown},
 		{"BNPB_PVMBG_CYCLE_TIMEOUT", 12 * time.Second, 5 * time.Minute, &cfg.PVMBGCycleTimeout},
 		{"BNPB_POLL_OVERLAP", 2 * time.Second, time.Minute, &cfg.PollOverlap},
 		{"BNPB_RETRY_MAX_BACKOFF", 15 * time.Second, 5 * time.Minute, &cfg.RetryMaxBackoff},
@@ -116,6 +130,8 @@ func loadCounts(lookup func(string) (string, bool), cfg *Config) error {
 		{"BNPB_LIST_DEFAULT_LIMIT", 100, 500, &cfg.ListDefaultLimit},
 		{"BNPB_LIST_MAX_LIMIT", 500, 500, &cfg.ListMaxLimit},
 		{"BNPB_OUTBOX_BATCH_SIZE", 100, 1000, &cfg.OutboxBatchSize},
+		{"BNPB_PANTAI_BREAKER_FAILURES", 5, 64, &cfg.PantaiResilience.BreakerFailures},
+		{"BNPB_PANTAI_MAX_IN_FLIGHT", 1, 8, &cfg.PantaiResilience.MaxInFlightCalls},
 	} {
 		configured, exists := lookup(setting.name)
 		if !exists {
@@ -138,6 +154,7 @@ func (cfg Config) validate() error {
 	}{
 		{"BNPB_BMKG_BASE_URL", cfg.BMKG.BaseURL, []string{"http", "https"}},
 		{"BNPB_PVMBG_BASE_URL", cfg.PVMBG.BaseURL, []string{"http", "https"}},
+		{"BNPB_PANTAI_BASE_URL", cfg.Pantai.BaseURL, []string{"http", "https"}},
 		{"BNPB_CANONICAL_DATABASE_URL", cfg.DatabaseURL, []string{"postgres", "postgresql"}},
 		{"BNPB_AMQP_URL", cfg.AMQPURL, []string{"amqp", "amqps"}},
 	} {
@@ -188,7 +205,7 @@ func (cfg Config) validateBudgets() error {
 		message string
 	}{
 		{cfg.PVMBGCycleTimeout < 2*cfg.PVMBG.HTTPTimeout, "BNPB_PVMBG_CYCLE_TIMEOUT: must cover two BNPB_PVMBG_HTTP_TIMEOUT requests"},
-		{cfg.SourceStaleAfter <= cfg.PVMBGCycleTimeout || cfg.SourceStaleAfter <= cfg.BMKG.HTTPTimeout+cfg.BMKG.PollInterval || cfg.SourceStaleAfter <= cfg.PVMBG.HTTPTimeout+cfg.PVMBG.PollInterval, "BNPB_SOURCE_STALE_AFTER: must exceed source request/cycle budgets"},
+		{cfg.SourceStaleAfter <= cfg.PVMBGCycleTimeout || cfg.SourceStaleAfter <= cfg.BMKG.HTTPTimeout+cfg.BMKG.PollInterval || cfg.SourceStaleAfter <= cfg.PVMBG.HTTPTimeout+cfg.PVMBG.PollInterval || cfg.SourceStaleAfter <= cfg.Pantai.HTTPTimeout+cfg.Pantai.PollInterval, "BNPB_SOURCE_STALE_AFTER: must exceed source request/cycle budgets"},
 		{cfg.ListDefaultLimit > cfg.ListMaxLimit, "BNPB_LIST_DEFAULT_LIMIT: must not exceed BNPB_LIST_MAX_LIMIT"},
 		{cfg.ReadMaxInFlight > cfg.DBReadMaxConns, "BNPB_READ_MAX_IN_FLIGHT: must not exceed BNPB_DB_READ_MAX_CONNS"},
 		{cfg.DBReadMaxConns+cfg.DBWriteMaxConns > 64, "BNPB_DB_READ_MAX_CONNS + BNPB_DB_WRITE_MAX_CONNS: must not exceed 64"},

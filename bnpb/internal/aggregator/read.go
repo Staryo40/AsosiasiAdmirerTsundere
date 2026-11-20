@@ -31,10 +31,11 @@ type readErrorEnvelope struct {
 	AsOf    *time.Time             `json:"as_of,omitempty"`
 }
 
-func registerSnapshotRoutes(mux *http.ServeMux, store *Store, cfg Config) {
+func registerSnapshotRoutes(mux *http.ServeMux, store *Store, cfg Config) snapshotAPI {
 	api := snapshotAPI{store: store, cfg: cfg, slots: make(chan struct{}, cfg.ReadMaxInFlight)}
 	mux.Handle("GET /internal/hazards", api.authenticate(http.HandlerFunc(api.list)))
 	mux.Handle("GET /internal/hazards/{hazard_id}", api.authenticate(http.HandlerFunc(api.detail)))
+	return api
 }
 
 func (api snapshotAPI) authenticate(next http.Handler) http.Handler {

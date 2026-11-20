@@ -175,7 +175,41 @@ kubectl -n sistem-informasi-kebencanaan-bnpb rollout restart deployment/<name>
 
 `<node-ip>` can be the IP of any node.
 
-## 6. Tester Agent
+## 6. Observability
+
+Prometheus and Grafana run in the separate `monitoring` namespace so Appendix B
+limits and the Tester Agent stay focused on application pods:
+
+```text
+kubectl apply -k k8s/monitoring
+```
+
+| Service | Address |
+| --- | --- |
+| Prometheus | `http://<node-ip>:30900` |
+| Grafana | `http://<node-ip>:30300` (anonymous Viewer; admin/`bnpb-observability`) |
+| Grafana Tempo (trace backend) | in-cluster `tempo.monitoring.svc:3200` (linked from Grafana datasource **Tempo**) |
+| Analytics dashboard (React) | `http://<node-ip>:30081` |
+
+BNPB Go services expose `GET /metrics`. Pods with the `prometheus.io/scrape`
+annotation are discovered automatically. Recording rules and an SLO burn alert
+ship in `k8s/monitoring/prometheus-rules.yaml` (mounted into Prometheus).
+
+HTTP middleware sets `X-BNPB-Correlation-ID` and W3C `traceparent` on responses
+and includes both in structured access logs. Outbound calls from the
+Client-Facing API forward `traceparent` to the Aggregator.
+
+**Sensor Pantai:** create Secret `pantai-token` (see `k8s/pantai-token.secret.example.yaml`),
+then `GET /v1/coastal/status` on the Client-Facing API returns breaker and poll
+state plus the last known coastal hazard when the upstream is slow or open.
+
+Load-test scripts (run outside the cluster): `loadtest/k6-api-sustained.js`,
+`loadtest/k6-api-10k.js`, and `loadtest/k6-media-shed.js` (see `loadtest/README.md`).
+
+Rebuild and reload application images before expecting new metrics, coastal
+endpoints, or notification priority behaviour.
+
+## 7. Tester Agent
 
 ```text
 kubectl apply -f https://raw.githubusercontent.com/susTuna/if4031-tester-agent/ebb55261711123a9a211739ffbf140a275caa6da/manifest.yaml

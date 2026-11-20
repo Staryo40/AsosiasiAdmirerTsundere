@@ -1,0 +1,66 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: sensor-pantai
+  labels:
+    app.kubernetes.io/name: sensor-pantai
+    role: sensor
+spec:
+  selector:
+    app.kubernetes.io/name: sensor-pantai
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sensor-pantai
+  labels:
+    app.kubernetes.io/name: sensor-pantai
+    role: sensor
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: sensor-pantai
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: sensor-pantai
+        role: sensor
+    spec:
+      containers:
+        - name: sensor
+          image: sustuna/sensor-pantai@sha256:51fbd90d3891ad6e9f5768ad330ffb65205644cb29e50da65c7538f2e0b4397d
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: PANTAI_PROFILE
+              value: practice
+            - name: PANTAI_SEED
+              value: "42"
+            - name: PANTAI_SPEED
+              value: "60"
+            - name: PANTAI_AUTH_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: pantai-token
+                  key: token
+          ports:
+            - name: http
+              containerPort: 8080
+          readinessProbe:
+            httpGet: {path: /healthz, port: http}
+            initialDelaySeconds: 3
+          resources:
+            requests: {memory: 128Mi}
+            limits: {memory: 256Mi}
+          volumeMounts:
+            - name: data
+              mountPath: /data
+      volumes:
+        - name: data
+          emptyDir: {}

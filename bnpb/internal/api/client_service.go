@@ -10,6 +10,8 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+
+	"github.com/Staryo40/AsosiasiAdmirerTsundere/bnpb/internal/platform/tracing"
 )
 
 const (
@@ -37,16 +39,17 @@ type authIntrospection struct {
 }
 
 type publicService struct {
-	config clientConfig
-	client *http.Client
-	logger *slog.Logger
+	config    clientConfig
+	client    *http.Client
+	logger    *slog.Logger
+	admission *admissionController
 }
 
 func newPublicService(config clientConfig, client *http.Client, logger *slog.Logger) (*publicService, error) {
 	if client == nil || logger == nil {
 		return nil, errors.New("HTTP client and logger are required")
 	}
-	return &publicService{config: config, client: client, logger: logger}, nil
+	return &publicService{config: config, client: client, logger: logger, admission: newAdmissionController()}, nil
 }
 
 func (service *publicService) authCall(ctx context.Context, path string, input, output any) (int, error) {
@@ -100,6 +103,9 @@ func (service *publicService) aggregatorCall(ctx context.Context, path, rawQuery
 		return 0, nil, err
 	}
 	request.Header.Set(aggregatorInternalKeyHeader, service.config.aggregatorKey)
+	if parent := tracing.Parent(ctx); parent != "" {
+		request.Header.Set(tracing.Header, parent)
+	}
 	response, err := service.client.Do(request)
 	if err != nil {
 		return 0, nil, fmt.Errorf("aggregator request: %w", err)
