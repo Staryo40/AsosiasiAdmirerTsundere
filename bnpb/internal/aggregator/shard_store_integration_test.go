@@ -104,6 +104,7 @@ func grantM2WriterPrivileges(t *testing.T, cfg Config, store *Store) {
 		role := pgx.Identifier{roleName}.Sanitize()
 		schema := pgx.Identifier{schemaName}.Sanitize()
 		for _, statement := range []string{
+			"GRANT pg_read_all_stats TO " + role,
 			"GRANT USAGE ON SCHEMA " + schema + " TO " + role,
 			"GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA " + schema + " TO " + role,
 			"REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON mutation_guard FROM " + role,

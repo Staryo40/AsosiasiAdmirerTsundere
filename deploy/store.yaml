@@ -1,3 +1,5 @@
+# Resource patch only. Apply patroni-durability.yaml to EVERY Patroni scope,
+# including control, before enabling routed writers; this patch does not enable HA.
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:

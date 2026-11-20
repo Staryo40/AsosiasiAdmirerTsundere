@@ -153,6 +153,15 @@ Untuk JSONL broker, setiap baris memuat `event`, `time`, `vhost`, `queue`, `mess
 | 12 — Readiness | Gunakan fixture shard untuk data lengkap, degradasi parsial, dan tidak ada unit valid. Uji perbedaan `/health`, `/ready`, dan status poll owner, juga batas admission serta propagasi korelasi lintas HTTP. |
 | 13 — Regresi | Dari `bnpb/`, setelah uji terarah berurutan: `go test ./...`, `go vet ./...`, `go build ./cmd/...`, `go test -race ./...`, lalu uji bertag `integration`. `regression_test.go` dan `p1_mapping_test.go` adalah regresi lokal. `p1_integration_test.go` mensyaratkan `postgres-test/bnpb_test` di jaringan Compose profil `tests`; suite Go memakai fixture BMKG/PVMBG dan server HTTP in-process, bukan proses mock hidup. Suite routed memakai `BNPB_M2_LOCAL_TEST_DATABASE_URL` dan tidak menggantikan fixture Compose. Jangan arahkan keduanya ke Canonical Store. |
 
+Regresi durabilitas C12 memiliki fixture primary/standby fisik tersendiri. Setelah mendapat izin untuk memulai proses PostgreSQL sementara dan menghapus **hanya data fixture**, jalankan dari `bnpb/` pada PowerShell:
+
+```powershell
+$env:BNPB_TEST_POSTGRES_BIN = 'C:/Program Files/PostgreSQL/18/bin'
+go test -tags=integration -race -count=1 ./internal/aggregator -run '^TestReplicatedMutationIntegration$' -timeout 180s
+```
+
+Fixture menginisialisasi dua direktori sementara dan port loopback, menguji penolakan tanpa replikasi, commit yang kehilangan replica, retry tanpa WAL dan perubahan konfigurasi, lalu menghentikan primary fixture, menghapus disknya, mempromosikan standby, dan membandingkan checksum Audit serta checkpoint/receipt control. Seluruh proses fixture dihentikan saat cleanup. Ini bukan bukti fencing, penempatan lintas node, Patroni, atau penerimaan Kubernetes. Konfigurasi produksi wajib mengikuti [kebijakan durabilitas routed](../bnpb/contracts/v1/README.md#step-5--durable-routed-receipts); tidak ada fallback acknowledgment satu salinan.
+
 Untuk bukti terdistribusi, catat revisi dan digest image, hash serta count referensi asisten, konfigurasi efektif, resource Appendix B, identitas node/boot/host dan disk lokal. Gunakan `evidence_topology.py` untuk inventaris, observasi baca berbatas waktu, urutan loss/fence/promote, lokasi, dan checksum sebelum/sesudah satu gangguan. Gunakan `evidence_repair.py` untuk skenario C6. `evidence_catalogue.py` mencatat beban natural/burst, `evidence_polling.py` mencatat takeover, dan `evidence_delivery.py` mencatat bukti broker serta metadata Anggota 3. Bukti kontinuitas tulis dan RF2 pada seluruh populasi memerlukan pengamatan tambahan.
 
 Setelah ada izin deploy dan fault yang eksplisit, simpan artefak terpisah untuk:

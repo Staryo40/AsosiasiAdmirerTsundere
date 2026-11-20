@@ -452,6 +452,9 @@ func storeError(operation string, err error) error {
 	if errors.Is(err, errInvalidPlacement) {
 		return fmt.Errorf("%s: %w", operation, errInvalidPlacement)
 	}
+	if errors.Is(err, errReplicatedDurability) {
+		return fmt.Errorf("%s: %w", operation, errReplicatedDurability)
+	}
 	if errors.Is(err, context.Canceled) {
 		return fmt.Errorf("%s: %w", operation, context.Canceled)
 	}

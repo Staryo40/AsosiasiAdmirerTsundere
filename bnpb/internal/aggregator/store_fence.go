@@ -16,7 +16,13 @@ func (store *Store) beginMutation(ctx context.Context) (pgx.Tx, error) {
 	if !ok || token.owner == "" || token.epoch < 1 {
 		return nil, errStaleMutationAuthority
 	}
-	tx, err := store.write.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
+	var tx pgx.Tx
+	var err error
+	if store.storeIdentity.role != "" {
+		tx, err = store.beginReplicatedMutation(ctx)
+	} else {
+		tx, err = store.write.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
+	}
 	if err != nil {
 		return nil, storeError("begin guarded mutation", err)
 	}
