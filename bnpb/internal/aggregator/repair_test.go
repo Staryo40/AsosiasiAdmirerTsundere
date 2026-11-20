@@ -52,14 +52,18 @@ func TestRepairRejectsMalformedWALPositions(t *testing.T) {
 	}
 }
 
-func TestRepairIntentPreservesPersistedJSON(t *testing.T) {
+func TestRepairIntentBindsSourceTimeline(t *testing.T) {
 	candidate := standbyRepairCandidate{
 		ShardID: 1, Target: repairMember{Unit: "s1-d", Node: "node-d", Scope: "shard-1", Name: "replacement"},
 		StatefulSet: "standby-1", PatroniConfigMap: "patroni-1", Claim: "disk-1",
 		Source: repairMember{Unit: "s1-b", Node: "node-b"}, OldReplica: repairMember{Unit: "s1-c", Node: "node-c"},
 	}
-	want := `{"shard_id":1,"unit":"s1-d","node":"node-d","scope":"shard-1","name":"replacement","stateful_set":"standby-1","patroni_config_map":"patroni-1","claim":"disk-1","system_id":"system-1","source_unit":"s1-b","source_node":"node-b","old_replica_unit":"s1-c","old_replica_node":"node-c"}`
-	if got := string(repairIntent(candidate, repairEvidence{SystemID: "system-1"})); got != want {
+	want := `{"shard_id":1,"unit":"s1-d","node":"node-d","scope":"shard-1","name":"replacement","stateful_set":"standby-1","patroni_config_map":"patroni-1","claim":"disk-1","system_id":"system-1","source_unit":"s1-b","source_node":"node-b","old_replica_unit":"s1-c","old_replica_node":"node-c","source_timeline":2}`
+	encoded, err := json.Marshal(repairIntent(candidate, repairEvidence{SystemID: "system-1", Timeline: 2}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := string(encoded); got != want {
 		t.Fatalf("persisted repair intent changed: got %s, want %s", got, want)
 	}
 }

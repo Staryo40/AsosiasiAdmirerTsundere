@@ -53,7 +53,7 @@ func probeRepairTarget(ctx context.Context, shardID int16, member repairMember) 
 }
 
 func probeRepair(ctx context.Context, shardID int16, member repairMember, mode repairProbeMode) (repairEvidence, error) {
-	// AI-assisted fix: a stalled handshake must leave time to confirm replica loss and inspect the source.
+
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
 	client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
@@ -601,6 +601,8 @@ func exactRepairNodeSelector(raw any, key, node string) bool {
 }
 
 func replicationObservation(ctx context.Context, sourceDSN, applicationName string) (bool, error) {
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
 	conn, err := pgx.Connect(ctx, sourceDSN)
 	if err != nil {
 		return false, err

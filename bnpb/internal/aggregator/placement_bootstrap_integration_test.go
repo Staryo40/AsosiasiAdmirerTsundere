@@ -146,8 +146,10 @@ func TestPlacementBootstrapRestartPreservesRepair(t *testing.T) {
 	if err != nil || !reflect.DeepEqual(completed, current) {
 		t.Fatalf("restart changed completed placement: %+v, %v", current, err)
 	}
-	if done, err := afterCompletion.repairAlreadyVerified(t.Context(), candidate, current.Copies); err != nil || !done {
-		t.Fatalf("restart lost verified repair: done=%t err=%v", done, err)
+	var status string
+	if err := afterCompletion.write.QueryRow(t.Context(), `SELECT status FROM shard_repair_jobs WHERE shard_id=$1`,
+		candidate.ShardID).Scan(&status); err != nil || status != "verified" {
+		t.Fatalf("restart lost verified repair record: status=%q err=%v", status, err)
 	}
 	stale := configuredBootstrap(t, cfg, initial.Revision, reordered)
 	rejected, err := OpenStore(t.Context(), stale, quietLogger())

@@ -4,6 +4,9 @@ package aggregator
 
 import (
 	"errors"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -31,28 +34,21 @@ func TestRepairReservationResumeAndCompletionRejectsPlacementABA(t *testing.T) {
 		repeatedRevision != reservedRevision || reserved.Revision != reservedRevision {
 		t.Fatalf("repeated reservation: revision=%d want=%d err=%v", repeatedRevision, reservedRevision, err)
 	}
-	done, err := store.repairAlreadyVerified(t.Context(), candidate, reserved.Copies)
-	if err != nil || done {
-		t.Fatalf("copying reservation treated as complete: done=%t err=%v", done, err)
-	}
 	mismatched := candidate
 	mismatched.Target.Node = "node-other"
-	if _, err := store.repairAlreadyVerified(t.Context(), mismatched, reserved.Copies); !errors.Is(err, errInvalidPlacement) {
+	if _, err := store.reserveStandbyRepair(t.Context(), reserved, mismatched,
+		repairIntent(mismatched, evidence)); !errors.Is(err, errInvalidPlacement) {
 		t.Fatalf("mismatched target node accepted: %v", err)
-	}
-	mismatchedRole := append([]shardPlacement(nil), reserved.Copies...)
-	for i := range mismatchedRole {
-		if mismatchedRole[i].Unit == candidate.Target.Unit {
-			mismatchedRole[i].Role = "primary"
-		}
-	}
-	if _, err := store.repairAlreadyVerified(t.Context(), candidate, mismatchedRole); !errors.Is(err, errInvalidPlacement) {
-		t.Fatalf("mismatched target role accepted: %v", err)
 	}
 	if err := store.setStandbyRepairStatus(t.Context(), candidate, reservedRevision, "provisioning"); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.setStandbyRepairStatus(t.Context(), candidate, reservedRevision, "copying"); err != nil {
+		t.Fatal(err)
+	}
+	digest := strings.Repeat("a", 64)
+	if _, err := store.write.Exec(t.Context(), `INSERT INTO shard_copy_loss_attestations
+		(unit,shard_id,node,evidence_sha256) VALUES ('s0-b',0,'node-b',$1)`, digest); err != nil {
 		t.Fatal(err)
 	}
 	changed := placementSnapshot{Revision: reserved.Revision, Copies: append([]shardPlacement(nil), reserved.Copies...)}
@@ -92,16 +88,33 @@ func TestRepairReservationResumeAndCompletionRejectsPlacementABA(t *testing.T) {
 	if status != "copying" || targetState != "copying" {
 		t.Fatalf("failed completion was published: job=%q target=%q", status, targetState)
 	}
-	var oldCopyCount int
-	if err := store.write.QueryRow(t.Context(), "SELECT count(*) FROM shard_placements WHERE unit='s0-b'").Scan(&oldCopyCount); err != nil {
+	var oldCopyCount, proofCount int
+	if err := store.write.QueryRow(t.Context(), `SELECT count(*),count(retirement_evidence_sha256)
+		FROM shard_placements WHERE unit='s0-b'`).Scan(&oldCopyCount, &proofCount); err != nil {
 		t.Fatal(err)
 	}
-	if oldCopyCount != 1 {
-		t.Fatalf("old physical row was erased: count=%d", oldCopyCount)
+	if oldCopyCount != 1 || proofCount != 0 {
+		t.Fatalf("stale repair changed old copy retention or proof: copies=%d proofs=%d", oldCopyCount, proofCount)
 	}
 	recovered, err := store.placement(t.Context())
 	if err != nil {
 		t.Fatal(err)
+	}
+	rebound := candidate
+	rebound.Source, rebound.OldReplica, err = repairPlacementMembers(candidate, recovered.Copies)
+	if err != nil || rebound.Source.Unit != "s0-b" || rebound.OldReplica.Unit != "s0-a" {
+		t.Fatalf("resolve changed source: %v", err)
+	}
+	reboundEvidence := repairEvidenceFixture(rebound)
+	reboundEvidence.Timeline = 2
+	reboundRevision, err := store.reserveStandbyRepair(t.Context(), recovered, rebound, repairIntent(rebound, reboundEvidence))
+	if err != nil || reboundRevision <= reservedRevision {
+		t.Fatalf("reserve against the new source: revision=%d err=%v", reboundRevision, err)
+	}
+	for _, status := range []string{"provisioning", "copying"} {
+		if err := store.setStandbyRepairStatus(t.Context(), rebound, reboundRevision, status); err != nil {
+			t.Fatal(err)
+		}
 	}
 	for i := range recovered.Copies {
 		switch recovered.Copies[i].Unit {
@@ -128,6 +141,11 @@ func TestRepairReservationResumeAndCompletionRejectsPlacementABA(t *testing.T) {
 	if err := store.completeStandbyRepair(t.Context(), candidate, reservedRevision, evidence); !errors.Is(err, errPlacementChanged) {
 		t.Fatalf("fresh reservation revalidated stale evidence: %v", err)
 	}
+	for _, status := range []string{"provisioning", "copying"} {
+		if err := store.setStandbyRepairStatus(t.Context(), candidate, freshRevision, status); err != nil {
+			t.Fatal(err)
+		}
+	}
 	if err := store.completeStandbyRepair(t.Context(), candidate, freshRevision, repairEvidenceFixture(candidate)); err != nil {
 		t.Fatalf("completion with fresh evidence: %v", err)
 	}
@@ -147,19 +165,76 @@ func TestRepairReservationResumeAndCompletionRejectsPlacementABA(t *testing.T) {
 	if status != "verified" || targetState != "ready" {
 		t.Fatalf("valid completion not published: job=%q target=%q", status, targetState)
 	}
+	var oldState, recordedDigest string
+	if err := store.write.QueryRow(t.Context(), `SELECT state,retirement_evidence_sha256
+		FROM shard_placements WHERE unit='s0-b'`).Scan(&oldState, &recordedDigest); err != nil {
+		t.Fatal(err)
+	}
+	if oldState != "retiring" || recordedDigest != digest {
+		t.Fatalf("old copy did not retain its retirement proof: state=%q digest=%q", oldState, recordedDigest)
+	}
+	primaryLocation := auditLocation{Node: candidate.Source.Node, Unit: candidate.Source.Unit, Role: "primary"}
+	targetLocation := auditLocation{Node: candidate.Target.Node, Unit: candidate.Target.Unit, Role: "replica"}
+	locationAPI := auditAPI{store: store, cfg: Config{ShardURLs: [logicalShardCount]string{"routed"}}}
+	copies, missing := locationAPI.auditLocationPlacement(t.Context())
+	if missing {
+		t.Fatal("audit could not read verified placement")
+	}
+	locations, unavailable := reconcileLocationPlacement(copies, []locationProbeResult{
+		{location: primaryLocation, shardID: candidate.ShardID, found: true},
+		{location: targetLocation, shardID: candidate.ShardID, found: true},
+		{probeUnit: "copy-1", boundUnit: candidate.OldReplica.Unit, partial: true},
+	})
+	if len(locations) != 2 || len(unavailable) != 0 {
+		t.Fatalf("verified replacement and proven loss: locations=%+v unavailable=%v", locations, unavailable)
+	}
+	if _, err := store.write.Exec(t.Context(), `UPDATE shard_repair_jobs SET candidate=candidate-'source_timeline'
+		WHERE shard_id=$1`, candidate.ShardID); err != nil {
+		t.Fatal(err)
+	}
+
+	// A replacement disk can have the same placement identity while Patroni is still initializing it.
+	patroni := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte(`{"patroni":{"scope":"scope","name":"target"},"state":"stopped","role":"uninitialized"}`))
+	}))
+	t.Cleanup(patroni.Close)
+	candidate.Target.PatroniURL = patroni.URL
+	primary := repairEvidence{Unit: candidate.Source.Unit, Node: candidate.Source.Node, SystemID: evidence.SystemID,
+		Timeline: evidence.PrimaryTimeline, PrimaryLSN: evidence.PrimaryLSN}
+	if verified, err := store.repairStillVerified(t.Context(), candidate, primary); err != nil || verified {
+		t.Fatalf("uninitialized replacement treated as verified: verified=%t err=%v", verified, err)
+	}
 	completed, err := store.placement(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if done, err := store.repairAlreadyVerified(t.Context(), candidate, completed.Copies); err != nil || !done {
-		t.Fatalf("durably verified ready target not recognized: done=%t err=%v", done, err)
+	candidate.Source, candidate.OldReplica, err = repairPlacementMembers(candidate, completed.Copies)
+	if err != nil || candidate.OldReplica.Unit != "" {
+		t.Fatalf("lost target was selected as its own old replica: %v", err)
 	}
-	var oldState string
-	if err := store.write.QueryRow(t.Context(), "SELECT state FROM shard_placements WHERE unit='s0-b'").Scan(&oldState); err != nil {
+	replacedRevision, err := store.reserveStandbyRepair(t.Context(), completed, candidate, repairIntent(candidate, primary))
+	if err != nil || replacedRevision <= completed.Revision {
+		t.Fatalf("replacement reservation: revision=%d err=%v", replacedRevision, err)
+	}
+	if err := store.write.QueryRow(t.Context(), `SELECT j.status,p.state FROM shard_repair_jobs j
+		JOIN shard_placements p ON p.unit=j.unit WHERE j.shard_id=$1`, candidate.ShardID).Scan(&status, &targetState); err != nil {
 		t.Fatal(err)
 	}
-	if oldState != "retiring" {
-		t.Fatalf("old copy was not retired: %q", oldState)
+	if status != "reserved" || targetState != "copying" {
+		t.Fatalf("replacement was not reserved: job=%q target=%q", status, targetState)
+	}
+	copying, err := store.placement(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	primary.Timeline++
+	newTimelineRevision, err := store.reserveStandbyRepair(t.Context(), copying, candidate, repairIntent(candidate, primary))
+	if err != nil || newTimelineRevision <= replacedRevision {
+		t.Fatalf("same member on a new timeline reused the old revision: revision=%d err=%v", newTimelineRevision, err)
+	}
+	if err := store.setStandbyRepairStatus(t.Context(), candidate, replacedRevision, "provisioning"); !errors.Is(err, errRepairUnsafeEvidence) {
+		t.Fatalf("previous timeline advanced the replacement job: %v", err)
 	}
 }
 
@@ -189,6 +264,10 @@ func TestRepairResolvesReversedPlacementRoles(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	if _, err := store.write.Exec(t.Context(), `INSERT INTO shard_copy_loss_attestations
+		(unit,shard_id,node,evidence_sha256) VALUES ('s0-a',0,'wrong-node',$1)`, strings.Repeat("b", 64)); err != nil {
+		t.Fatal(err)
+	}
 	if err := store.completeStandbyRepair(t.Context(), candidate, revision, evidence); err != nil {
 		t.Fatal(err)
 	}
@@ -211,6 +290,27 @@ func TestRepairResolvesReversedPlacementRoles(t *testing.T) {
 	}
 	if len(want) != 0 {
 		t.Fatalf("physical copy rows missing: %+v", want)
+	}
+	isRetired := func() bool {
+		t.Helper()
+		var retired bool
+		if err := store.read.QueryRow(t.Context(), `SELECT retirement_evidence_sha256 IS NOT NULL
+			FROM shard_placements WHERE unit='s0-a'`).Scan(&retired); err != nil {
+			t.Fatal(err)
+		}
+		return retired
+	}
+	if isRetired() {
+		t.Fatal("wrong-node attestation accepted")
+	}
+	if _, err := store.write.Exec(t.Context(), "UPDATE shard_copy_loss_attestations SET node='node-a' WHERE unit='s0-a'"); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.confirmLateRetirements(t.Context(), candidate.ShardID, revision); err != nil || isRetired() {
+		t.Fatalf("stale late retirement accepted: err=%v", err)
+	}
+	if err := store.confirmLateRetirements(t.Context(), candidate.ShardID, completed.Revision); err != nil || !isRetired() {
+		t.Fatalf("late exact retirement not recorded: err=%v", err)
 	}
 }
 

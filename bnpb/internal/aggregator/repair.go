@@ -24,7 +24,6 @@ var (
 	errRepairConfiguration  = errors.New("BNPB_SHARD_REPAIR_CANDIDATES: invalid configuration")
 	errRepairUnsafeEvidence = errors.New("standby repair evidence is incomplete or unsafe")
 	errRepairReplicaHealthy = errors.New("known replica is healthy")
-	errRepairAlreadyReady   = errors.New("repair target is already verified")
 )
 
 const maxRepairCandidatesBytes = 64 << 10
@@ -71,6 +70,17 @@ type repairTargetIdentity struct {
 	Claim            string `json:"claim"`
 }
 
+type repairJobIntent struct {
+	repairTargetIdentity
+	SystemID       string          `json:"system_id"`
+	SourceUnit     string          `json:"source_unit"`
+	SourceNode     string          `json:"source_node"`
+	OldReplicaUnit string          `json:"old_replica_unit"`
+	OldReplicaNode string          `json:"old_replica_node"`
+	SourceTimeline uint32          `json:"source_timeline"`
+	Evidence       *repairEvidence `json:"evidence,omitempty"`
+}
+
 func (candidate standbyRepairCandidate) targetIdentity() repairTargetIdentity {
 	return repairTargetIdentity{
 		ShardID: candidate.ShardID, Unit: candidate.Target.Unit, Node: candidate.Target.Node,
@@ -108,7 +118,7 @@ func parseStandbyRepairCandidates(raw string) ([]standbyRepairCandidate, error) 
 			len(candidate.Sources) == 0 || len(candidate.Sources) > logicalShardCount || !validRepairMember(candidate.Target) ||
 			!validText(candidate.Namespace) || !validText(candidate.StatefulSet) || !validText(candidate.PatroniConfigMap) || !validText(candidate.Claim) ||
 			seenUnits[candidate.Target.Unit] || (!noKnownReplica && (!validRepairMember(candidate.KnownReplica) ||
-			candidate.KnownReplica.Unit == candidate.Target.Unit)) {
+			candidate.KnownReplica.Unit == candidate.Target.Unit || candidate.KnownReplica.Scope != candidate.Target.Scope)) {
 			return nil, errRepairConfiguration
 		}
 		seenSources := make(map[string]bool, len(candidate.Sources))
@@ -118,9 +128,6 @@ func parseStandbyRepairCandidates(raw string) ([]standbyRepairCandidate, error) 
 				return nil, errRepairConfiguration
 			}
 			seenSources[source.Unit] = true
-		}
-		if !noKnownReplica && (!validRepairMember(candidate.KnownReplica) || candidate.KnownReplica.Scope != candidate.Target.Scope) {
-			return nil, errRepairConfiguration
 		}
 		seenUnits[candidate.Target.Unit] = true
 	}
@@ -210,26 +217,22 @@ func (store *Store) reconcileStandbyRepair(ctx context.Context, candidate standb
 	if validatePlacement(current.Copies) != nil {
 		return errInvalidPlacement
 	}
-	done, err := store.repairAlreadyVerified(ctx, candidate, current.Copies)
-	if err != nil {
-		return err
-	}
-	if done {
-		return nil
-	}
 	source, oldReplica, err := repairPlacementMembers(candidate, current.Copies)
 	if err != nil {
 		return err
 	}
 	candidate.Source, candidate.OldReplica = source, oldReplica
-	resuming := false
+	var targetState string
 	for _, copy := range current.Copies {
-		if copy.Unit == candidate.Target.Unit && copy.State == "copying" {
-			resuming = true
+		if copy.Unit == candidate.Target.Unit {
+			if copy.ShardID != candidate.ShardID || copy.Node != candidate.Target.Node || copy.Role != "replica" {
+				return errInvalidPlacement
+			}
+			targetState = copy.State
 			break
 		}
 	}
-	if !resuming {
+	if targetState != "copying" && targetState != "ready" {
 		if err := confirmKnownReplicaUnhealthy(ctx, candidate.ShardID, oldReplica); errors.Is(err, errRepairReplicaHealthy) {
 			return nil
 		} else if err != nil {
@@ -240,11 +243,17 @@ func (store *Store) reconcileStandbyRepair(ctx context.Context, candidate standb
 	if err != nil {
 		return sanitizeRepairError(err)
 	}
+	if targetState == "ready" {
+		verified, err := store.repairStillVerified(ctx, candidate, primaryEvidence)
+		if err != nil {
+			return err
+		}
+		if verified {
+			return store.confirmLateRetirements(ctx, candidate.ShardID, current.Revision)
+		}
+	}
 	reservedRevision, err := store.reserveStandbyRepair(ctx, current, candidate, repairIntent(candidate, primaryEvidence))
 	if err != nil {
-		if errors.Is(err, errRepairAlreadyReady) {
-			return nil
-		}
 		return err
 	}
 	if err := store.setStandbyRepairStatus(ctx, candidate, reservedRevision, "provisioning"); err != nil {
@@ -270,57 +279,68 @@ func (store *Store) reconcileStandbyRepair(ctx context.Context, candidate standb
 	}
 	return store.completeStandbyRepair(ctx, candidate, reservedRevision, observed)
 }
-func (store *Store) repairAlreadyVerified(ctx context.Context, candidate standbyRepairCandidate, copies []shardPlacement) (bool, error) {
-	found := false
-	targetState := ""
-	for _, copy := range copies {
-		if copy.Unit != candidate.Target.Unit {
-			continue
-		}
-		if copy.ShardID != candidate.ShardID || copy.Node != candidate.Target.Node || copy.Role != "replica" ||
-			(copy.State != "ready" && copy.State != "copying") {
-			return false, errInvalidPlacement
-		}
-		found, targetState = true, copy.State
+
+const confirmCopyRetirementsSQL = `UPDATE shard_placements AS placement
+	SET retirement_evidence_sha256 = attestation.evidence_sha256
+	FROM shard_copy_loss_attestations AS attestation
+	WHERE placement.shard_id=$1 AND placement.unit=attestation.unit AND placement.shard_id=attestation.shard_id
+		AND placement.node=attestation.node AND placement.state='retiring'
+		AND placement.retirement_evidence_sha256 IS NULL`
+
+func (store *Store) confirmLateRetirements(ctx context.Context, shardID int16, revision int64) error {
+	pool, err := store.repairPool()
+	if err != nil {
+		return err
 	}
-	if !found {
-		return false, nil
-	}
+	ctx, cancel := context.WithTimeout(ctx, store.writeTimeout)
+	defer cancel()
+	// Recheck the placement after probing the ready primary and replacement.
+	// Lock in placement CAS order before the update trigger advances the revision.
+	_, err = pool.Exec(ctx, `WITH verified_revision AS MATERIALIZED (
+		SELECT revision FROM placement_revision WHERE singleton AND revision=$2 FOR UPDATE
+	) `+confirmCopyRetirementsSQL+` AND EXISTS (SELECT 1 FROM verified_revision)`, shardID, revision)
+	return storeError("confirm late copy retirement", err)
+}
+
+func (store *Store) repairStillVerified(ctx context.Context, candidate standbyRepairCandidate, primary repairEvidence) (bool, error) {
 	pool, err := store.repairPool()
 	if err != nil {
 		return false, err
 	}
-	ctx, cancel := context.WithTimeout(ctx, store.writeTimeout)
-	defer cancel()
-	var status string
+	queryCtx, cancel := context.WithTimeout(ctx, store.writeTimeout)
 	var raw []byte
-	if err := pool.QueryRow(ctx, "SELECT status,candidate FROM shard_repair_jobs WHERE shard_id=$1 AND unit=$2 AND node=$3",
-		candidate.ShardID, candidate.Target.Unit, candidate.Target.Node).Scan(&status, &raw); err != nil {
-		return false, errInvalidPlacement
-	}
-	var stored repairTargetIdentity
-	if json.Unmarshal(raw, &stored) != nil || stored != candidate.targetIdentity() {
-		return false, errInvalidPlacement
-	}
-	switch status {
-	case "reserved", "provisioning", "copying":
-		if targetState != "copying" {
-			return false, errInvalidPlacement
+	err = pool.QueryRow(queryCtx, `SELECT candidate FROM shard_repair_jobs
+		WHERE shard_id=$1 AND unit=$2 AND node=$3 AND status='verified'`,
+		candidate.ShardID, candidate.Target.Unit, candidate.Target.Node).Scan(&raw)
+	cancel()
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return false, errPlacementChanged
 		}
+		return false, storeError("read verified standby repair", err)
+	}
+	var stored repairJobIntent
+	if json.Unmarshal(raw, &stored) != nil || stored.repairTargetIdentity != candidate.targetIdentity() ||
+		stored.SystemID != primary.SystemID || stored.Evidence == nil {
+		return false, errInvalidPlacement
+	}
+	prior := *stored.Evidence
+	if prior.PrimaryUnit != primary.Unit || prior.PrimaryNode != primary.Node || prior.PrimaryTimeline != primary.Timeline {
 		return false, nil
-	case "verified":
-		if targetState != "ready" {
-			return false, errInvalidPlacement
-		}
-		return true, nil
-	default:
-		return false, errInvalidPlacement
 	}
+	if !lsnAtLeast(primary.PrimaryLSN, prior.PrimaryLSN) {
+		return false, errRepairUnsafeEvidence
+	}
+	target, err := synchronousRepairTarget(ctx, candidate, primary)
+	if unavailableRepairProbe(err) {
+		return false, ctx.Err()
+	}
+	return err == nil && lsnAtLeast(target.ReplayLSN, prior.PrimaryLSN), sanitizeRepairError(err)
 }
 
 func repairPlacementMembers(candidate standbyRepairCandidate, copies []shardPlacement) (source, oldReplica repairMember, err error) {
 	for _, copy := range copies {
-		if copy.ShardID != candidate.ShardID || copy.State != "ready" {
+		if copy.ShardID != candidate.ShardID || copy.State != "ready" || copy.Unit == candidate.Target.Unit {
 			continue
 		}
 		if copy.Role == "primary" {
@@ -419,7 +439,7 @@ func sanitizeRepairError(err error) error {
 	return errors.New("standby repair dependency failed")
 }
 
-func (store *Store) reserveStandbyRepair(ctx context.Context, current placementSnapshot, candidate standbyRepairCandidate, intent []byte) (revision int64, err error) {
+func (store *Store) reserveStandbyRepair(ctx context.Context, current placementSnapshot, candidate standbyRepairCandidate, intent repairJobIntent) (revision int64, err error) {
 	pool, err := store.repairPool()
 	if err != nil {
 		return 0, err
@@ -441,21 +461,45 @@ func (store *Store) reserveStandbyRepair(ctx context.Context, current placementS
 	if validatePlacement(locked.Copies) != nil {
 		return 0, errInvalidPlacement
 	}
-	revision, err = reservePlacementTarget(ctx, tx, locked, candidate)
+	encoded, err := json.Marshal(intent)
 	if err != nil {
 		return 0, err
 	}
-	tag, err := tx.Exec(ctx, `INSERT INTO shard_repair_jobs AS job (shard_id,unit,node,placement_revision,status,candidate)
+	var previousRaw []byte
+	var previousRevision int64
+	var resume bool
+	err = tx.QueryRow(ctx, `SELECT candidate, placement_revision, placement_revision=$2 AND candidate=$3::jsonb
+		AND status IN ('reserved','provisioning','copying')
+		FROM shard_repair_jobs WHERE shard_id=$1 FOR UPDATE`, candidate.ShardID, current.Revision, encoded).
+		Scan(&previousRaw, &previousRevision, &resume)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return 0, storeError("lock standby repair", err)
+	}
+	var previous repairJobIntent
+	if err == nil && (json.Unmarshal(previousRaw, &previous) != nil || previous.SystemID != intent.SystemID ||
+		(previous.Unit == intent.Unit && previous.repairTargetIdentity != intent.repairTargetIdentity)) {
+		return 0, errInvalidPlacement
+	}
+	if resume {
+		return current.Revision, storeError("resume standby repair", tx.Commit(ctx))
+	}
+	revision, err = reservePlacementTarget(ctx, tx, locked, candidate, previous.Unit)
+	if err != nil {
+		return 0, err
+	}
+	// A different intent can reuse a copying placement, but never the previous job's revision.
+	if revision == previousRevision {
+		if err := tx.QueryRow(ctx, `UPDATE placement_revision SET revision=revision+1 WHERE singleton RETURNING revision`).Scan(&revision); err != nil {
+			return 0, storeError("advance standby repair revision", err)
+		}
+	}
+	_, err = tx.Exec(ctx, `INSERT INTO shard_repair_jobs (shard_id,unit,node,placement_revision,status,candidate)
         VALUES ($1,$2,$3,$4,'reserved',$5::jsonb) ON CONFLICT (shard_id) DO UPDATE
-        SET placement_revision=EXCLUDED.placement_revision
-        WHERE job.unit=EXCLUDED.unit AND job.node=EXCLUDED.node AND job.candidate=EXCLUDED.candidate
-        AND job.status IN ('reserved','provisioning','copying')`,
-		candidate.ShardID, candidate.Target.Unit, candidate.Target.Node, revision, intent)
+        SET unit=EXCLUDED.unit,node=EXCLUDED.node,placement_revision=EXCLUDED.placement_revision,
+            status='reserved',candidate=EXCLUDED.candidate,last_error=NULL,updated_at=now()`,
+		candidate.ShardID, candidate.Target.Unit, candidate.Target.Node, revision, encoded)
 	if err != nil {
 		return 0, storeError("reserve standby repair", err)
-	}
-	if tag.RowsAffected() != 1 {
-		return 0, errInvalidPlacement
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return 0, storeError("commit standby repair reservation", err)
@@ -463,27 +507,30 @@ func (store *Store) reserveStandbyRepair(ctx context.Context, current placementS
 	return revision, nil
 }
 
-func reservePlacementTarget(ctx context.Context, tx pgx.Tx, current placementSnapshot, candidate standbyRepairCandidate) (int64, error) {
+func reservePlacementTarget(ctx context.Context, tx pgx.Tx, current placementSnapshot, candidate standbyRepairCandidate, previousUnit string) (int64, error) {
 	target := shardPlacement{ShardID: candidate.ShardID, Unit: candidate.Target.Unit, Node: candidate.Target.Node, Role: "replica", State: "copying"}
-	for _, existing := range current.Copies {
-		if existing.Unit != target.Unit {
-			continue
-		}
-		if existing.ShardID != target.ShardID || existing.Node != target.Node || existing.Role != target.Role {
-			return 0, errInvalidPlacement
-		}
-		switch existing.State {
-		case "ready":
-			var status string
-			if err := tx.QueryRow(ctx, "SELECT status FROM shard_repair_jobs WHERE shard_id=$1 AND unit=$2 FOR UPDATE", target.ShardID, target.Unit).Scan(&status); err == nil && status == "verified" {
-				return 0, errRepairAlreadyReady
+	proposed := placementSnapshot{Revision: current.Revision, Copies: slices.Clone(current.Copies)}
+	found := false
+	for i, copy := range proposed.Copies {
+		switch copy.Unit {
+		case target.Unit:
+			if copy.ShardID != target.ShardID || copy.Node != target.Node || copy.Role != target.Role {
+				return 0, errInvalidPlacement
 			}
-		case "copying":
-			return current.Revision, nil
+			proposed.Copies[i] = target
+			found = true
+		case previousUnit:
+			if copy.State == "copying" {
+				proposed.Copies[i].State = "retiring"
+			}
 		}
-		return 0, errInvalidPlacement
 	}
-	proposed := placementSnapshot{Revision: current.Revision, Copies: append(current.Copies, target)}
+	if !found {
+		proposed.Copies = append(proposed.Copies, target)
+	}
+	if slices.Equal(current.Copies, proposed.Copies) {
+		return current.Revision, nil
+	}
 	if validatePlacement(proposed.Copies) != nil {
 		return 0, errInvalidPlacement
 	}
@@ -595,6 +642,9 @@ func (store *Store) completeStandbyRepair(ctx context.Context, candidate standby
 	if err := recordPlacementChange(ctx, tx, proposed, current); err != nil {
 		return err
 	}
+	if _, err := tx.Exec(ctx, confirmCopyRetirementsSQL, candidate.ShardID); err != nil {
+		return storeError("confirm copy retirement", err)
+	}
 	var revision int64
 	if err := tx.QueryRow(ctx, "SELECT revision FROM placement_revision WHERE singleton").Scan(&revision); err != nil {
 		return storeError("read completed placement revision", err)
@@ -603,10 +653,14 @@ func (store *Store) completeStandbyRepair(ctx context.Context, candidate standby
 	if err != nil {
 		return err
 	}
+	intent, err := json.Marshal(repairIntent(candidate, evidence))
+	if err != nil {
+		return err
+	}
 	tag, err := tx.Exec(ctx, `UPDATE shard_repair_jobs SET status='verified',placement_revision=$3,
         candidate=candidate || jsonb_build_object('evidence',$4::jsonb),updated_at=now(),last_error=NULL
         WHERE shard_id=$1 AND unit=$2 AND status='copying' AND placement_revision=$5 AND candidate=$6::jsonb`,
-		candidate.ShardID, candidate.Target.Unit, revision, encoded, reservedRevision, repairIntent(candidate, evidence))
+		candidate.ShardID, candidate.Target.Unit, revision, encoded, reservedRevision, intent)
 	if err != nil {
 		return storeError("complete standby repair", err)
 	}
@@ -616,18 +670,12 @@ func (store *Store) completeStandbyRepair(ctx context.Context, candidate standby
 	return storeError("commit standby repair", tx.Commit(ctx))
 }
 
-func repairIntent(candidate standbyRepairCandidate, evidence repairEvidence) []byte {
-	intent := struct {
-		repairTargetIdentity
-		SystemID       string `json:"system_id"`
-		SourceUnit     string `json:"source_unit"`
-		SourceNode     string `json:"source_node"`
-		OldReplicaUnit string `json:"old_replica_unit"`
-		OldReplicaNode string `json:"old_replica_node"`
-	}{candidate.targetIdentity(), evidence.SystemID,
-		candidate.Source.Unit, candidate.Source.Node, candidate.OldReplica.Unit, candidate.OldReplica.Node}
-	encoded, _ := json.Marshal(intent)
-	return encoded
+func repairIntent(candidate standbyRepairCandidate, evidence repairEvidence) repairJobIntent {
+	return repairJobIntent{
+		repairTargetIdentity: candidate.targetIdentity(), SystemID: evidence.SystemID, SourceTimeline: evidence.Timeline,
+		SourceUnit: candidate.Source.Unit, SourceNode: candidate.Source.Node,
+		OldReplicaUnit: candidate.OldReplica.Unit, OldReplicaNode: candidate.OldReplica.Node,
+	}
 }
 
 func verifyRepairEvidence(primary, replacement repairEvidence, candidate standbyRepairCandidate) error {
@@ -651,7 +699,7 @@ func lsnAtLeast(replay, boundary string) bool {
 }
 
 func parseLSN(position string) (uint64, error) {
-	// AI-assisted fix: validate the whole PostgreSQL WAL position before using it as repair evidence.
+
 	highPart, lowPart, found := strings.Cut(position, "/")
 	if !found || len(highPart) > 8 || len(lowPart) > 8 {
 		return 0, errRepairUnsafeEvidence
