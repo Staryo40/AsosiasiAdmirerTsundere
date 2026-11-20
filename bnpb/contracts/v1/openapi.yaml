@@ -350,8 +350,8 @@ paths:
       summary: Proxy failed-input metadata
       description: >-
         Proxies metadata only from the configured Member 3 API; raw payloads are
-        never returned. Missing, malformed, oversized or unavailable upstream
-        yields bounded 503, not an empty success.
+        never returned. Missing, incomplete, malformed, oversized or unavailable
+        upstream results yield bounded 503.
       security:
         - AuditBearer: []
       parameters:

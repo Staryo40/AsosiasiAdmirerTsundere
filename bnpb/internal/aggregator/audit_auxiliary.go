@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -125,11 +124,14 @@ func (api auditAPI) unprocessed(w http.ResponseWriter, request *http.Request) {
 
 func decodeUnprocessedEnvelope(body []byte, limit int, source string) (unprocessedEnvelope, bool) {
 	var raw map[string]json.RawMessage
-	decoder := json.NewDecoder(bytes.NewReader(body))
-	if err := decoder.Decode(&raw); err != nil || raw == nil {
+	if validateJSON(body) != nil || json.Unmarshal(body, &raw) != nil || raw == nil {
 		return unprocessedEnvelope{}, false
 	}
-	if err := decoder.Decode(new(any)); !errors.Is(err, io.EOF) {
+
+	var partial bool
+	var unavailable []string
+	if (raw["partial"] != nil && (!decodeField(raw, "partial", &partial) || partial)) ||
+		(raw["unavailable_units"] != nil && (!decodeField(raw, "unavailable_units", &unavailable) || len(unavailable) != 0)) {
 		return unprocessedEnvelope{}, false
 	}
 	itemsRaw, hasItems := raw["items"]

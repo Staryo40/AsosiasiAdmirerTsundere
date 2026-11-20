@@ -222,7 +222,7 @@ Migration 010 adds the Audit access indexes in C byte order: `(ingested_at, haza
 
 Cross-shard events/checksum reads may return reachable data with `partial=true` and `unavailable_units`; a partial cursor repeats the last complete boundary (or an opaque start marker on an incomplete first page). `/location` verifies row presence, live PostgreSQL role, and logical identity in the same probe, then reconciles the observed `bnpb.node_name` / `bnpb.unit_name` with placement. Logical primary routes do not report standbys. It returns distinct verified locations and marks uncertainty `partial`; verified absence is 404. A2 must still attest that the server-side settings match real Kubernetes nodes.
 
-`/unprocessed` is a metadata-only proxy to the Member 3 owner API. Missing, unreachable, malformed, oversized, or out-of-filter results yield 503, not an empty success. Reject out-of-filter results rather than reusing the owner's opaque cursor for a locally filtered page. The real Member 3 API has not been observed here.
+`/unprocessed` is a metadata-only proxy to the Member 3 owner API. Missing, unreachable, malformed, oversized, out-of-filter, or incomplete results yield bounded 503. The owner may omit degradation fields on complete responses or send `partial: false` and an empty `unavailable_units` list. The proxy preserves `items` and `next_cursor` for complete pages. It rejects incomplete pages because the owner contract does not establish a safe continuation cursor. The real Member 3 API has not been observed here.
 
 The metadata owner must keep `reason` safe for the dedicated Audit credential; never put the raw message in this field. Validate the deployed lifecycle and ensure failed-payload inspection remains Internal Ops-only.
 

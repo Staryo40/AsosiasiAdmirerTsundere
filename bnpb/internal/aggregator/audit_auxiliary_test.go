@@ -30,7 +30,7 @@ func TestAuditUnprocessedMetadataProxyLifecycle(t *testing.T) {
 		seenQueries = append(seenQueries, r.URL.Query())
 		w.Header().Set("Content-Type", "application/json")
 		if state == "gone" {
-			_, _ = w.Write([]byte(`{"items":[],"next_cursor":null}`))
+			_, _ = w.Write([]byte(`{"items":[],"next_cursor":null,"partial":false,"unavailable_units":[]}`))
 			return
 		}
 		items := `{"message_id":"msg-1","source":"PVMBG","received_at":"2026-11-18T12:13:14Z","reason":"schema incompatible","retryable":true,"attempts":2,"status":"` + state + `","raw_payload":"SECRET-RAW"}`
@@ -96,7 +96,7 @@ func TestAuditUnprocessedMetadataProxyLifecycle(t *testing.T) {
 	if err := json.Unmarshal(last.Body.Bytes(), &result); err != nil {
 		t.Fatal(err)
 	}
-	if len(result.Items) != 0 || result.NextCursor != nil || calls != 4 {
+	if strings.TrimSpace(last.Body.String()) != `{"items":[],"next_cursor":null}` || calls != 4 {
 		t.Fatalf("recovered response=%+v calls=%d", result, calls)
 	}
 }
@@ -146,6 +146,18 @@ func TestAuditUnprocessedUnavailableAndMalformedResponsesFailClosed(t *testing.T
 		"missing_cursor": func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(`{"items":[]}`)) },
 		"empty_cursor": func(w http.ResponseWriter, _ *http.Request) {
 			_, _ = w.Write([]byte(`{"items":[],"next_cursor":""}`))
+		},
+		"partial_terminal": func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = w.Write([]byte(`{"items":[],"next_cursor":null,"partial":true,"unavailable_units":["owner-shard-1"]}`))
+		},
+		"unavailable_without_partial": func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = w.Write([]byte(`{"items":[],"next_cursor":null,"unavailable_units":["owner-shard-1"]}`))
+		},
+		"malformed_partial": func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = w.Write([]byte(`{"items":[],"next_cursor":null,"partial":null}`))
+		},
+		"duplicate_partial": func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = w.Write([]byte(`{"items":[],"next_cursor":null,"partial":true,"partial":false}`))
 		},
 		"null_retryable": func(w http.ResponseWriter, _ *http.Request) {
 			_, _ = w.Write([]byte(`{"items":[{"message_id":"m","source":"PVMBG","received_at":"2026-11-18T00:00:00Z","reason":"r","retryable":null,"attempts":0,"status":"retrying"}],"next_cursor":null}`))
