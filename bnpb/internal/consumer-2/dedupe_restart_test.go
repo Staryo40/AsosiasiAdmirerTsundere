@@ -1,10 +1,16 @@
 package consumer2
 
 import (
+	"encoding/json"
 	"errors"
+	"io"
+	"log/slog"
+	"net"
 	"path/filepath"
 	"testing"
 	"time"
+
+	amqp "github.com/rabbitmq/amqp091-go"
 )
 
 func TestDedupeSurvivesRestartAndAgedMessageRetry(t *testing.T) {
@@ -57,4 +63,42 @@ func TestDedupeSurvivesRestartAndAgedMessageRetry(t *testing.T) {
 	if stats.AlertsSent != 2 || stats.MessagesSeen != 2 {
 		t.Fatalf("unexpected durable effects after retries: %+v", stats)
 	}
+
+	worker.logger = slog.New(slog.NewJSONHandler(io.Discard, nil))
+	body, err := json.Marshal(created)
+	if err != nil {
+		t.Fatal(err)
+	}
+	socket, peer := net.Pipe()
+	defer socket.Close()
+	defer peer.Close()
+	acknowledger := &duplicateDeliveryAcknowledger{}
+	delivery := amqp.Delivery{Acknowledger: acknowledger, DeliveryTag: 17, MessageId: "created-message", Body: body}
+	if err := worker.handleDelivery(ctx, &consumerSession{socket: socket}, delivery); err != nil {
+		t.Fatalf("aged duplicate entered failure handling: %v", err)
+	}
+	if acknowledger.ackedTag != delivery.DeliveryTag {
+		t.Fatal("aged duplicate was not acknowledged")
+	}
+	var attempts int
+	if err := reopened.db.QueryRowContext(ctx, "SELECT count(*) FROM delivery_attempts").Scan(&attempts); err != nil || attempts != 0 {
+		t.Fatalf("aged duplicate consumed a retry: %d, %v", attempts, err)
+	}
+}
+
+type duplicateDeliveryAcknowledger struct {
+	ackedTag uint64
+}
+
+func (acknowledger *duplicateDeliveryAcknowledger) Ack(tag uint64, _ bool) error {
+	acknowledger.ackedTag = tag
+	return nil
+}
+
+func (*duplicateDeliveryAcknowledger) Nack(uint64, bool, bool) error {
+	return errors.New("duplicate delivery must not be requeued")
+}
+
+func (*duplicateDeliveryAcknowledger) Reject(uint64, bool) error {
+	return errors.New("duplicate delivery must not be rejected")
 }

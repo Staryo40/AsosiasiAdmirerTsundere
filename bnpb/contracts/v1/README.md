@@ -81,7 +81,7 @@ Skema utama menerima atribut opsional tambahan bagi konsumen; `#/$defs/Producer`
 
 Exchange `hazard.events` bertipe `fanout` menggunakan antrean konsumen terpisah. Pengiriman bersifat *at-least-once*: satu outbox per `(hazard_id, revision)` dikomit bersama perubahan data; transaksi tidak ditahan saat publikasi. Sukses memerlukan ACK produsen tanpa pengembalian wajib. Pengiriman ulang mempertahankan identitas, isi, dan waktu pesan. Konsumen menangani duplikasi, mengabaikan revisi lama atau sama, dan melakukan ACK setelah pemrosesan berhasil. Efek *exactly-once* tidak dijamin.
 
-Identitas dedupe dan catatan percobaan konsumen tidak lagi dipangkas berdasarkan umur; efek dan dedupe dikomit dalam transaksi SQLite yang sama sebelum ACK. Tabel ini tumbuh sesuai riwayat pengiriman, sehingga kapasitas disk dan backpressure harus dipantau.
+Ketiga konsumen (`consumer-1`, `consumer-2`, `consumer-3`) mempertahankan identitas dedupe dan catatan percobaan tanpa pemangkasan umur; efek dan dedupe dikomit dalam transaksi SQLite yang sama sebelum ACK. Replay lama yang sudah berhasil diakui sebagai duplikat, bukan dikirim ke antrean gagal. Tabel ini tumbuh sesuai riwayat pengiriman, sehingga kapasitas disk dan backpressure harus dipantau.
 
 Perubahan sumber kebijakan broker telah diizinkan, tetapi belum diterapkan ke broker berjalan: antrean utama dibatasi 10.000 pesan dan antrean gagal 1.000 pesan, memakai `overflow: reject-publish` tanpa TTL atau expiry. Antrean penuh menolak publikasi agar outbox atau handoff gagal tetap dapat diulang, bukan menghapus pesan yang sudah diterima. Konfirmasi broker tetap bukan bukti pemrosesan konsumen; pengiriman broker langsung dan pemulihan infrastrukturnya belum diuji.
 
