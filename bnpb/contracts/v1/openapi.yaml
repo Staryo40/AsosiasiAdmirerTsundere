@@ -278,17 +278,17 @@ paths:
   /internal/audit/checksum:
     get:
       operationId: auditChecksum
-      summary: Compute per-source active-event checksum
+      summary: Compute active-event checksum for one or all sources
       description: >-
         Count logical events; byte-sort every source_ref_id, retaining duplicate
         values from distinct events, join with LF and SHA-256 the bytes without
-        a final LF. The empty source hashes the empty byte sequence.
+        a final LF. Omitting source includes all sources and returns source: null.
+        An empty result hashes the empty byte sequence.
       security:
         - AuditBearer: []
       parameters:
         - name: source
           in: query
-          required: true
           schema:
             $ref: './schemas/hazard-event.schema.json#/properties/source'
       responses:
@@ -767,7 +767,9 @@ components:
       additionalProperties: false
       properties:
         source:
-          $ref: './schemas/hazard-event.schema.json#/properties/source'
+          anyOf:
+            - $ref: './schemas/hazard-event.schema.json#/properties/source'
+            - type: 'null'
         count: {type: integer, minimum: 0}
         checksum:
           type: string
