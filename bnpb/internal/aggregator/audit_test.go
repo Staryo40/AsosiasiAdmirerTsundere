@@ -1,6 +1,7 @@
 package aggregator
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -185,9 +186,89 @@ func TestAuditLocationDropsConflictingUnitsAndSortsVerifiedLocations(t *testing.
 		{location: other, shardID: 1, found: true},
 		{location: replica, shardID: 1, found: true},
 	}
-	locations, partial := reconcileLocationPlacement(nil, observed)
-	if !partial || !reflect.DeepEqual(locations, []auditLocation{primary, replica}) {
-		t.Fatalf("locations=%+v partial=%t", locations, partial)
+	locations, unavailable := reconcileLocationPlacement(nil, observed)
+	if !reflect.DeepEqual(unavailable, []string{conflict.Unit}) || !reflect.DeepEqual(locations, []auditLocation{primary, replica}) {
+		t.Fatalf("locations=%+v unavailable=%v", locations, unavailable)
+	}
+}
+
+func TestAuditLocationKeepsPromotedCopyWhileReportingRoleDrift(t *testing.T) {
+	promoted := auditLocation{Node: "node-b", Unit: "s0-b", Role: "primary"}
+	expected := []locationPlacementCopy{
+		{shardPlacement: shardPlacement{ShardID: 0, Unit: "s0-a", Node: "node-a", Role: "primary", State: "ready"}},
+		{shardPlacement: shardPlacement{ShardID: 0, Unit: promoted.Unit, Node: promoted.Node, Role: "replica", State: "ready"}},
+	}
+	observed := []locationProbeResult{{location: promoted, shardID: 0, found: true}}
+	locations, unavailable := reconcileLocationPlacement(expected, observed)
+	promoted.RoleDrift = true
+	if !reflect.DeepEqual(locations, []auditLocation{promoted}) || !reflect.DeepEqual(unavailable, []string{"s0-b", "s0-a"}) {
+		t.Fatalf("locations=%+v unavailable=%v", locations, unavailable)
+	}
+	observed = append(observed, locationProbeResult{
+		location: auditLocation{Node: promoted.Node, Unit: promoted.Unit, Role: "replica"}, shardID: 0, found: true,
+	})
+	locations, unavailable = reconcileLocationPlacement(expected, observed)
+	if !reflect.DeepEqual(locations, []auditLocation{promoted}) || len(unavailable) == 0 {
+		t.Fatalf("conflicting roles erased the positive probe: locations=%+v unavailable=%v", locations, unavailable)
+	}
+}
+
+func TestAuditLocationRequiresRetirementProofForMissingCopies(t *testing.T) {
+	primary := auditLocation{Node: "node-a", Unit: "s0-a", Role: "primary"}
+	replacement := auditLocation{Node: "node-d", Unit: "s0-d", Role: "replica"}
+	lost := auditLocation{Node: "node-b", Unit: "s0-b", Role: "replica"}
+	expected := []locationPlacementCopy{
+		{shardPlacement: shardPlacement{ShardID: 0, Unit: primary.Unit, Node: primary.Node, Role: primary.Role, State: "ready"}},
+		{shardPlacement: shardPlacement{ShardID: 0, Unit: replacement.Unit, Node: replacement.Node, Role: replacement.Role, State: "ready"}},
+		{shardPlacement: shardPlacement{ShardID: 0, Unit: lost.Unit, Node: lost.Node, Role: lost.Role, State: "retiring"}},
+	}
+	observed := []locationProbeResult{
+		{location: primary, shardID: 0, found: true},
+		{location: replacement, shardID: 0, found: true},
+		{probeUnit: "copy-1", boundUnit: lost.Unit, partial: true},
+	}
+	locations, unavailable := reconcileLocationPlacement(expected, observed[:2])
+	if !reflect.DeepEqual(locations, []auditLocation{primary, replacement}) || !reflect.DeepEqual(unavailable, []string{lost.Unit}) {
+		t.Fatalf("unproven loss: locations=%+v unavailable=%v", locations, unavailable)
+	}
+	expected[2].retired = true
+	locations, unavailable = reconcileLocationPlacement(expected, observed)
+	if !reflect.DeepEqual(locations, []auditLocation{primary, replacement}) || len(unavailable) != 0 {
+		t.Fatalf("proven loss: locations=%+v unavailable=%v", locations, unavailable)
+	}
+	observed[2].boundUnit = ""
+	_, unavailable = reconcileLocationPlacement(expected, observed)
+	if !reflect.DeepEqual(unavailable, []string{"copy-1"}) {
+		t.Fatalf("unbound failure was masked: unavailable=%v", unavailable)
+	}
+	observed[2] = locationProbeResult{location: lost, shardID: 0, found: true}
+	locations, unavailable = reconcileLocationPlacement(expected, observed)
+	if !reflect.DeepEqual(locations, []auditLocation{primary, lost, replacement}) || !reflect.DeepEqual(unavailable, []string{lost.Unit}) {
+		t.Fatalf("contradicted proof: locations=%+v unavailable=%v", locations, unavailable)
+	}
+	observed[2].found = false
+	locations, unavailable = reconcileLocationPlacement(expected, observed)
+	if !reflect.DeepEqual(locations, []auditLocation{primary, replacement}) || !reflect.DeepEqual(unavailable, []string{lost.Unit}) {
+		t.Fatalf("retired identity still serving: locations=%+v unavailable=%v", locations, unavailable)
+	}
+}
+
+func TestAuditLocationUnavailableDirectProbeRequiresExplicitBinding(t *testing.T) {
+	const unit = "s0-b"
+	for _, test := range []struct{ name, application, boundUnit string }{
+		{name: "bound", application: auditCopyApplicationPrefix + unit, boundUnit: unit},
+		{name: "ordinary application name", application: unit},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			pool := mustTestPool(t, "postgres://127.0.0.1:1/copy?application_name="+url.QueryEscape(test.application))
+			defer pool.Close()
+			ctx, cancel := context.WithDeadline(t.Context(), time.Time{})
+			defer cancel()
+			probe := (locationProbeJob{pool: pool, routed: true, unit: "copy-1", shardID: noAuditShard}).probe(ctx, "missing")
+			if !probe.partial || probe.boundUnit != test.boundUnit {
+				t.Fatalf("probe=%+v, want partial with binding %q", probe, test.boundUnit)
+			}
+		})
 	}
 }
 

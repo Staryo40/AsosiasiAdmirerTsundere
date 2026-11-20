@@ -3,9 +3,11 @@ package aggregator
 import (
 	"cmp"
 	"context"
+	"fmt"
 	"net/http"
 	"net/url"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -14,25 +16,36 @@ import (
 
 const maxConcurrentAuditLocationProbes = 8
 const noAuditShard int16 = -1
+const auditCopyApplicationPrefix = "bnpb-audit-copy:"
 
 type auditLocation struct {
-	Node string `json:"node"`
-	Unit string `json:"unit"`
-	Role string `json:"role"`
+	Node      string `json:"node"`
+	Unit      string `json:"unit"`
+	Role      string `json:"role"`
+	RoleDrift bool   `json:"role_drift,omitempty"`
+}
+
+type locationPlacementCopy struct {
+	shardPlacement
+	retired bool
 }
 
 type locationProbeJob struct {
 	pool    *pgxpool.Pool
 	owner   *Store
+	unit    string
 	routed  bool
 	shardID int16
 }
 
 type locationProbeResult struct {
-	location auditLocation
-	shardID  int16
-	found    bool
-	partial  bool
+	location            auditLocation
+	probeUnit           string
+	boundUnit           string
+	shardID             int16
+	found               bool
+	partial             bool
+	routeReportsReplica bool
 }
 
 func (api auditAPI) location(w http.ResponseWriter, request *http.Request) {
@@ -44,7 +57,7 @@ func (api auditAPI) location(w http.ResponseWriter, request *http.Request) {
 	hazardID := query.Get("hazard_id")
 	jobs := api.locationProbeJobs()
 	if len(jobs) == 0 {
-		writeAuditLocation(w, hazardID, []auditLocation{}, true)
+		writeAuditLocation(w, hazardID, []auditLocation{}, []string{"local"})
 		return
 	}
 	budget := api.cfg.DBReadTimeout
@@ -53,42 +66,63 @@ func (api auditAPI) location(w http.ResponseWriter, request *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(request.Context(), budget)
 	defer cancel()
+	var copies []locationPlacementCopy
+	var placementMissing bool
+	var placementRead sync.WaitGroup
+	placementRead.Go(func() { copies, placementMissing = api.auditLocationPlacement(ctx) })
 	observed := observeAuditLocations(ctx, hazardID, jobs)
+	placementRead.Wait()
 	// Missing placement cannot certify completeness, but doesn't erase a live observation.
-	expected, placementMissing := api.auditLocationPlacement(ctx)
-	locations, probesPartial := reconcileLocationPlacement(expected, observed)
-	partial := placementMissing || probesPartial
-	if len(locations) == 0 && !partial {
+	locations, unavailable := reconcileLocationPlacement(copies, observed)
+	if placementMissing {
+		unavailable = append(unavailable, "control")
+	}
+	if len(locations) == 0 && len(unavailable) == 0 {
 		auditWriteError(w, http.StatusNotFound, "not_found", "hazard was not found")
 		return
 	}
-	writeAuditLocation(w, hazardID, locations, partial)
+	writeAuditLocation(w, hazardID, locations, unavailable)
 }
 
-func writeAuditLocation(w http.ResponseWriter, hazardID string, locations []auditLocation, partial bool) {
+func writeAuditLocation(w http.ResponseWriter, hazardID string, locations []auditLocation, unavailable []string) {
+	slices.Sort(unavailable)
 	auditWriteJSON(w, http.StatusOK, struct {
-		HazardID  string          `json:"hazard_id"`
-		Locations []auditLocation `json:"locations"`
-		Partial   bool            `json:"partial"`
-	}{hazardID, locations, partial})
+		HazardID         string          `json:"hazard_id"`
+		Locations        []auditLocation `json:"locations"`
+		Partial          bool            `json:"partial"`
+		UnavailableUnits []string        `json:"unavailable_units,omitempty"`
+	}{hazardID, locations, len(unavailable) > 0, slices.Compact(unavailable)})
 }
 
 func (api auditAPI) routedLocationAudit() bool {
 	return api.cfg.ShardURLs != [logicalShardCount]string{}
 }
 
-func (api auditAPI) auditLocationPlacement(ctx context.Context) ([]shardPlacement, bool) {
+func (api auditAPI) auditLocationPlacement(ctx context.Context) ([]locationPlacementCopy, bool) {
 	if !api.routedLocationAudit() {
 		return nil, false
 	}
 	if api.store.read == nil {
 		return nil, true
 	}
-	placement, err := api.store.placement(ctx)
+	rows, err := api.store.read.Query(ctx, `SELECT shard_id, unit, node, role, state,
+		retirement_evidence_sha256 IS NOT NULL FROM shard_placements`)
 	if err != nil {
 		return nil, true
 	}
-	return placement.Copies, len(placement.Copies) == 0
+	defer rows.Close()
+	var copies []locationPlacementCopy
+	for rows.Next() {
+		var copy locationPlacementCopy
+		if err := rows.Scan(&copy.ShardID, &copy.Unit, &copy.Node, &copy.Role, &copy.State, &copy.retired); err != nil {
+			return nil, true
+		}
+		copies = append(copies, copy)
+	}
+	if rows.Err() != nil {
+		return nil, true
+	}
+	return copies, len(copies) == 0
 }
 
 func (api auditAPI) locationProbeJobs() []locationProbeJob {
@@ -100,17 +134,17 @@ func (api auditAPI) locationProbeJobs() []locationProbeJob {
 	jobs := make([]locationProbeJob, 0, len(store.shards)+len(store.physicalCopies))
 	if routed {
 		for shardID, shard := range store.shards {
-			job := locationProbeJob{owner: shard, routed: true, shardID: int16(shardID)}
+			job := locationProbeJob{owner: shard, unit: fmt.Sprintf("shard-%d", shardID), routed: true, shardID: int16(shardID)}
 			if shard != nil {
 				job.pool = shard.read
 			}
 			jobs = append(jobs, job)
 		}
 	} else {
-		jobs = append(jobs, locationProbeJob{pool: store.read, owner: store, shardID: noAuditShard})
+		jobs = append(jobs, locationProbeJob{pool: store.read, owner: store, unit: "local", shardID: noAuditShard})
 	}
-	for _, pool := range store.physicalCopies {
-		jobs = append(jobs, locationProbeJob{pool: pool, routed: routed, shardID: noAuditShard})
+	for index, pool := range store.physicalCopies {
+		jobs = append(jobs, locationProbeJob{pool: pool, unit: fmt.Sprintf("copy-%d", index+1), routed: routed, shardID: noAuditShard})
 	}
 	return jobs
 }
@@ -134,70 +168,107 @@ func observeAuditLocations(ctx context.Context, hazardID string, queued []locati
 	return observed
 }
 
-func reconcileLocationPlacement(expected []shardPlacement, observed []locationProbeResult) ([]auditLocation, bool) {
-	byUnit, partial := verifiedLocationProbes(expected, observed)
+func reconcileLocationPlacement(expected []locationPlacementCopy, observed []locationProbeResult) ([]auditLocation, []string) {
+	byUnit, unavailable := verifiedLocationProbes(expected, observed)
 	locations := make([]auditLocation, 0, len(byUnit))
 	targetShard := noAuditShard
+	conflictingShards := false
 	for _, probe := range byUnit {
 		if !probe.found {
 			continue
 		}
 		if targetShard != noAuditShard && probe.shardID != targetShard {
 			// The same canonical ID cannot establish a location on two logical shards.
-			return locations[:0], true
+			conflictingShards = true
 		}
 		targetShard = probe.shardID
 		locations = append(locations, probe.location)
 	}
-	partial = partial || !locationInventoryCovered(expected, byUnit, targetShard)
-	slices.SortFunc(locations, func(a, b auditLocation) int { return cmp.Compare(a.Unit, b.Unit) })
-	return locations, partial
-}
-
-func verifiedLocationProbes(expected []shardPlacement, observed []locationProbeResult) (map[string]locationProbeResult, bool) {
-	placements := make(map[string]shardPlacement, len(expected))
-	for _, copy := range expected {
-		placements[copy.Unit] = copy
-	}
-	byUnit := make(map[string]locationProbeResult, len(observed))
-	partial := false
-	for _, probe := range observed {
-		unit := probe.location.Unit
-		if probe.partial || (len(placements) != 0 && !probe.matchesPlacement(placements[unit])) {
-			partial = true
-			continue
+	if conflictingShards {
+		for _, location := range locations {
+			unavailable = append(unavailable, location.Unit)
 		}
-		previous, seen := byUnit[unit]
-		switch {
-		case !seen:
-			byUnit[unit] = probe
-		case previous.partial || previous.location != probe.location || previous.shardID != probe.shardID:
-			byUnit[unit] = locationProbeResult{partial: true}
-			partial = true
-		case previous.found != probe.found:
-			probe.found = true
-			byUnit[unit] = probe
-			partial = true
-		}
+		return locations[:0], unavailable
 	}
-	return byUnit, partial
-}
-
-func (probe locationProbeResult) matchesPlacement(copy shardPlacement) bool {
-	return probe.shardID == copy.ShardID && probe.location == (auditLocation{Node: copy.Node, Unit: copy.Unit, Role: copy.Role})
-}
-
-func locationInventoryCovered(expected []shardPlacement, byUnit map[string]locationProbeResult, targetShard int16) bool {
 	for _, copy := range expected {
 		if targetShard != noAuditShard && copy.ShardID != targetShard {
 			continue
 		}
 		probe, seen := byUnit[copy.Unit]
+		if copy.retired {
+			if seen {
+				unavailable = append(unavailable, copy.Unit)
+			}
+			continue
+		}
 		if !seen || probe.partial || (targetShard != noAuditShard && !probe.found) {
-			return false
+			unavailable = append(unavailable, copy.Unit)
 		}
 	}
-	return true
+	slices.SortFunc(locations, func(a, b auditLocation) int { return cmp.Compare(a.Unit, b.Unit) })
+	return locations, unavailable
+}
+
+func verifiedLocationProbes(expected []locationPlacementCopy, observed []locationProbeResult) (map[string]locationProbeResult, []string) {
+	placements := make(map[string]locationPlacementCopy, len(expected))
+	for _, copy := range expected {
+		placements[copy.Unit] = copy
+	}
+	byUnit := make(map[string]locationProbeResult, len(observed))
+	var unavailable []string
+	for _, probe := range observed {
+		unit := probe.location.Unit
+		if probe.partial {
+			if placement, bound := placements[probe.boundUnit]; bound {
+				if placement.retired {
+					continue
+				}
+				probe.probeUnit = placement.Unit
+			}
+			unavailable = append(unavailable, probe.probeUnit)
+			continue
+		}
+		placement, known := placements[unit]
+		if len(placements) != 0 && (!known || !probe.matchesPlacement(placement.shardPlacement)) {
+			unavailable = append(unavailable, probe.probeUnit)
+			continue
+		}
+		if probe.routeReportsReplica {
+			unavailable = append(unavailable, probe.probeUnit)
+		}
+		if known && probe.location.Role != placement.Role {
+			probe.location.RoleDrift = true
+			unavailable = append(unavailable, unit)
+		}
+		if previous, seen := byUnit[unit]; seen {
+			var inconsistent bool
+			probe, inconsistent = mergeLocationProbes(previous, probe)
+			if inconsistent {
+				unavailable = append(unavailable, unit)
+			}
+		}
+		byUnit[unit] = probe
+	}
+	return byUnit, unavailable
+}
+
+func (probe locationProbeResult) matchesPlacement(copy shardPlacement) bool {
+	return probe.shardID == copy.ShardID && probe.location.Unit == copy.Unit && probe.location.Node == copy.Node
+}
+
+func mergeLocationProbes(previous, current locationProbeResult) (locationProbeResult, bool) {
+	if previous.partial || previous.location.Node != current.location.Node || previous.shardID != current.shardID {
+		return locationProbeResult{partial: true}, true
+	}
+	roleConflict := previous.location.Role != current.location.Role
+	drift := previous.location.RoleDrift || current.location.RoleDrift || roleConflict
+	inconsistent := roleConflict || previous.found != current.found
+	// Prefer a positive read; between equal observations prefer the promoted role.
+	if previous.found && !current.found || previous.found == current.found && previous.location.Role == "primary" {
+		current = previous
+	}
+	current.location.RoleDrift = drift
+	return current, inconsistent
 }
 
 const auditLocationServerIdentity = `SELECT COALESCE(pg_catalog.current_setting('bnpb.node_name', true), ''),
@@ -218,9 +289,9 @@ const standaloneAuditLocationProbe = auditLocationServerIdentity + `EXISTS (SELE
 
 func (job locationProbeJob) probe(ctx context.Context, hazardID string) locationProbeResult {
 	if job.pool == nil || (job.owner != nil && job.owner.verifyStartupResource(ctx) != nil) {
-		return locationProbeResult{partial: true}
+		return locationProbeResult{partial: true, probeUnit: job.unit}
 	}
-	probe := locationProbeResult{shardID: noAuditShard}
+	probe := locationProbeResult{shardID: noAuditShard, probeUnit: job.unit}
 	var replica bool
 	var err error
 	if job.routed {
@@ -230,13 +301,24 @@ func (job locationProbeJob) probe(ctx context.Context, hazardID string) location
 		err = job.pool.QueryRow(ctx, standaloneAuditLocationProbe, hazardID).
 			Scan(&probe.location.Node, &probe.location.Unit, &replica, &probe.found)
 	}
-	if err != nil || !validText(probe.location.Node) || !validText(probe.location.Unit) ||
-		(job.routed && job.owner != nil && replica) {
-		return locationProbeResult{partial: true}
+	if err != nil {
+		failed := locationProbeResult{partial: true, probeUnit: job.unit}
+		if job.routed && job.owner == nil && unavailableRepairProbe(err) {
+			// Only a declared direct-member binding can explain a failed slot.
+			application := job.pool.Config().ConnConfig.RuntimeParams["application_name"]
+			if unit, bound := strings.CutPrefix(application, auditCopyApplicationPrefix); bound {
+				failed.boundUnit = unit
+			}
+		}
+		return failed
+	}
+	if !validText(probe.location.Node) || !validText(probe.location.Unit) {
+		return locationProbeResult{partial: true, probeUnit: job.unit}
 	}
 	probe.location.Role = "primary"
 	if replica {
 		probe.location.Role = "replica"
+		probe.routeReportsReplica = job.routed && job.owner != nil
 	}
 	return probe
 }

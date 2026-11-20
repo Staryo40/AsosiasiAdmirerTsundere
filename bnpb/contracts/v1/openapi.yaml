@@ -314,8 +314,10 @@ paths:
       summary: Inspect actual configured physical copies
       description: >-
         Probes configured physical copies, their live PostgreSQL role and row
-        presence. Placement metadata alone is not proof of location. Missing
-        copy/config/settings makes completeness partial.
+        presence. Placement metadata alone is not proof of location. A missing
+        copy remains partial unless verified repair recorded terminal retirement
+        evidence. Role drift preserves the live observation, marks the location
+        with role_drift, and makes placement coverage partial.
       security:
         - AuditBearer: []
       parameters:
@@ -780,6 +782,14 @@ components:
       type: object
       required: [hazard_id, locations, partial]
       additionalProperties: false
+      if:
+        properties:
+          partial: {const: true}
+      then:
+        required: [unavailable_units]
+      else:
+        properties:
+          unavailable_units: false
       properties:
         hazard_id: {type: string}
         locations:
@@ -792,7 +802,17 @@ components:
               node: {type: string}
               unit: {type: string}
               role: {type: string, enum: [primary, replica]}
+              role_drift:
+                type: boolean
+                const: true
+                description: Live role disagrees with placement or another observation of this copy.
         partial: {type: boolean}
+        unavailable_units:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          description: Unreachable units or units whose placement coverage could not be verified.
+          items: {type: string, minLength: 1}
     AuditUnprocessed:
       type: object
       required: [items, next_cursor]

@@ -41,7 +41,9 @@ func TestAuditLocationUsesLivePhysicalDatabaseAndServerIdentity(t *testing.T) {
 		}
 		t.Cleanup(pool.Close)
 		unnamed := auditAPI{store: &Store{read: pool}, cfg: cfg}
-		assertAuditLocations(t, unnamed, hazardID, true)
+		if units := assertAuditLocations(t, unnamed, hazardID, true); !slices.Equal(units, []string{"local"}) {
+			t.Fatalf("unknown standalone identity named the wrong unit: %v", units)
+		}
 		assertAuditLocations(t, unnamed, "not-present", true)
 	})
 
@@ -97,7 +99,9 @@ func TestAuditLocationChecksLiveRoutedIdentityAndPlacement(t *testing.T) {
 		}
 	})
 	t.Run("absent_placement", func(t *testing.T) {
-		assertAuditLocations(t, api, hazardID, true, want)
+		if units := assertAuditLocations(t, api, hazardID, true, want); !slices.Equal(units, []string{"control"}) {
+			t.Fatalf("missing placement named the wrong unit: %v", units)
+		}
 		assertAuditLocations(t, api, "not-present", true)
 	})
 	if err := store.recordPlacement(t.Context(), placement); err != nil {
@@ -111,7 +115,9 @@ func TestAuditLocationChecksLiveRoutedIdentityAndPlacement(t *testing.T) {
 		setFixtureStoreIdentity(t, target, wrongIdentity)
 		defer setFixtureStoreIdentity(t, target, actualIdentity)
 		assertAuditLocations(t, api, hazardID, true)
-		assertAuditLocations(t, api, "not-present", true)
+		if units := assertAuditLocations(t, api, "not-present", true); !slices.Equal(units, []string{expectedCopy.Unit, "shard-1"}) {
+			t.Fatalf("failed shard route or unverified placement was not named: %v", units)
+		}
 	})
 	t.Run("duplicate_and_mismatched_physical_probes", func(t *testing.T) {
 		address := auditLocationFixtureURL(t, cfg.ShardURLs[targetShard], "wrong-node", expectedCopy.Unit)
@@ -124,12 +130,35 @@ func TestAuditLocationChecksLiveRoutedIdentityAndPlacement(t *testing.T) {
 		t.Cleanup(func() { store.physicalCopies = nil })
 		assertAuditLocations(t, api, hazardID, false, want)
 		store.physicalCopies = append(store.physicalCopies, conflict)
-		assertAuditLocations(t, api, hazardID, true, want)
+		if units := assertAuditLocations(t, api, hazardID, true, want); !slices.Equal(units, []string{"copy-2"}) {
+			t.Fatalf("mismatched direct-copy probe named the wrong slot: %v", units)
+		}
 		store.physicalCopies = store.physicalCopies[:1]
 		primaryPool := target.read
 		target.read = nil
 		defer func() { target.read = primaryPool }()
 		assertAuditLocations(t, api, hazardID, true, want)
+	})
+	t.Run("promoted_before_placement_cas", func(t *testing.T) {
+		placement, err := store.placement(t.Context())
+		if err != nil {
+			t.Fatal(err)
+		}
+		for index := range placement.Copies {
+			if placement.Copies[index].Unit == expectedCopy.Unit {
+				placement.Copies[index].Role = "replica"
+			}
+		}
+		oldPrimary := shardPlacement{ShardID: targetShard, Unit: "old-primary", Node: "old-node", Role: "primary", State: "ready"}
+		placement.Copies = append(placement.Copies, oldPrimary)
+		if err := store.recordPlacement(t.Context(), placement); err != nil {
+			t.Fatal(err)
+		}
+		promoted := want
+		promoted.RoleDrift = true
+		if units := assertAuditLocations(t, api, hazardID, true, promoted); !slices.Equal(units, []string{expectedCopy.Unit, oldPrimary.Unit}) {
+			t.Fatalf("partial promotion reported unexpected units: %v", units)
+		}
 	})
 }
 
@@ -152,7 +181,7 @@ func requestAuditLocation(t *testing.T, api auditAPI, hazardID string) *httptest
 	return recorder
 }
 
-func assertAuditLocations(t *testing.T, api auditAPI, hazardID string, partial bool, want ...auditLocation) {
+func assertAuditLocations(t *testing.T, api auditAPI, hazardID string, partial bool, want ...auditLocation) []string {
 	t.Helper()
 	recorder := requestAuditLocation(t, api, hazardID)
 	mediaType, _, typeErr := mime.ParseMediaType(recorder.Header().Get("Content-Type"))
@@ -160,9 +189,10 @@ func assertAuditLocations(t *testing.T, api auditAPI, hazardID string, partial b
 		t.Fatalf("status=%d content-type=%q body=%s", recorder.Code, mediaType, recorder.Body)
 	}
 	var response struct {
-		HazardID  string          `json:"hazard_id"`
-		Locations []auditLocation `json:"locations"`
-		Partial   *bool           `json:"partial"`
+		HazardID         string          `json:"hazard_id"`
+		Locations        []auditLocation `json:"locations"`
+		Partial          *bool           `json:"partial"`
+		UnavailableUnits []string        `json:"unavailable_units"`
 	}
 	decoder := json.NewDecoder(recorder.Body)
 	decoder.DisallowUnknownFields()
@@ -170,7 +200,9 @@ func assertAuditLocations(t *testing.T, api auditAPI, hazardID string, partial b
 		t.Fatal(err)
 	}
 	if response.HazardID != hazardID || response.Partial == nil || *response.Partial != partial ||
-		response.Locations == nil || !slices.Equal(response.Locations, want) {
+		response.Locations == nil || !slices.Equal(response.Locations, want) ||
+		(partial && len(response.UnavailableUnits) == 0) || (!partial && response.UnavailableUnits != nil) {
 		t.Fatalf("location response=%+v, want hazard=%q partial=%t locations=%+v", response, hazardID, partial, want)
 	}
+	return response.UnavailableUnits
 }
