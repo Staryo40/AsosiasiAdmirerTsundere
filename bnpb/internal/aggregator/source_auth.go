@@ -66,8 +66,11 @@ func (session *readerSession) reports(ctx context.Context, query url.Values) ([]
 	if !errors.As(err, &failure) || failure.statusCode != http.StatusUnauthorized {
 		return records, err
 	}
-	// The sole immediate retry is one fresh reader login after a rejected token.
 	session.token = ""
+	if session.client.routed {
+		// Renew on the next scheduled cycle rather than replaying the routed GET.
+		return nil, err
+	}
 	if err := session.login(ctx); err != nil {
 		return nil, err
 	}

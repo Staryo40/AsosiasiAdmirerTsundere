@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"errors"
+	"slices"
 	"time"
 )
 
@@ -31,16 +32,20 @@ type hazardSummary struct {
 }
 
 type listEnvelope struct {
-	Items      []hazardEvent   `json:"items"`
-	NextCursor *string         `json:"next_cursor"`
-	Sources    json.RawMessage `json:"sources"`
-	AsOf       string          `json:"as_of"`
+	Items            []hazardEvent   `json:"items"`
+	NextCursor       *string         `json:"next_cursor"`
+	Sources          json.RawMessage `json:"sources"`
+	AsOf             string          `json:"as_of"`
+	Partial          bool            `json:"partial"`
+	UnavailableUnits []string        `json:"unavailable_units"`
 }
 
 type detailEnvelope struct {
-	Item    hazardEvent     `json:"item"`
-	Sources json.RawMessage `json:"sources"`
-	AsOf    string          `json:"as_of"`
+	Item             hazardEvent     `json:"item"`
+	Sources          json.RawMessage `json:"sources"`
+	AsOf             string          `json:"as_of"`
+	Partial          bool            `json:"partial"`
+	UnavailableUnits []string        `json:"unavailable_units"`
 }
 
 func projectList(payload []byte, view string) (any, error) {
@@ -48,8 +53,11 @@ func projectList(payload []byte, view string) (any, error) {
 	if err := decodeStrictBytes(payload, &envelope); err != nil {
 		return nil, err
 	}
-	if envelope.Items == nil || !validMetadata(envelope.Sources, envelope.AsOf) {
+	if envelope.Items == nil || !validMetadata(envelope.Sources, envelope.AsOf) || !validPartialMetadata(payload, envelope.Partial, envelope.UnavailableUnits) {
 		return nil, errors.New("invalid list envelope")
+	}
+	if envelope.UnavailableUnits == nil {
+		envelope.UnavailableUnits = []string{}
 	}
 	for _, item := range envelope.Items {
 		if err := validateHazard(item); err != nil {
@@ -64,11 +72,13 @@ func projectList(payload []byte, view string) (any, error) {
 		items = append(items, summarize(item))
 	}
 	return struct {
-		Items      []hazardSummary `json:"items"`
-		NextCursor *string         `json:"next_cursor"`
-		Sources    json.RawMessage `json:"sources"`
-		AsOf       string          `json:"as_of"`
-	}{items, envelope.NextCursor, envelope.Sources, envelope.AsOf}, nil
+		Items            []hazardSummary `json:"items"`
+		NextCursor       *string         `json:"next_cursor"`
+		Sources          json.RawMessage `json:"sources"`
+		AsOf             string          `json:"as_of"`
+		Partial          bool            `json:"partial"`
+		UnavailableUnits []string        `json:"unavailable_units"`
+	}{items, envelope.NextCursor, envelope.Sources, envelope.AsOf, envelope.Partial, envelope.UnavailableUnits}, nil
 }
 
 func projectDetail(payload []byte, view string) (any, error) {
@@ -76,17 +86,39 @@ func projectDetail(payload []byte, view string) (any, error) {
 	if err := decodeStrictBytes(payload, &envelope); err != nil {
 		return nil, err
 	}
-	if err := validateHazard(envelope.Item); err != nil || !validMetadata(envelope.Sources, envelope.AsOf) {
+	if err := validateHazard(envelope.Item); err != nil || !validMetadata(envelope.Sources, envelope.AsOf) || !validPartialMetadata(payload, envelope.Partial, envelope.UnavailableUnits) {
 		return nil, errors.New("invalid detail envelope")
+	}
+	if envelope.UnavailableUnits == nil {
+		envelope.UnavailableUnits = []string{}
 	}
 	if view == viewFull {
 		return envelope, nil
 	}
 	return struct {
-		Item    hazardSummary   `json:"item"`
-		Sources json.RawMessage `json:"sources"`
-		AsOf    string          `json:"as_of"`
-	}{summarize(envelope.Item), envelope.Sources, envelope.AsOf}, nil
+		Item             hazardSummary   `json:"item"`
+		Sources          json.RawMessage `json:"sources"`
+		AsOf             string          `json:"as_of"`
+		Partial          bool            `json:"partial"`
+		UnavailableUnits []string        `json:"unavailable_units"`
+	}{summarize(envelope.Item), envelope.Sources, envelope.AsOf, envelope.Partial, envelope.UnavailableUnits}, nil
+}
+
+func validPartialMetadata(payload []byte, partial bool, unavailableUnits []string) bool {
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(payload, &fields) != nil {
+		return false
+	}
+	if raw, exists := fields["partial"]; exists && string(raw) != "true" && string(raw) != "false" {
+		return false
+	}
+	if raw, exists := fields["unavailable_units"]; exists {
+		var decoded []string
+		if json.Unmarshal(raw, &decoded) != nil || decoded == nil || !slices.Equal(decoded, unavailableUnits) {
+			return false
+		}
+	}
+	return partial == (len(unavailableUnits) > 0)
 }
 
 func summarize(event hazardEvent) hazardSummary {
@@ -101,10 +133,13 @@ func validateHazard(event hazardEvent) error {
 	if event.HazardID == "" || event.SourceRefID == "" || event.AreaName == "" {
 		return errors.New("hazard identity or area is empty")
 	}
-	if event.Source != "BMKG" && event.Source != "PVMBG" {
+	if !validSource(event.Source) {
 		return errors.New("hazard source is invalid")
 	}
-	if event.Source == "BMKG" && event.HazardType != "SEISMIC" || event.Source == "PVMBG" && event.HazardType != "VOLCANIC" {
+	if !validHazardType(event.HazardType) {
+		return errors.New("hazard type is invalid")
+	}
+	if !validSourceType(event.Source, event.HazardType) {
 		return errors.New("hazard source and type are inconsistent")
 	}
 	if event.Severity != "NORMAL" && event.Severity != "WASPADA" && event.Severity != "SIAGA" && event.Severity != "AWAS" {

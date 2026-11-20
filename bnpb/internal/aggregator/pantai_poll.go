@@ -102,3 +102,11 @@ func (worker *pantaiPoller) logRecovery(ctx context.Context, previous pollObserv
 	logging.Event(ctx, worker.logger, logging.Record{Level: slog.LevelInfo, Event: "pantai_poll_recovered", Message: "coastal endpoint recovered"},
 		"endpoint", string(CoastalEndpoint), "previous_error_category", previous.ErrorCategory)
 }
+
+func responseChunk(response IngestChunk, ordered []orderedRecord) IngestChunk {
+	chunk := IngestChunk{Endpoint: response.Endpoint, ReceivedAt: response.ReceivedAt}
+	for _, record := range ordered {
+		chunk.Records = append(chunk.Records, record.raw)
+	}
+	return chunk
+}

@@ -1,0 +1,14 @@
+# Patroni 4.1.5 dynamic configuration; apply to control and each shard scope.
+# Merge with bootstrap.dcs for NEW clusters; existing DCS needs edit-config --apply.
+synchronous_mode: true
+synchronous_mode_strict: true
+synchronous_node_count: 1
+check_timeline: true
+failsafe_mode: false
+postgresql:
+  use_slots: true
+  parameters:
+    wal_level: replica
+    fsync: 'on'
+    full_page_writes: 'on'
+    synchronous_commit: 'on'

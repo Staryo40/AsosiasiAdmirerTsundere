@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"time"
 	"unicode/utf8"
@@ -14,9 +15,10 @@ import (
 const internalKeyHeader = "X-BNPB-Internal-Key"
 
 type snapshotAPI struct {
-	store *Store
-	cfg   Config
-	slots chan struct{}
+	store           *Store
+	cfg             Config
+	slots           chan struct{}
+	analyticsBudget time.Duration
 }
 
 type applicationError struct {
@@ -31,10 +33,14 @@ type readErrorEnvelope struct {
 	AsOf    *time.Time             `json:"as_of,omitempty"`
 }
 
-func registerSnapshotRoutes(mux *http.ServeMux, store *Store, cfg Config) snapshotAPI {
+func registerSnapshotRoutes(mux *http.ServeMux, store *Store, cfg Config, writeTimeout time.Duration) snapshotAPI {
 	api := snapshotAPI{store: store, cfg: cfg, slots: make(chan struct{}, cfg.ReadMaxInFlight)}
 	mux.Handle("GET /internal/hazards", api.authenticate(http.HandlerFunc(api.list)))
 	mux.Handle("GET /internal/hazards/{hazard_id}", api.authenticate(http.HandlerFunc(api.detail)))
+	analytics := api
+	analytics.slots = make(chan struct{}, 1)
+	analytics.analyticsBudget = analyticsReadBudget(cfg, writeTimeout)
+	mux.Handle("GET /internal/analytics", analytics.authenticate(http.HandlerFunc(analytics.analytics)))
 	return api
 }
 
@@ -90,7 +96,7 @@ func (api snapshotAPI) list(w http.ResponseWriter, request *http.Request) {
 		writeReadError(w, request, http.StatusServiceUnavailable, "store_unavailable")
 		return
 	}
-	if sourcesUnavailable(page.Sources) {
+	if !page.Partial && !page.MetadataUnavailable && sourcesUnavailable(page.Sources) {
 		failure := readErrorEnvelope{Error: readFailure(request, "source_unavailable"), Sources: page.Sources, AsOf: &page.AsOf}
 		writeReadJSON(w, http.StatusServiceUnavailable, failure)
 		return
@@ -105,7 +111,7 @@ func (api snapshotAPI) detail(w http.ResponseWriter, request *http.Request) {
 		return
 	}
 	detail, err := api.store.hazardDetail(request.Context(), hazardID, api.cfg)
-	if err == errHazardNotFound {
+	if errors.Is(err, errHazardNotFound) {
 		writeReadError(w, request, http.StatusNotFound, "not_found")
 		return
 	}
@@ -118,9 +124,13 @@ func (api snapshotAPI) detail(w http.ResponseWriter, request *http.Request) {
 
 func readFailure(request *http.Request, code string) applicationError {
 	messages := map[string]string{
-		"invalid_query": "invalid query parameters", "missing_credential": "internal credential is required",
-		"invalid_credential": "invalid internal credential", "not_found": "hazard not found",
-		"source_unavailable": "selected sources are unavailable", "store_unavailable": "canonical store is unavailable",
+		"invalid_query": "invalid query parameters", "invalid_request": "invalid request body",
+		"missing_credential": "internal credential is required", "invalid_credential": "invalid internal credential",
+		"not_found": "hazard not found", "source_unavailable": "selected sources are unavailable",
+		"store_unavailable": "canonical store is unavailable", "authority_unavailable": "current write authority is unavailable",
+		"storage_unavailable": "canonical storage is unavailable", "catalogue_input_rejected": "one or more catalogue records were rejected",
+		"catalogue_input_conflict": "catalogue input identity conflicts with a previous receipt",
+		"measurements_unavailable": "storage measurements are unavailable",
 	}
 	return applicationError{code, messages[code], correlation.ID(request.Context())}
 }

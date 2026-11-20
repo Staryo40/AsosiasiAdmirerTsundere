@@ -42,16 +42,16 @@ func parseListQuery(rawQuery string) (parsedQuery, error) {
 	if err != nil {
 		return parsedQuery{}, err
 	}
-	if value := values.Get("source"); value != "" && value != "BMKG" && value != "PVMBG" {
+	if value := values.Get("source"); value != "" && !validSource(value) {
 		return parsedQuery{}, errors.New("source is invalid")
 	}
-	if value := values.Get("hazard_type"); value != "" && value != "SEISMIC" && value != "VOLCANIC" {
+	if value := values.Get("hazard_type"); value != "" && !validHazardType(value) {
 		return parsedQuery{}, errors.New("hazard_type is invalid")
 	}
 	if value := values.Get("severity"); value != "" && value != "NORMAL" && value != "WASPADA" && value != "SIAGA" && value != "AWAS" {
 		return parsedQuery{}, errors.New("severity is invalid")
 	}
-	if values.Get("source") == "BMKG" && values.Get("hazard_type") == "VOLCANIC" || values.Get("source") == "PVMBG" && values.Get("hazard_type") == "SEISMIC" {
+	if source, hazardType := values.Get("source"), values.Get("hazard_type"); source != "" && hazardType != "" && !validSourceType(source, hazardType) {
 		return parsedQuery{}, errors.New("source and hazard_type are inconsistent")
 	}
 	from, err := optionalTime(values.Get("occurred_from"))
@@ -112,4 +112,37 @@ func optionalTime(value string) (*time.Time, error) {
 		return nil, err
 	}
 	return &parsed, nil
+}
+
+func validSource(source string) bool {
+	switch source {
+	case "BMKG", "PVMBG", "SATELIT", "SENSOR_PANTAI":
+		return true
+	default:
+		return false
+	}
+}
+
+func validHazardType(hazardType string) bool {
+	switch hazardType {
+	case "SEISMIC", "VOLCANIC", "WILDFIRE", "COASTAL":
+		return true
+	default:
+		return false
+	}
+}
+
+func validSourceType(source, hazardType string) bool {
+	switch source {
+	case "BMKG":
+		return hazardType == "SEISMIC"
+	case "PVMBG":
+		return hazardType == "VOLCANIC"
+	case "SATELIT":
+		return hazardType == "WILDFIRE"
+	case "SENSOR_PANTAI":
+		return hazardType == "COASTAL"
+	default:
+		return false
+	}
 }

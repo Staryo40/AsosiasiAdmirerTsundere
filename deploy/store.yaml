@@ -1,0 +1,21 @@
+# Resource patch only. Apply patroni-durability.yaml to EVERY Patroni scope,
+# including control, before enabling routed writers; this patch does not enable HA.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres
+  labels:
+    role: store
+spec:
+  template:
+    metadata:
+      labels:
+        role: store
+    spec:
+      containers:
+        - name: postgres
+          resources:
+            requests:
+              memory: 512Mi
+            limits:
+              memory: 1Gi

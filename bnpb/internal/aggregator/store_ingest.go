@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"math"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -22,11 +23,12 @@ const (
 )
 
 type IngestChunk struct {
-	Endpoint   Endpoint
-	Records    []json.RawMessage
-	ReceivedAt time.Time
+	Endpoint    Endpoint
+	Records     []json.RawMessage
+	ReceivedAt  time.Time
+	InputID     string
+	InputOffset int
 }
-
 type endpointFields struct {
 	identity, timestamp string
 	lock                int
@@ -51,20 +53,36 @@ func (store *Store) Ingest(ctx context.Context, chunk IngestChunk) (err error) {
 
 // Pollers can commit chunks without advertising a successful incomplete response.
 type checkpointPolicy struct {
-	ceiling      *time.Time
-	started      *time.Time
-	completed    *time.Time
-	hold         bool
-	completePoll bool
+	ceiling       *time.Time
+	started       *time.Time
+	completed     *time.Time
+	hold          bool
+	completePoll  bool
+	omitPollState bool
 }
 
 func (store *Store) ingestChunk(ctx context.Context, chunk IngestChunk, policy checkpointPolicy) (err error) {
+	if !validInputOrdinals(chunk.InputOffset, len(chunk.Records)) {
+		return errors.New("ingest: input ordinal range is invalid")
+	}
+	if chunk.InputID == "" {
+		encoded, marshalErr := json.Marshal(chunk.Records)
+		if marshalErr != nil {
+			return marshalErr
+		}
+		identity := append([]byte(string(chunk.Endpoint)+"\x00"), encoded...)
+		digest := sha256.Sum256(identity)
+		chunk.InputID = hex.EncodeToString(digest[:])
+	}
 	if err := store.validateChunk(chunk); err != nil {
 		return err
 	}
+	if store.shards[0] != nil {
+		return store.ingestShardChunk(ctx, chunk, policy)
+	}
 	ctx, cancel := context.WithTimeout(ctx, store.writeTimeout)
 	defer cancel()
-	tx, err := store.write.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
+	tx, err := store.beginWriteMutation(ctx)
 	if err != nil {
 		return storeError("begin ingest", err)
 	}
@@ -82,6 +100,20 @@ func (store *Store) ingestChunk(ctx context.Context, chunk IngestChunk, policy c
 		return err
 	}
 	return tx.Commit(ctx)
+}
+
+func validInputOrdinals(offset, count int) bool {
+	return offset >= 0 && (count == 0 || offset <= math.MaxInt-(count-1))
+}
+
+func (store *Store) beginWriteMutation(ctx context.Context) (pgx.Tx, error) {
+	if _, _, ok := pollAuthorityToken(ctx); ok {
+		return store.beginMutation(ctx)
+	}
+	if store.shards[0] != nil {
+		return nil, errors.New("ingest: poll authority required")
+	}
+	return store.write.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
 }
 
 func (store *Store) validateChunk(chunk IngestChunk) error {
@@ -107,7 +139,9 @@ func (store *Store) validateChunk(chunk IngestChunk) error {
 func (store *Store) writeChunk(ctx context.Context, tx pgx.Tx, chunk IngestChunk, policy checkpointPolicy) error {
 	var checkpoint *time.Time
 	completeTimestamps := true
-	for _, raw := range chunk.Records {
+	for index, raw := range chunk.Records {
+		recordChunk := chunk
+		recordChunk.InputOffset += index
 		stamp := recordTimestamp(raw, chunk.Endpoint)
 		if stamp == nil {
 			completeTimestamps = false
@@ -115,9 +149,28 @@ func (store *Store) writeChunk(ctx context.Context, tx pgx.Tx, chunk IngestChunk
 		if stamp != nil && (checkpoint == nil || stamp.After(*checkpoint)) {
 			checkpoint = stamp
 		}
-		if err := store.writeRecord(ctx, tx, chunk, raw); err != nil {
+		status, exists, err := handledInputStatus(ctx, tx, recordChunk, raw)
+		if err != nil {
 			return err
 		}
+		if exists {
+			if status == "retained" {
+				if err := retryRetainedInput(ctx, tx, store, recordChunk, raw); err != nil {
+					return err
+				}
+			}
+			continue
+		}
+		status, reason, err := store.writeRecord(ctx, tx, recordChunk, raw)
+		if err != nil {
+			return err
+		}
+		if err := insertHandledInput(ctx, tx, recordChunk, raw, status, reason); err != nil {
+			return err
+		}
+	}
+	if policy.omitPollState {
+		return nil
 	}
 	if !completeTimestamps || policy.hold {
 		checkpoint = nil
@@ -133,23 +186,29 @@ func (store *Store) writeChunk(ctx context.Context, tx pgx.Tx, chunk IngestChunk
 	return err
 }
 
-func (store *Store) writeRecord(ctx context.Context, tx pgx.Tx, chunk IngestChunk, raw json.RawMessage) error {
+func (store *Store) writeRecord(ctx context.Context, tx pgx.Tx, chunk IngestChunk, raw json.RawMessage) (string, string, error) {
 	recordTx, err := tx.Begin(ctx)
 	if err != nil {
-		return err
+		return "", "", err
 	}
 	err = store.writeSourceRecord(ctx, recordTx, chunk, raw)
 	if err == nil {
-		return recordTx.Commit(ctx)
+		if err := recordTx.Commit(ctx); err != nil {
+			return "", "", err
+		}
+		return "applied", "", nil
 	}
 	if cleanupErr := rollbackTransaction(ctx, recordTx); cleanupErr != nil {
 		err = errors.Join(err, cleanupErr)
 	}
 	category, field := rejectReason(err)
 	if category == "" {
-		return err
+		return "", "", err
 	}
-	return writeReject(ctx, tx, chunk, rejectedRecord{raw, ValidationError{Code: ValidationCode(category), Field: field}})
+	if err := writeReject(ctx, tx, chunk, rejectedRecord{raw, ValidationError{Code: ValidationCode(category), Field: field}}); err != nil {
+		return "", "", err
+	}
+	return "retained", category + ":" + field, nil
 }
 
 func (store *Store) writeSourceRecord(ctx context.Context, tx pgx.Tx, chunk IngestChunk, raw json.RawMessage) error {

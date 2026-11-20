@@ -12,15 +12,32 @@ type Severity string
 const (
 	BMKG         Source     = "BMKG"
 	PVMBG        Source     = "PVMBG"
+	Satelit      Source     = "SATELIT"
 	SensorPantai Source     = "SENSOR_PANTAI"
 	Seismic      HazardType = "SEISMIC"
 	Volcanic     HazardType = "VOLCANIC"
+	Wildfire     HazardType = "WILDFIRE"
 	Coastal      HazardType = "COASTAL"
-	Normal   Severity   = "NORMAL"
-	Waspada  Severity   = "WASPADA"
-	Siaga    Severity   = "SIAGA"
-	Awas     Severity   = "AWAS"
+	Normal       Severity   = "NORMAL"
+	Waspada      Severity   = "WASPADA"
+	Siaga        Severity   = "SIAGA"
+	Awas         Severity   = "AWAS"
 )
+
+func hazardTypeForSource(source Source) HazardType {
+	switch source {
+	case BMKG:
+		return Seismic
+	case PVMBG:
+		return Volcanic
+	case Satelit:
+		return Wildfire
+	case SensorPantai:
+		return Coastal
+	default:
+		return ""
+	}
+}
 
 // HazardEvent contains only the public canonical fields; revisions belong to storage.
 type HazardEvent struct {

@@ -11,10 +11,13 @@ import (
 	"net/http/httptest"
 	"net/http/httptrace"
 	"net/textproto"
+	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Staryo40/AsosiasiAdmirerTsundere/bnpb/internal/platform/correlation"
+	"github.com/Staryo40/AsosiasiAdmirerTsundere/bnpb/internal/platform/httpclient"
 	"github.com/Staryo40/AsosiasiAdmirerTsundere/bnpb/internal/platform/logging"
 )
 
@@ -122,16 +125,22 @@ func TestPanicDiscardsUncommittedResponseHeaders(t *testing.T) {
 	}
 }
 
-func TestOnlyHealthMethodsBypassLimit(t *testing.T) {
+func TestHealthAndReadinessRemainAdmittedWhenDataIsSaturated(t *testing.T) {
 	handler := limitRequests(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 	}), 0)
-	// A full limiter must admit GET/HEAD probes, but reject other methods.
-	for method, want := range map[string]int{"GET": 204, "HEAD": 204, "POST": 429} {
+	for _, request := range []struct {
+		method, path string
+		want         int
+	}{
+		{"GET", "/health", 204}, {"HEAD", "/health", 204}, {"POST", "/health", 429},
+		{"GET", "/ready", 204}, {"HEAD", "/ready", 204}, {"POST", "/ready", 429},
+		{"GET", "/internal/hazards", 429},
+	} {
 		response := httptest.NewRecorder()
-		handler.ServeHTTP(response, httptest.NewRequest(method, "/health", nil))
-		if response.Code != want {
-			t.Errorf("%s: got %d, want %d", method, response.Code, want)
+		handler.ServeHTTP(response, httptest.NewRequest(request.method, request.path, nil))
+		if response.Code != request.want {
+			t.Errorf("%s %s: got %d, want %d", request.method, request.path, response.Code, request.want)
 		}
 	}
 }
@@ -177,5 +186,62 @@ func TestServerDiagnosticsAreSanitizedJSON(t *testing.T) {
 	records := decodeRegressionLogLines(t, output.Bytes())
 	if len(records) != 1 || records[0]["event"] != "http_server_error" || strings.Contains(output.String(), "private-header-value") {
 		t.Fatalf("unexpected diagnostic: %s", output.String())
+	}
+}
+
+func TestHTTPTraceContextAcrossServices(t *testing.T) {
+	const parent = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-03"
+	for _, tc := range []struct {
+		name        string
+		parents     []string
+		wantParents []string
+	}{
+		{"valid", []string{parent}, []string{parent}},
+		{"duplicate", []string{parent, parent}, nil},
+		{"zero trace", []string{"00-00000000000000000000000000000000-00f067aa0ba902b7-01"}, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			headers := make(chan http.Header, 1)
+			peer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				headers <- r.Header
+				w.WriteHeader(http.StatusNoContent)
+			}))
+			defer peer.Close()
+			logger := logging.New("trace-test", slog.LevelInfo, io.Discard)
+			client := httpclient.New(time.Second, logger)
+			defer client.CloseIdleConnections()
+			handler := Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				request, err := http.NewRequestWithContext(r.Context(), http.MethodGet, peer.URL, nil)
+				if err != nil {
+					t.Error(err)
+					return
+				}
+				response, err := client.Do(request)
+				if err != nil {
+					t.Error(err)
+					return
+				}
+				defer response.Body.Close()
+				w.WriteHeader(response.StatusCode)
+			}), logger, 1)
+			request := httptest.NewRequest(http.MethodGet, "/", nil)
+			request.Header["Traceparent"] = tc.parents
+			request.Header.Set("Tracestate", "vendor=untrusted")
+			request.Header.Set("Baggage", "key=untrusted")
+			request.Header.Set(correlation.Header, "trace-test-request")
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, request)
+			if response.Code != http.StatusNoContent {
+				t.Fatalf("unexpected status %d", response.Code)
+			}
+			outbound := <-headers
+			if outbound.Get(correlation.Header) != "trace-test-request" ||
+				len(outbound.Values("Tracestate")) != 0 || len(outbound.Values("Baggage")) != 0 {
+				t.Fatalf("outbound header propagation: %v", outbound)
+			}
+			if parents := outbound.Values("Traceparent"); !slices.Equal(parents, tc.wantParents) {
+				t.Fatalf("outbound traceparent = %q, want %q", parents, tc.wantParents)
+			}
+		})
 	}
 }

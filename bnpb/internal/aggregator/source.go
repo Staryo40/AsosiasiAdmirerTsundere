@@ -18,6 +18,14 @@ import (
 	"github.com/Staryo40/AsosiasiAdmirerTsundere/bnpb/internal/platform/httpclient"
 )
 
+type pollRequestMetadataKey struct{}
+
+type pollRequestMetadata struct {
+	endpoint         Endpoint
+	period           string
+	authority        *PollAuthority
+	authorityTimeout time.Duration
+}
 type sourceClients struct {
 	bmkg, pvmbg *sourceClient
 }
@@ -27,6 +35,7 @@ type sourceClient struct {
 	origin   *url.URL
 	apiKey   string
 	maxBytes int64
+	routed   bool
 }
 
 type sourceRequest struct {
@@ -57,14 +66,19 @@ func (err *sourceError) Unwrap() error { return err.cause }
 func newSourceClients(cfg Config, logger *slog.Logger) sourceClients {
 	bmkgURL, _ := url.Parse(cfg.BMKG.BaseURL)
 	pvmbgURL, _ := url.Parse(cfg.PVMBG.BaseURL)
+	newClient := httpclient.New
+	routed := cfg.ShardURLs[0] != ""
+	if routed {
+		newClient = httpclient.NewDirectSingleRequest
+	}
 	return sourceClients{
 		bmkg: &sourceClient{
-			client: httpclient.New(cfg.BMKG.HTTPTimeout, logger), origin: bmkgURL,
-			apiKey: cfg.BMKGAPIKey, maxBytes: cfg.MaxResponseBytes,
+			client: newClient(cfg.BMKG.HTTPTimeout, logger), origin: bmkgURL,
+			apiKey: cfg.BMKGAPIKey, maxBytes: cfg.MaxResponseBytes, routed: routed,
 		},
 		pvmbg: &sourceClient{
-			client: httpclient.New(cfg.PVMBG.HTTPTimeout, logger), origin: pvmbgURL,
-			maxBytes: cfg.MaxResponseBytes,
+			client: newClient(cfg.PVMBG.HTTPTimeout, logger), origin: pvmbgURL,
+			maxBytes: cfg.MaxResponseBytes, routed: routed,
 		},
 	}
 }
@@ -86,6 +100,14 @@ func (client *sourceClient) request(ctx context.Context, request sourceRequest) 
 		return nil, &sourceError{category: "invalid_request"}
 	}
 	outbound.Header = client.headers(request)
+	if owner, epoch, ok := pollAuthorityToken(ctx); ok {
+		outbound.Header.Set("X-BNPB-Owner", owner)
+		outbound.Header.Set("X-BNPB-Epoch", strconv.FormatInt(epoch, 10))
+		if metadata, ok := ctx.Value(pollRequestMetadataKey{}).(pollRequestMetadata); ok {
+			outbound.Header.Set("X-BNPB-Endpoint", string(metadata.endpoint))
+			outbound.Header.Set("X-BNPB-Period", metadata.period)
+		}
+	}
 	return outbound, nil
 }
 
@@ -104,7 +126,34 @@ func (client *sourceClient) headers(request sourceRequest) http.Header {
 	return headers
 }
 
+func verifyPollAuthority(ctx context.Context) error {
+	metadata, _ := ctx.Value(pollRequestMetadataKey{}).(pollRequestMetadata)
+	if metadata.authority == nil {
+		return nil
+	}
+	owner, epoch, ok := pollAuthorityToken(ctx)
+	if !ok {
+		return errStaleMutationAuthority
+	}
+	checkCtx, cancel := context.WithTimeout(ctx, metadata.authorityTimeout)
+	defer cancel()
+	live, err := metadata.authority.currentContext(checkCtx)
+	if err != nil {
+		return err
+	}
+	if currentOwner, currentEpoch, _ := pollAuthorityToken(live); currentOwner != owner || currentEpoch != epoch {
+		return errStaleMutationAuthority
+	}
+	return nil
+}
+
 func (client *sourceClient) doJSON(ctx context.Context, request sourceRequest, target any) error {
+	// PVMBG login may have taken time; validate ownership before dispatching the data GET.
+	if client.routed && request.method == http.MethodGet {
+		if err := verifyPollAuthority(ctx); err != nil {
+			return err
+		}
+	}
 	// Bound body reads through the instrumented transport.
 	ctx, cancel := context.WithTimeout(ctx, client.client.Timeout)
 	defer cancel()

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/Staryo40/AsosiasiAdmirerTsundere/bnpb/internal/platform/correlation"
@@ -38,25 +39,50 @@ func correlate(next http.Handler) http.Handler {
 			correlationID = correlation.NewID()
 		}
 		w.Header().Set(correlation.Header, correlationID)
-		ctx, traceparent := tracing.Ensure(r.WithContext(correlation.WithID(r.Context(), correlationID)))
+		ctx := correlation.WithTrace(correlation.WithID(r.Context(), correlationID), r.Header)
+		ctx, traceparent := tracing.Ensure(r.WithContext(ctx))
 		w.Header().Set(tracing.Header, traceparent)
-		next.ServeHTTP(w, r.WithContext(ctx))
+		correlated := r.WithContext(ctx)
+		next.ServeHTTP(w, correlated)
+		r.Pattern = correlated.Pattern
 	})
 }
 
 func limitRequests(next http.Handler, maximum int) http.Handler {
 	semaphore := make(chan struct{}, maximum)
+	diagnosticSlots := make(chan struct{}, 2)
+	readinessSlots := make(chan struct{}, 1)
+	metricsSlots := make(chan struct{}, 1)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if isProbePath(r.URL.Path) && (r.Method == http.MethodGet || r.Method == http.MethodHead) {
-			next.ServeHTTP(w, r)
-			return
+		slots := semaphore
+		if r.Method == http.MethodGet || r.Method == http.MethodHead {
+			switch r.URL.Path {
+			case "/health":
+				next.ServeHTTP(w, r)
+				return
+			case "/ready":
+				slots = diagnosticSlots
+			case "/readyz":
+				// Diagnostic and scrape traffic must not crowd out the kube probe.
+				slots = readinessSlots
+			case "/metrics":
+				slots = metricsSlots
+			}
 		}
 		select {
-		case semaphore <- struct{}{}:
-			defer func() { <-semaphore }()
+		case slots <- struct{}{}:
+			defer func() { <-slots }()
 			next.ServeHTTP(w, r)
 		default:
-			writeJSONError(w, http.StatusTooManyRequests, "too many requests")
+			if slots == readinessSlots {
+				w.WriteHeader(http.StatusServiceUnavailable)
+				return
+			}
+			if strings.HasPrefix(r.URL.Path, "/internal/audit/") {
+				writeAuditRateLimitError(w)
+			} else {
+				writeJSONError(w, http.StatusTooManyRequests, "too many requests")
+			}
 		}
 	})
 }
@@ -101,10 +127,6 @@ func logRequest(request *http.Request, logger *slog.Logger, recorder *responseRe
 		"duration_ms", duration.Milliseconds(),
 		"traceparent", tracing.Parent(request.Context()),
 	)
-}
-
-func isProbePath(path string) bool {
-	return path == "/health" || path == "/metrics" || path == "/ready"
 }
 
 func accessLevel(path string, status int) slog.Level {
@@ -164,4 +186,11 @@ func writeJSONError(w http.ResponseWriter, status int, publicMessage string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(map[string]string{"error": publicMessage})
+}
+func writeAuditRateLimitError(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusTooManyRequests)
+	_ = json.NewEncoder(w).Encode(map[string]map[string]string{
+		"error": {"code": "too_many_requests", "message": "too many requests"},
+	})
 }

@@ -47,6 +47,9 @@ func writeHazard(ctx context.Context, tx pgx.Tx, hazard HazardEvent) error {
 		return err
 	}
 	hazard.IngestedAt = databaseTime(hazard.IngestedAt)
+	if updatedAt.Before(hazard.IngestedAt) {
+		updatedAt = hazard.IngestedAt
+	}
 	return writeNotification(ctx, tx, hazardNotification{SchemaVersion: 1, MessageID: "msg-" + rand.Text(),
 		HazardID: hazard.HazardID, Revision: revision, ProducedAt: updatedAt, HazardEvent: hazard})
 }

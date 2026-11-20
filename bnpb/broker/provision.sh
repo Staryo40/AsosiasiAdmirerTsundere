@@ -163,15 +163,14 @@ ensure_permissions() {
 # consumer can start, bind, and be tested before the Aggregator ever runs.
 put "/exchanges/%2F/hazard.events" '{"type":"fanout","durable":true}'
 
-# Main queues (hazard.events.<role>): 3h TTL, 10k cap, oldest dropped first,
-# queue deleted after 24h with no consumer.
+# Bound backlog without deleting accepted messages or expiring absent subscribers.
+# A full subscriber queue rejects publication, so the durable outbox can retry.
 ensure_policy main-bounds '^hazard\.events\.[a-z0-9-]+$' \
-	'{"message-ttl":10800000,"max-length":10000,"overflow":"drop-head","expires":86400000}'
+	'{"max-length":10000,"overflow":"reject-publish"}'
 
-# Failed queues (hazard.events.<role>.failed): 24h TTL, 1k cap. No separate
-# expiry; a failed queue is operator-facing and should not quietly vanish.
+# Preserve parked payloads until recovery; capacity pressure rejects new handoffs.
 ensure_policy failed-bounds '^hazard\.events\.[a-z0-9-]+\.failed$' \
-	'{"message-ttl":86400000,"max-length":1000,"overflow":"drop-head"}'
+	'{"max-length":1000,"overflow":"reject-publish"}'
 
 # Publisher: may declare and publish into the exchange, never reads anything.
 ensure_user "$BNPB_RABBITMQ_PUBLISHER_USER" "$BNPB_RABBITMQ_PUBLISHER_PASSWORD"

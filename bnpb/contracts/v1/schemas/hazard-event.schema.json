@@ -27,6 +27,7 @@
       "enum": [
         "BMKG",
         "PVMBG",
+        "SATELIT",
         "SENSOR_PANTAI"
       ],
       "x-classification": "Ringkasan"
@@ -40,6 +41,7 @@
       "enum": [
         "SEISMIC",
         "VOLCANIC",
+        "WILDFIRE",
         "COASTAL"
       ],
       "x-classification": "Ringkasan"
@@ -127,30 +129,36 @@
       "description": "RFC 3339 UTC output, preserving available fractional precision. Enable format assertion in payload validators."
     },
     "SourceTypePair": {
-      "if": {
-        "properties": {
-          "source": {
-            "const": "BMKG"
-          }
+      "oneOf": [
+        {
+          "properties": {
+            "source": { "const": "BMKG" },
+            "hazard_type": { "const": "SEISMIC" }
+          },
+          "required": ["source", "hazard_type"]
         },
-        "required": [
-          "source"
-        ]
-      },
-      "then": {
-        "properties": {
-          "hazard_type": {
-            "const": "SEISMIC"
-          }
+        {
+          "properties": {
+            "source": { "const": "PVMBG" },
+            "hazard_type": { "const": "VOLCANIC" }
+          },
+          "required": ["source", "hazard_type"]
+        },
+        {
+          "properties": {
+            "source": { "const": "SATELIT" },
+            "hazard_type": { "const": "WILDFIRE" }
+          },
+          "required": ["source", "hazard_type"]
+        },
+        {
+          "properties": {
+            "source": { "const": "SENSOR_PANTAI" },
+            "hazard_type": { "const": "COASTAL" }
+          },
+          "required": ["source", "hazard_type"]
         }
-      },
-      "else": {
-        "properties": {
-          "hazard_type": {
-            "const": "VOLCANIC"
-          }
-        }
-      }
+      ]
     }
   }
 }

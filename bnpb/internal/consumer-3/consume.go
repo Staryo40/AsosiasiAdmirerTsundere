@@ -18,15 +18,17 @@ const (
 	exchange            = "hazard.events"
 	maxDeliveryAttempts = 3
 	prefetchCount       = 1
-	pruneInterval       = 30 * time.Minute
 )
 
 var reconnectBackoff = []time.Duration{time.Second, 2 * time.Second, 5 * time.Second, 10 * time.Second, 15 * time.Second}
 
 // envelope is the consumer side of contracts/v1/schemas/hazard-notification.schema.json.
 type envelope struct {
-	HazardID    string `json:"hazard_id"`
-	HazardEvent struct {
+	SchemaVersion int    `json:"schema_version"`
+	Revision      int64  `json:"revision"`
+	EventType     string `json:"event_type"`
+	HazardID      string `json:"hazard_id"`
+	HazardEvent   struct {
 		Source     string    `json:"source"`
 		HazardType string    `json:"hazard_type"`
 		Severity   string    `json:"severity"`
@@ -47,9 +49,6 @@ type consumer struct {
 // run owns the AMQP connection for the process lifetime: connect, declare,
 // consume, reconnect on loss, until ctx is canceled.
 func run(ctx context.Context, cfg Config, store *Store, logger *slog.Logger) {
-	pruned := make(chan struct{})
-	go func() { defer close(pruned); pruneLoop(ctx, store, logger) }()
-	defer func() { <-pruned }()
 	worker := &consumer{cfg: cfg, store: store, logger: logger}
 	defer worker.closePublisher()
 	for attempt := 0; ctx.Err() == nil; attempt++ {
@@ -130,21 +129,6 @@ func (worker *consumer) handleDelivery(ctx context.Context, session *consumerSes
 	return worker.acknowledge(ctx, session, delivery)
 }
 
-func pruneLoop(ctx context.Context, store *Store, logger *slog.Logger) {
-	ticker := time.NewTicker(pruneInterval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			if err := store.PruneOldRecords(ctx); err != nil {
-				logging.Event(ctx, logger, logging.Record{Level: slog.LevelError, Event: "prune_failed", Message: "could not prune old dedupe records"}, "error", err.Error())
-			}
-		}
-	}
-}
-
 func waitBackoff(ctx context.Context, delay time.Duration) error {
 	timer := time.NewTimer(delay)
 	defer timer.Stop()
@@ -156,7 +140,36 @@ func waitBackoff(ctx context.Context, delay time.Duration) error {
 	}
 }
 
+func validSourceType(source, hazardType string) bool {
+	switch source {
+	case "BMKG":
+		return hazardType == "SEISMIC"
+	case "PVMBG":
+		return hazardType == "VOLCANIC"
+	case "SATELIT":
+		return hazardType == "WILDFIRE"
+	case "SENSOR_PANTAI":
+		return hazardType == "COASTAL"
+	default:
+		return false
+	}
+}
+
+func (env envelope) supportedNotification() bool {
+	if env.SchemaVersion != 1 {
+		return false
+	}
+	return env.Revision == 1 && env.EventType == "hazard.created" ||
+		env.Revision > 1 && env.EventType == "hazard.updated"
+}
+
 func (worker *consumer) applyEnvelope(ctx context.Context, messageID string, env envelope) error {
+	if !env.supportedNotification() {
+		return errors.New("unsupported notification version or lifecycle")
+	}
+	if !validSourceType(env.HazardEvent.Source, env.HazardEvent.HazardType) {
+		return errors.New("invalid source/hazard_type pair")
+	}
 	return worker.store.Apply(ctx, FeedEntry{
 		MessageID:  messageID,
 		HazardID:   env.HazardID,

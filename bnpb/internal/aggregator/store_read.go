@@ -10,24 +10,62 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-var errHazardNotFound = errors.New("hazard not found")
+var (
+	errHazardNotFound    = errors.New("hazard not found")
+	errHazardUnavailable = errors.New("hazard unavailable")
+)
 
 type hazardList struct {
-	Items      []HazardEvent          `json:"items"`
-	NextCursor *string                `json:"next_cursor"`
-	Sources    map[Source]sourceState `json:"sources"`
-	AsOf       time.Time              `json:"as_of"`
+	Items               []HazardEvent          `json:"items"`
+	NextCursor          *string                `json:"next_cursor"`
+	Sources             map[Source]sourceState `json:"sources"`
+	AsOf                time.Time              `json:"as_of"`
+	Partial             bool                   `json:"partial"`
+	UnavailableUnits    []string               `json:"unavailable_units"`
+	MetadataUnavailable bool                   `json:"-"`
 }
 
 type hazardDetail struct {
-	Item    HazardEvent            `json:"item"`
-	Sources map[Source]sourceState `json:"sources"`
-	AsOf    time.Time              `json:"as_of"`
+	Item             HazardEvent            `json:"item"`
+	Sources          map[Source]sourceState `json:"sources"`
+	AsOf             time.Time              `json:"as_of"`
+	Partial          bool                   `json:"partial"`
+	UnavailableUnits []string               `json:"unavailable_units"`
 }
 
-func (store *Store) snapshot(ctx context.Context, read func(context.Context, pgx.Tx) error) (err error) {
+func (store *Store) snapshot(ctx context.Context, read func(context.Context, pgx.Tx) error) error {
 	ctx, cancel := context.WithTimeout(ctx, store.readTimeout)
 	defer cancel()
+	return store.primarySnapshot(ctx, read)
+}
+
+// Check the backend on every snapshot: startup verification can predate a
+// route change. PostgreSQL recovery state does not establish Patroni leadership.
+func (store *Store) primarySnapshot(ctx context.Context, read func(context.Context, pgx.Tx) error) error {
+	return store.snapshotWithContext(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		identity := store.storeIdentity
+		if identity.role != "" {
+			var matches bool
+			err := tx.QueryRow(ctx, `SELECT NOT pg_catalog.pg_is_in_recovery()
+				AND role = $1 AND shard_id IS NOT DISTINCT FROM $2::smallint
+				FROM store_identity WHERE singleton`, identity.role, identity.shardID).Scan(&matches)
+			if err != nil {
+				return storeError("verify logical read target", err)
+			}
+			if !matches {
+				return errors.New("logical read target is in recovery or has a different store identity")
+			}
+		}
+		return read(ctx, tx)
+	})
+}
+
+// snapshotWithContext uses only the caller's deadline. Logical data snapshots
+// and control metadata reads share the request's one cfg.DBReadTimeout context.
+func (store *Store) snapshotWithContext(ctx context.Context, read func(context.Context, pgx.Tx) error) (err error) {
+	if err := store.verifyStartupResource(ctx); err != nil {
+		return storeError("verify startup resource", err)
+	}
 	tx, err := store.read.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
 	if err != nil {
 		return storeError("begin snapshot", err)
@@ -43,41 +81,171 @@ func (store *Store) snapshot(ctx context.Context, read func(context.Context, pgx
 	return storeError("commit snapshot", tx.Commit(ctx))
 }
 
-func (store *Store) listHazards(ctx context.Context, query hazardQuery, cfg Config) (hazardList, error) {
-	page := hazardList{Items: []HazardEvent{}}
-	err := store.snapshot(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		var err error
-		page.Sources, page.AsOf, err = readFreshness(ctx, tx, query.filters.selectedSources(), cfg)
-		if err != nil {
-			return err
-		}
-		page.Items, err = readHazardPage(ctx, tx, query)
-		return err
-	})
-	if err == nil && len(page.Items) > query.limit {
-		page.Items = page.Items[:query.limit]
-		cursor, cursorErr := nextHazardCursor(page.Items[len(page.Items)-1], query.filters)
-		err = storeError("encode hazard cursor", cursorErr)
-		page.NextCursor = &cursor
-	}
-	return page, err
+type shardHazards struct {
+	Rows   []HazardEvent
+	Cached map[Source]bool
 }
 
-func (store *Store) hazardDetail(ctx context.Context, hazardID string, cfg Config) (hazardDetail, error) {
-	detail := hazardDetail{}
-	err := store.snapshot(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		hazard, err := scanHazard(tx.QueryRow(ctx, "SELECT "+hazardColumns+" FROM hazard_events WHERE hazard_id = $1", hazardID))
-		if errors.Is(err, pgx.ErrNoRows) {
-			return errHazardNotFound
-		}
-		if err != nil {
-			return storeError("read hazard", err)
-		}
-		detail.Item = hazard
-		detail.Sources, detail.AsOf, err = readFreshness(ctx, tx, []Source{hazard.Source}, cfg)
-		return err
+func (store *Store) listHazards(requestCtx context.Context, query hazardQuery, cfg Config) (hazardList, error) {
+	ctx, cancel := context.WithTimeout(requestCtx, cfg.DBReadTimeout)
+	defer cancel()
+	page := hazardList{Items: make([]HazardEvent, 0, query.limit+1), UnavailableUnits: []string{}}
+	stores := store.logicalReadStores()
+	selected := query.filters.selectedSources()
+	results := fanoutLogicalReads(ctx, stores, func(ctx context.Context, unit logicalReadStore) (shardHazards, error) {
+		value := shardHazards{Cached: make(map[Source]bool, len(selected))}
+		err := unit.Store.primarySnapshot(ctx, func(ctx context.Context, tx pgx.Tx) error {
+			var err error
+			value.Rows, err = readHazardPage(ctx, tx, query)
+			if err != nil {
+				return err
+			}
+			for _, source := range selected {
+				var cached bool
+				if err := tx.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM hazard_events WHERE source = $1)", string(source)).Scan(&cached); err != nil {
+					return storeError("read shard cache", err)
+				}
+				value.Cached[source] = cached
+			}
+			return nil
+		})
+		return value, err
 	})
-	return detail, err
+	page.UnavailableUnits = unavailableReadUnits(results)
+	page.Partial = len(page.UnavailableUnits) != 0
+
+	cached := make(map[Source]bool, len(selected))
+	for _, result := range results {
+		if result.Err != nil {
+			continue
+		}
+		for source, exists := range result.Value.Cached {
+			cached[source] = cached[source] || exists
+		}
+	}
+	// Each shard batch is already in canonical order; advance the best of three
+	// heads rather than concatenating and sorting up to three full batches.
+	positions := make([]int, len(results))
+	for len(page.Items) < query.limit+1 {
+		best := -1
+		for index, result := range results {
+			if result.Err != nil || positions[index] >= len(result.Value.Rows) {
+				continue
+			}
+			if best < 0 || hazardBefore(result.Value.Rows[positions[index]], results[best].Value.Rows[positions[best]]) {
+				best = index
+			}
+		}
+		if best < 0 {
+			break
+		}
+		page.Items = append(page.Items, results[best].Value.Rows[positions[best]])
+		positions[best]++
+	}
+	more := len(page.Items) > query.limit
+	if more {
+		page.Items = page.Items[:query.limit]
+	}
+
+	var metadataErr error
+	page.Sources, page.AsOf, metadataErr = store.sourceMetadata(ctx, selected, cfg)
+	page.MetadataUnavailable = metadataErr != nil
+	for source, exists := range cached {
+		state := page.Sources[source]
+		state.HasCachedData = state.HasCachedData || exists
+		if metadataErr == nil && exists && state.Status == "unavailable" {
+			state.Status = "stale"
+		}
+		page.Sources[source] = state
+	}
+
+	if page.Partial {
+		if query.cursor != nil {
+			page.NextCursor = &query.cursorToken
+		} else {
+			token, err := startHazardCursor(query.filters)
+			if err != nil {
+				return page, storeError("encode start cursor", err)
+			}
+			page.NextCursor = &token
+		}
+	} else if more {
+		token, err := nextHazardCursor(page.Items[len(page.Items)-1], query.filters)
+		if err != nil {
+			return page, storeError("encode hazard cursor", err)
+		}
+		page.NextCursor = &token
+	}
+	return page, nil
+}
+
+func hazardBefore(left, right HazardEvent) bool {
+	if left.OccurredAt.Equal(right.OccurredAt) {
+		return left.HazardID > right.HazardID
+	}
+	return left.OccurredAt.After(right.OccurredAt)
+}
+
+func (store *Store) hazardDetail(requestCtx context.Context, hazardID string, cfg Config) (hazardDetail, error) {
+	ctx, cancel := context.WithTimeout(requestCtx, cfg.DBReadTimeout)
+	defer cancel()
+	stores := store.logicalReadStores()
+	type located struct {
+		Hazard HazardEvent
+		Found  bool
+	}
+	results := fanoutLogicalReads(ctx, stores, func(ctx context.Context, unit logicalReadStore) (located, error) {
+		var value located
+		err := unit.Store.primarySnapshot(ctx, func(ctx context.Context, tx pgx.Tx) error {
+			hazard, err := scanHazard(tx.QueryRow(ctx, "SELECT "+hazardColumns+" FROM hazard_events WHERE hazard_id = $1", hazardID))
+			if errors.Is(err, pgx.ErrNoRows) {
+				return nil
+			}
+			if err != nil {
+				return storeError("read hazard", err)
+			}
+			value = located{Hazard: hazard, Found: true}
+			return nil
+		})
+		return value, err
+	})
+	units := unavailableReadUnits(results)
+	for _, result := range results {
+		if result.Err != nil || !result.Value.Found {
+			continue
+		}
+		detail := hazardDetail{Item: result.Value.Hazard, Partial: len(units) != 0, UnavailableUnits: units}
+		detail.Sources, detail.AsOf, _ = store.sourceMetadata(ctx, []Source{detail.Item.Source}, cfg)
+		return detail, nil
+	}
+	if len(units) != 0 {
+		return hazardDetail{Partial: true, UnavailableUnits: units}, errHazardUnavailable
+	}
+	return hazardDetail{}, errHazardNotFound
+}
+
+func (store *Store) sourceMetadata(ctx context.Context, selected []Source, cfg Config) (map[Source]sourceState, time.Time, error) {
+	var states map[Source]sourceState
+	var asOf time.Time
+	err := store.primarySnapshot(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		var readErr error
+		states, asOf, readErr = readFreshness(ctx, tx, selected, cfg)
+		return readErr
+	})
+	if err != nil {
+
+		states, asOf = unavailableSourceMetadata(selected)
+	}
+	return states, asOf, err
+}
+
+func unavailableSourceMetadata(sources []Source) (map[Source]sourceState, time.Time) {
+	states := make(map[Source]sourceState, len(sources))
+	for _, source := range sources {
+		category := "metadata_unavailable"
+		states[source] = sourceState{pollObservation: pollObservation{Status: "unavailable", ErrorCategory: &category}, Endpoints: map[string]pollObservation{}}
+	}
+	return states, time.Now().UTC()
 }
 
 const hazardColumns = `hazard_id, source, source_ref_id, hazard_type, severity, area_name,
@@ -137,8 +305,8 @@ func hazardPageSQL(query hazardQuery) (string, []any) {
 	if filters.OccurredTo != nil {
 		add("occurred_at <= $%d", filters.OccurredTo.Truncate(time.Microsecond))
 	}
-	if query.cursor != nil {
-		args = append(args, query.cursor.OccurredAt, query.cursor.HazardID)
+	if query.cursor != nil && !query.cursor.Start {
+		args = append(args, *query.cursor.OccurredAt, *query.cursor.HazardID)
 		clauses = append(clauses, fmt.Sprintf(`(occurred_at, hazard_id COLLATE "C") < ($%d, $%d::text COLLATE "C")`, len(args)-1, len(args)))
 	}
 	args = append(args, query.limit+1)
@@ -158,6 +326,14 @@ func readFreshness(ctx context.Context, tx pgx.Tx, selected []Source, cfg Config
 	}
 	sources := make(map[Source]sourceState, len(selected))
 	for _, source := range selected {
+		if source == Satelit {
+			state, err := readUnconfiguredSource(ctx, tx, source)
+			if err != nil {
+				return nil, asOf, err
+			}
+			sources[source] = state
+			continue
+		}
 		if len(snapshots[source]) != len(sourceEndpoints(source)) {
 			return nil, asOf, storeError("read poll state", errors.New("incomplete endpoint state"))
 		}
@@ -198,11 +374,24 @@ func sourceEndpoints(source Source) []Endpoint {
 	switch source {
 	case BMKG:
 		return []Endpoint{SeismicEndpoint, WarningEndpoint}
+	case PVMBG:
+		return []Endpoint{VolcanicEndpoint}
 	case SensorPantai:
 		return []Endpoint{CoastalEndpoint}
 	default:
-		return []Endpoint{VolcanicEndpoint}
+		return nil
 	}
+}
+
+func readUnconfiguredSource(ctx context.Context, tx pgx.Tx, source Source) (sourceState, error) {
+	category := "source_not_configured"
+	state := sourceState{pollObservation: pollObservation{Status: "unavailable", ErrorCategory: &category},
+		Endpoints: make(map[string]pollObservation)}
+	err := tx.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM hazard_events WHERE source = $1)", string(source)).Scan(&state.HasCachedData)
+	if state.HasCachedData {
+		state.Status = "stale"
+	}
+	return state, storeError("read unconfigured source", err)
 }
 
 func utcTime(stamp *time.Time) *time.Time {

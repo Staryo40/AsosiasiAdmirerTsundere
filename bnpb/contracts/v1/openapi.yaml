@@ -3,9 +3,12 @@ info:
   title: BNPB Aggregator Internal API
   version: 1.0.0
   description: >-
-    A1 snapshot API for the authenticated A2 service. Only Aggregator accesses
-    Canonical Store. Reads do not wait for agency or broker calls. Mapping,
-    freshness rollups, authorization and cursor semantics are specified in README.md.
+    Internal Aggregator read and analytics APIs, M2 Audit API, catalog ingestion, and physical
+    storage measurements. Routes and runtime capabilities are documented in
+    README.md. Audit and catalog routes use dedicated Bearer credentials.
+    M2 public cursors are opaque v2 logical-boundary tokens; partial reads never
+    advance beyond the last complete boundary. New-source reads may explicitly
+    report partial or unavailable units. No TSUNAMI enum is defined.
 security:
   - InternalKey: []
 paths:
@@ -17,10 +20,11 @@ paths:
         Order descending by (occurred_at, hazard_id), using locale-independent ID
         comparison. Time bounds are inclusive. Authentication precedes application
         validation. Reject unknown, duplicate, empty or inconsistent parameters.
-        Cached/stale and mixed-source reads return 200. Return source_unavailable
-        only when every selected source is unavailable without cached data;
-        availability is independent of filtered matches. Cursor values are opaque,
-        filter-bound, bounded keyset tokens; limit may change between pages.
+        Cached/stale, mixed-source, and explicitly partial reads return 200 with
+        unavailable_units and partial state. A partial page does not advance past
+        its last complete incoming boundary; its opaque v2 retry cursor may be a
+        start marker rather than null. Null means terminal only for a complete page.
+        Cursor tokens are opaque, filter-bound, and bounded; limit may change.
       parameters:
         - $ref: '#/components/parameters/CorrelationId'
         - name: source
@@ -49,6 +53,7 @@ paths:
             format: date-time
         - name: limit
           in: query
+          description: Page size from 1 through 500.
           schema:
             type: integer
             minimum: 1
@@ -57,9 +62,9 @@ paths:
         - name: cursor
           in: query
           description: >-
-            Unpadded base64url cursor v1, at most 2048 ASCII bytes. Validate version,
-            decoded values and normalized filters. It provides no authorization or
-            snapshot isolation. Do not construct it on the client.
+            Opaque base64url keyset cursor v2, at most 2048 ASCII bytes. Client
+            must not decode or construct it. Partial reads can return a start
+            marker to retry without claiming traversal progress.
           schema:
             type: string
             minLength: 1
@@ -126,16 +131,89 @@ paths:
           $ref: '#/components/responses/UnexpectedError'
         '503':
           $ref: '#/components/responses/DependencyUnavailable'
+  /internal/analytics:
+    get:
+      operationId: aggregateHazards
+      summary: Aggregate active logical hazards across canonical shards
+      description: >-
+        Uses an inclusive from and exclusive to on occurred_at, at most 366 days
+        and 1000 intersecting UTC buckets. Timestamps allow at most nine
+        fractional digits and must normalize to a four-digit common-era UTC year.
+        A seismic event with a correlated warning
+        counts as TSUNAMI instead of EARTHQUAKE. Never reads physical replicas.
+        as_of is a request time, not a global snapshot or Audit watermark.
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+        - {name: from, in: query, required: true, schema: {type: string, format: date-time}}
+        - {name: to, in: query, required: true, schema: {type: string, format: date-time}}
+        - name: bucket
+          in: query
+          schema: {type: string, enum: [hour, day, week], default: day}
+      responses:
+        '200':
+          description: Active totals; partial results cover only available logical units.
+          headers:
+            X-Correlation-ID:
+              $ref: '#/components/headers/CorrelationId'
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/HazardAnalytics'}
+        '400':
+          $ref: '#/components/responses/InvalidQuery'
+        '401':
+          $ref: '#/components/responses/MissingCredential'
+        '403':
+          $ref: '#/components/responses/InvalidCredential'
+        '429':
+          $ref: '#/components/responses/AdmissionLimited'
+        '500':
+          $ref: '#/components/responses/UnexpectedError'
+        '503':
+          description: >-
+            An analytics result exceeded a configured bound, or the response could
+            not be encoded (analytics_unavailable).
+          headers:
+            X-Correlation-ID:
+              $ref: '#/components/headers/CorrelationId'
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApplicationError'
+                  - properties:
+                      error:
+                        properties:
+                          code: {enum: [analytics_result_limit, analytics_response_too_large, analytics_unavailable]}
   /ready:
     get:
       operationId: readiness
-      summary: Check initialized schema and database readiness
+      summary: Check process, canonical logical units and poll-owner status
       security: []
       responses:
         '200':
-          description: Initialized schema and database are usable; body not specified.
+          description: At least one schema- and identity-verified logical unit is usable.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AggregatorReadiness'}
         '503':
-          description: Initialization or database is unavailable; body not specified.
+          description: No verified logical unit is usable.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AggregatorReadiness'}
+        '429':
+          $ref: '#/components/responses/AdmissionLimited'
+  /readyz:
+    get:
+      operationId: readinessProbe
+      summary: Check canonical data readiness without consulting poll-owner authority
+      security: []
+      responses:
+        '200':
+          description: At least one schema- and identity-verified logical unit is usable.
+        '503':
+          description: No verified logical unit is usable before the probe deadline.
+        '429':
+          $ref: '#/components/responses/AdmissionLimited'
   /health:
     get:
       operationId: liveness
@@ -158,6 +236,219 @@ paths:
                   status:
                     type: string
                     const: ok
+  /internal/audit/events:
+    get:
+      operationId: auditEvents
+      summary: Read logical events in audit order
+      description: >-
+        Dedicated Bearer audit token, independent of X-BNPB-Internal-Key and
+        user roles. Audit errors are exactly {error:{code,message}} with no
+        correlation_id. JSON timestamps are UTC. Optional since is an inclusive
+        ingested_at lower bound; omitted source selects all sources. Results are
+        ascending (ingested_at,hazard_id). Default limit 100, maximum 1000.
+        Partial results set partial and unavailable_units; cursor repeats the last
+        complete boundary, including an opaque start marker on first-page partial.
+      security:
+        - AuditBearer: []
+      parameters:
+        - $ref: '#/components/parameters/AuditSince'
+        - $ref: '#/components/parameters/AuditLimit'
+        - $ref: '#/components/parameters/AuditCursor'
+        - name: source
+          in: query
+          schema:
+            $ref: './schemas/hazard-event.schema.json#/properties/source'
+      responses:
+        '200':
+          description: Logical events, possibly explicitly partial.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuditEvents'
+        '400':
+          $ref: '#/components/responses/AuditInvalidQuery'
+        '401':
+          $ref: '#/components/responses/AuditMissingCredential'
+        '403':
+          $ref: '#/components/responses/AuditInvalidCredential'
+        '429':
+          $ref: '#/components/responses/AuditLimited'
+        '503':
+          $ref: '#/components/responses/AuditUnavailable'
+  /internal/audit/checksum:
+    get:
+      operationId: auditChecksum
+      summary: Compute active-event checksum for one or all sources
+      description: >-
+        Count logical events; byte-sort every source_ref_id, retaining duplicate
+        values from distinct events, join with LF and SHA-256 the bytes without
+        a final LF. Omitting source includes all sources and returns source: null.
+        An empty result hashes the empty byte sequence.
+      security:
+        - AuditBearer: []
+      parameters:
+        - name: source
+          in: query
+          schema:
+            $ref: './schemas/hazard-event.schema.json#/properties/source'
+      responses:
+        '200':
+          description: SHA-256 over byte-sorted source_ref_id values joined by LF, without final LF.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuditChecksum'
+        '400':
+          $ref: '#/components/responses/AuditInvalidQuery'
+        '401':
+          $ref: '#/components/responses/AuditMissingCredential'
+        '403':
+          $ref: '#/components/responses/AuditInvalidCredential'
+        '429':
+          $ref: '#/components/responses/AuditLimited'
+        '503':
+          $ref: '#/components/responses/AuditUnavailable'
+  /internal/audit/location:
+    get:
+      operationId: auditLocation
+      summary: Inspect actual configured physical copies
+      description: >-
+        Probes configured physical copies, their live PostgreSQL role and row
+        presence. Placement metadata alone is not proof of location. A missing
+        copy remains partial unless verified repair recorded terminal retirement
+        evidence. Role drift preserves the live observation, marks the location
+        with role_drift, and makes placement coverage partial.
+      security:
+        - AuditBearer: []
+      parameters:
+        - name: hazard_id
+          in: query
+          required: true
+          schema:
+            type: string
+            minLength: 1
+      responses:
+        '200':
+          description: Actual locations and completeness.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuditLocation'
+        '400':
+          $ref: '#/components/responses/AuditInvalidQuery'
+        '401':
+          $ref: '#/components/responses/AuditMissingCredential'
+        '403':
+          $ref: '#/components/responses/AuditInvalidCredential'
+        '404':
+          $ref: '#/components/responses/AuditNotFound'
+        '429':
+          $ref: '#/components/responses/AuditLimited'
+        '503':
+          $ref: '#/components/responses/AuditUnavailable'
+  /internal/audit/unprocessed:
+    get:
+      operationId: auditUnprocessed
+      summary: Proxy failed-input metadata
+      description: >-
+        Proxies metadata only from the configured Member 3 API; raw payloads are
+        never returned. Missing, incomplete, malformed, oversized or unavailable
+        upstream results yield bounded 503.
+      security:
+        - AuditBearer: []
+      parameters:
+        - name: source
+          in: query
+          schema:
+            $ref: './schemas/hazard-event.schema.json#/properties/source'
+        - $ref: '#/components/parameters/AuditLimit'
+        - $ref: '#/components/parameters/AuditCursor'
+      responses:
+        '200':
+          description: Validated metadata-only response from upstream.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuditUnprocessed'
+        '400':
+          $ref: '#/components/responses/AuditInvalidQuery'
+        '401':
+          $ref: '#/components/responses/AuditMissingCredential'
+        '403':
+          $ref: '#/components/responses/AuditInvalidCredential'
+        '429':
+          $ref: '#/components/responses/AuditLimited'
+        '503':
+          $ref: '#/components/responses/AuditUnavailable'
+  /internal/catalog/seismic:
+    post:
+      operationId: ingestSeismicCatalog
+      summary: Ingest an idempotent seismic catalog batch
+      description: >-
+        Accepts a request of up to 1000 records and 4 MiB of wire JSON. The
+        active owner ingests the receipt in storage-budget-sized chunks without
+        changing poll state. A follower discovers owner_endpoint and forwards
+        the original request bytes transparently at most one hop. Retries must
+        reuse the original input identity and bytes. A retained rejection or
+        conflicting receipt identity returns 409; an uncertain outcome is 503.
+      security:
+        - CatalogBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CatalogBatch'
+      responses:
+        '200':
+          description: Durable batch accepted by the local owner.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [accepted, input_id, input_offset]
+                properties:
+                  accepted: {type: integer, minimum: 1}
+                  input_id: {type: string}
+                  input_offset: {type: integer, minimum: 0}
+        '400':
+          $ref: '#/components/responses/ReadError'
+        '401':
+          $ref: '#/components/responses/CatalogMissingCredential'
+        '403':
+          $ref: '#/components/responses/CatalogInvalidCredential'
+        '429':
+          $ref: '#/components/responses/AdmissionLimited'
+        '409':
+          $ref: '#/components/responses/CatalogRetainedConflict'
+        '503':
+          $ref: '#/components/responses/ReadUnavailable'
+  /internal/storage/measurements:
+    get:
+      operationId: storageMeasurements
+      summary: Read current physical PostgreSQL measurements
+      security:
+        - CatalogBearer: []
+      responses:
+        '200':
+          description: >-
+            Queries configured physical pools in parallel and validates logical
+            store identity. Canonical revisions count observed outbox rows;
+            PostgreSQL insert/update counters are sampled estimates. relation_bytes
+            measures the PostgreSQL relation, not node disk or WAL. Missing units
+            and settings are reported explicitly.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StorageMeasurements'
+        '401':
+          $ref: '#/components/responses/CatalogMissingCredential'
+        '403':
+          $ref: '#/components/responses/CatalogInvalidCredential'
+        '429':
+          $ref: '#/components/responses/AdmissionLimited'
+        '503':
+          $ref: '#/components/responses/ReadUnavailable'
 components:
   securitySchemes:
     InternalKey:
@@ -167,6 +458,14 @@ components:
       description: >-
         Dedicated API-to-Aggregator credential. Missing gives 401; empty, repeated
         or invalid gives 403. Authorization is not a substitute. Never echo the key.
+    AuditBearer:
+      type: http
+      scheme: bearer
+      description: Dedicated Audit token; separate from internal key and role tokens.
+    CatalogBearer:
+      type: http
+      scheme: bearer
+      description: Dedicated catalog token; separate from Audit and internal keys.
   parameters:
     CorrelationId:
       name: X-Correlation-ID
@@ -177,12 +476,96 @@ components:
         resulting request correlation ID, separate from ingestion correlation.
       schema:
         type: string
+    AuditSince:
+      name: since
+      in: query
+      description: Inclusive RFC 3339 UTC instant; events with ingested_at >= since.
+      schema:
+        type: string
+        format: date-time
+    AuditLimit:
+      name: limit
+      in: query
+      description: Defaults to 100; maximum 1000.
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 1000
+        default: 100
+    AuditCursor:
+      name: cursor
+      in: query
+      description: Opaque bounded owner cursor; do not decode or construct.
+      schema:
+        type: string
+        maxLength: 4096
   headers:
     CorrelationId:
       required: true
       schema:
         $ref: '#/components/schemas/CorrelationId'
   schemas:
+    HazardAnalytics:
+      type: object
+      additionalProperties: false
+      required: [from, to, bucket, as_of, total, series, severity, areas, partial, unavailable_units]
+      properties:
+        from: {$ref: '#/components/schemas/UtcTimestamp'}
+        to: {$ref: '#/components/schemas/UtcTimestamp'}
+        bucket: {type: string, enum: [hour, day, week]}
+        as_of: {$ref: '#/components/schemas/UtcTimestamp'}
+        total: {type: integer, minimum: 0}
+        series:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [start, category, count]
+            properties:
+              start: {$ref: '#/components/schemas/UtcTimestamp'}
+              category: {type: string, enum: [EARTHQUAKE, TSUNAMI, VOLCANIC, WILDFIRE, COASTAL]}
+              count: {type: integer, minimum: 1}
+        severity:
+          type: object
+          additionalProperties: false
+          required: [NORMAL, WASPADA, SIAGA, AWAS]
+          properties:
+            NORMAL: {type: integer, minimum: 0}
+            WASPADA: {type: integer, minimum: 0}
+            SIAGA: {type: integer, minimum: 0}
+            AWAS: {type: integer, minimum: 0}
+        areas:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [area_name, count]
+            properties:
+              area_name: {type: string, minLength: 1}
+              count: {type: integer, minimum: 1}
+        partial: {type: boolean}
+        unavailable_units:
+          type: array
+          items: {type: string, minLength: 1}
+    AggregatorReadiness:
+      type: object
+      additionalProperties: false
+      required: [process_status, ready, logical_shards, poll_owner]
+      properties:
+        process_status: {type: string, const: ok}
+        ready: {type: boolean}
+        logical_shards:
+          type: array
+          maxItems: 3
+          items:
+            type: object
+            additionalProperties: false
+            required: [id, unit, status]
+            properties:
+              id: {type: integer, minimum: 0, maximum: 2}
+              unit: {type: string, enum: [local, shard-0, shard-1, shard-2]}
+              status: {type: string, enum: [ready, unavailable]}
+        poll_owner: {type: string, enum: [local, owner, follower, unavailable]}
     HazardEvent:
       $ref: './schemas/hazard-event.schema.json'
     HazardSummary:
@@ -214,7 +597,7 @@ components:
           $ref: '#/components/schemas/NullableTimestamp'
         error_category:
           type: [string, 'null']
-          enum: [outage, auth, rate_limited, timeout, network, invalid_response, store, null]
+          enum: [outage, auth, rate_limited, timeout, network, invalid_response, store, source_not_configured, null]
     SourceState:
       type: object
       description: Rollup formulas and hung-poll thresholds are specified in README.md.
@@ -239,7 +622,7 @@ components:
       type: object
       description: Only selected sources, or the detail record's source, are present.
       minProperties: 1
-      maxProperties: 2
+      maxProperties: 4
       additionalProperties: false
       properties:
         BMKG:
@@ -266,15 +649,29 @@ components:
                   properties:
                     volcanic_reports:
                       $ref: '#/components/schemas/Observation'
+        SATELIT:
+          $ref: '#/components/schemas/UnconfiguredSourceState'
+        SENSOR_PANTAI:
+          $ref: '#/components/schemas/UnconfiguredSourceState'
+    UnconfiguredSourceState:
+      allOf:
+        - $ref: '#/components/schemas/SourceState'
+        - properties:
+            status:
+              enum: [stale, unavailable]
+            error_category:
+              const: source_not_configured
+            endpoints:
+              type: object
+              maxProperties: 0
     HazardList:
       type: object
-      required: [items, next_cursor, sources, as_of]
+      required: [items, next_cursor, sources, as_of, partial, unavailable_units]
       additionalProperties: false
       properties:
         items:
           type: array
-          items:
-            $ref: '#/components/schemas/HazardEvent'
+          items: {$ref: '#/components/schemas/HazardEvent'}
         next_cursor:
           anyOf:
             - type: string
@@ -282,23 +679,27 @@ components:
               maxLength: 2048
               pattern: '^[A-Za-z0-9_-]+$'
             - type: 'null'
-        sources:
-          $ref: '#/components/schemas/Sources'
-        as_of:
-          $ref: '#/components/schemas/UtcTimestamp'
+        sources: {$ref: '#/components/schemas/Sources'}
+        as_of: {$ref: '#/components/schemas/UtcTimestamp'}
+        partial: {type: boolean}
+        unavailable_units:
+          type: array
+          items: {type: string}
     HazardDetail:
       type: object
-      required: [item, sources, as_of]
+      required: [item, sources, as_of, partial, unavailable_units]
       additionalProperties: false
       properties:
-        item:
-          $ref: '#/components/schemas/HazardEvent'
+        item: {$ref: '#/components/schemas/HazardEvent'}
         sources:
           allOf:
             - $ref: '#/components/schemas/Sources'
             - maxProperties: 1
-        as_of:
-          $ref: '#/components/schemas/UtcTimestamp'
+        as_of: {$ref: '#/components/schemas/UtcTimestamp'}
+        partial: {type: boolean}
+        unavailable_units:
+          type: array
+          items: {type: string}
     ErrorDetail:
       type: object
       required: [code, message, correlation_id]
@@ -306,7 +707,21 @@ components:
       properties:
         code:
           type: string
-          enum: [invalid_query, missing_credential, invalid_credential, not_found, source_unavailable, store_unavailable]
+          enum:
+            - invalid_query
+            - missing_credential
+            - invalid_credential
+            - not_found
+            - source_unavailable
+            - store_unavailable
+            - invalid_request
+            - authority_unavailable
+            - measurements_unavailable
+            - catalogue_input_rejected
+            - catalogue_input_conflict
+            - analytics_result_limit
+            - analytics_response_too_large
+            - analytics_unavailable
         message:
           type: string
           minLength: 1
@@ -320,6 +735,158 @@ components:
       properties:
         error:
           $ref: '#/components/schemas/ErrorDetail'
+    AuditError:
+      type: object
+      required: [error]
+      additionalProperties: false
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          additionalProperties: false
+          properties:
+            code: {type: string}
+            message: {type: string, minLength: 1}
+    AuditEvents:
+      type: object
+      required: [items, next_cursor, partial, unavailable_units]
+      additionalProperties: false
+      properties:
+        items:
+          type: array
+          items: {$ref: '#/components/schemas/HazardEvent'}
+        next_cursor:
+          anyOf: [{type: string}, {type: 'null'}]
+        partial: {type: boolean}
+        unavailable_units:
+          type: array
+          items: {type: string}
+    AuditChecksum:
+      type: object
+      required: [source, count, checksum, algorithm, as_of, partial, unavailable_units]
+      additionalProperties: false
+      properties:
+        source:
+          anyOf:
+            - $ref: './schemas/hazard-event.schema.json#/properties/source'
+            - type: 'null'
+        count: {type: integer, minimum: 0}
+        checksum:
+          type: string
+          pattern: '^[a-f0-9]{64}$'
+        algorithm: {type: string, const: sha256}
+        as_of: {$ref: '#/components/schemas/UtcTimestamp'}
+        partial: {type: boolean}
+        unavailable_units:
+          type: array
+          items: {type: string}
+    AuditLocation:
+      type: object
+      required: [hazard_id, locations, partial]
+      additionalProperties: false
+      if:
+        properties:
+          partial: {const: true}
+      then:
+        required: [unavailable_units]
+      else:
+        properties:
+          unavailable_units: false
+      properties:
+        hazard_id: {type: string}
+        locations:
+          type: array
+          items:
+            type: object
+            required: [node, unit, role]
+            additionalProperties: false
+            properties:
+              node: {type: string}
+              unit: {type: string}
+              role: {type: string, enum: [primary, replica]}
+              role_drift:
+                type: boolean
+                const: true
+                description: Live role disagrees with placement or another observation of this copy.
+        partial: {type: boolean}
+        unavailable_units:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          description: Unreachable units or units whose placement coverage could not be verified.
+          items: {type: string, minLength: 1}
+    AuditUnprocessed:
+      type: object
+      required: [items, next_cursor]
+      additionalProperties: false
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+            required: [message_id, source, received_at, reason, retryable, attempts, status]
+            additionalProperties: false
+            properties:
+              message_id: {type: string, minLength: 1}
+              source:
+                $ref: './schemas/hazard-event.schema.json#/properties/source'
+              received_at: {$ref: '#/components/schemas/UtcTimestamp'}
+              reason: {type: string, minLength: 1}
+              retryable: {type: boolean}
+              attempts: {type: integer, minimum: 0}
+              status: {type: string, enum: [retrying, parked]}
+        next_cursor:
+          anyOf: [{type: string, maxLength: 4096}, {type: 'null'}]
+    CatalogBatch:
+      type: object
+      required: [input_id, input_offset, received_at, records]
+      additionalProperties: false
+      properties:
+        input_id: {type: string, minLength: 1, maxLength: 128}
+        input_offset: {type: integer, minimum: 0}
+        received_at: {$ref: '#/components/schemas/UtcTimestamp'}
+        records:
+          type: array
+          minItems: 1
+          maxItems: 1000
+          items: {type: object}
+    StorageMeasurements:
+      type: object
+      required: [items, partial, missing_settings, unavailable_units]
+      additionalProperties: false
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+            properties:
+              connection_index: {type: integer, minimum: 0}
+              unit: {type: string}
+              node: {type: string}
+              role: {type: string, enum: [primary, replica]}
+              in_recovery: {type: boolean}
+              settings_complete: {type: boolean}
+              partial: {type: boolean}
+              canonical_revisions: {type: integer, minimum: 0, description: Exact count of observed outbox rows for this pool.}
+              tables:
+                type: array
+                items:
+                  type: object
+                  required: [name, row_count, relation_bytes, stats_inserted, stats_updated]
+                  properties:
+                    name: {type: string, enum: [hazard_events, source_seismic, source_warnings, outbox, handled_inputs]}
+                    row_count: {type: integer, minimum: 0}
+                    relation_bytes: {type: integer, minimum: 0, description: "PostgreSQL relation bytes, not node disk or WAL."}
+                    stats_inserted: {type: integer, minimum: 0, description: Sampled PostgreSQL statistics.}
+                    stats_updated: {type: integer, minimum: 0, description: Sampled PostgreSQL statistics.}
+                    stats_approximate: {type: boolean}
+        partial: {type: boolean}
+        missing_settings:
+          type: array
+          items: {type: string}
+        unavailable_units:
+          type: array
+          items: {type: string}
     SourceUnavailableError:
       type: object
       required: [error, sources, as_of]
@@ -447,3 +1014,58 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/TransportError'
+    AuditInvalidQuery:
+      description: Invalid query; exact Audit envelope has no correlation_id.
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/AuditError'}
+    AuditMissingCredential:
+      description: Missing dedicated Bearer credential.
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/AuditError'}
+    AuditInvalidCredential:
+      description: Invalid, empty or repeated dedicated Bearer credential.
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/AuditError'}
+    AuditNotFound:
+      description: Hazard ID absent from a complete usable read.
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/AuditError'}
+    AuditLimited:
+      description: Admission rejection; same exact Audit JSON envelope.
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/AuditError'}
+    AuditUnavailable:
+      description: Store or metadata dependency unavailable; no fabricated empty result.
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/AuditError'}
+    CatalogMissingCredential:
+      description: Missing dedicated catalog Bearer token.
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/ApplicationError'}
+    CatalogInvalidCredential:
+      description: Invalid dedicated catalog Bearer token.
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/ApplicationError'}
+    CatalogRetainedConflict:
+      description: A durable retained rejection or a receipt identity/content conflict.
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/ApplicationError'}
+    ReadError:
+      description: Invalid catalog request.
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/ApplicationError'}
+    ReadUnavailable:
+      description: Authority, storage, or measurement dependency unavailable.
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/ApplicationError'}
