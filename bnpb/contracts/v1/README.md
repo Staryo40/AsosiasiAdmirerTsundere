@@ -249,7 +249,14 @@ Metadata `shard_repair_jobs` tetap merupakan tambahan control store yang tidak m
 - `tmp_role_label` dan `bootstrap_labels` tidak boleh mengubah `role=store`. Setel label tambahan di ConfigMap yang diverifikasi, bukan melalui override environment.
 - Proses supervisi memberi satu jendela kerja 20 detik per siklus, lalu menunggu 5 detik. Backup dapat berlanjut pada siklus berikutnya. Setelah primary mengonfirmasi replikasi sinkron, controller mengambil batas flush WAL dan menunggu replay hingga batas itu sebelum mencatat target `ready` dan salinan lama `retiring`. Pada siklus berikutnya, controller memeriksa kembali identitas, timeline, status replikasi sinkron, dan posisi replay target. Target yang hilang atau mulai dari disk kosong kembali ke `copying`. Perubahan sumber atau timeline memulai intent dengan revisi placement baru dan membatalkan penyelesaian dari intent lama. Semua salinan fisik tetap tercatat.
 
-Standby readiness is an observed identity and replay barrier, not a promotion grant. Reusing a logical primary route after a primary loss requires independent old-writer fencing, an acknowledged WAL boundary on the correct history, candidate verification and closure/rebinding of the application mutation guard. A `/primary` HTTP success, `pg_is_in_recovery() = false`, or greater timeline/LSN alone is not proof. Without Member 2's validated host and routing integration, safe automatic primary cutover and end-to-end second-loss tolerance remain open.
+Standby repair keeps `nofailover` enabled. The repair WAL barrier records catch-up at verification time. Recovery after a later primary loss requires the acknowledged WAL boundary for that loss.
+
+1. A2 must fence the old PostgreSQL primary and prevent it from restarting as a writer. Establish the acknowledged WAL boundary and its timeline from the deployment's durability guarantees.
+2. Verify the candidate's shard, system identifier, WAL history, and replay through that boundary before making it eligible for promotion. Confirm that the promoted member holds Patroni leadership and is writable.
+3. Publish the promoted member on the logical primary route and drain connections to the previous backend. Publish the new roles with a placement CAS. Aggregator must close and rebind its mutation guard to the new generation before resuming guarded writes.
+4. Exercise the sequence after losing the primary of a repaired shard. Compare the complete Audit checksum and count with the pre-loss values.
+
+Automatic promotion remains open. The current deployment contribution lacks the Patroni HA configuration, old-primary fence, and logical primary routing needed to execute this handoff.
 
 ### Step 11 — Handoff analitik untuk Anggota 2
 

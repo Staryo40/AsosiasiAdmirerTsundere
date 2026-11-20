@@ -54,7 +54,7 @@ injeksi outage/delay, cleanup, dan evidence tersedia di [P02/README.md](P02/READ
 
 ## Bukti deployment sharding, polling, katalog, dan delivery
 
-Empat collector `evidence_*.py` di folder ini menggunakan Python 3.9+ tanpa paket tambahan. Jalankan dari root aplikasi. Collector hanya membaca endpoint, inventaris Kubernetes, atau hasil pengamatan; collector tidak memicu fault, mengisi antrean, menjalankan replay, atau menulis katalog.
+Collector `evidence_*.py` di folder ini menggunakan Python 3.9+ tanpa paket tambahan. Jalankan dari root aplikasi. Collector hanya membaca endpoint, inventaris Kubernetes, atau hasil pengamatan; collector tidak memicu fault, mengisi antrean, menjalankan replay, atau menulis katalog.
 
 Tulis setiap laporan ke path baru di `testing/results/`. Exit `0` berarti semua pemeriksaan mekanis collector lulus untuk input tersebut; exit `1` berarti bukti tidak lengkap atau gagal. Input log yang dinormalisasi harus berasal dari pengamatan aktual, menggunakan timestamp UTC dari pengamat yang tidak ikut mengalami *clock skew*. Simpan ekspor asli yang sudah disanitasi, identitas revisi/image deployment, serta log penguji secara terpisah. Jangan memasukkan token, kredensial, atau payload mentah ke laporan.
 
@@ -71,6 +71,26 @@ python testing/evidence_topology.py --context CONTEXT --base-url AGGREGATOR_URL 
 Tunggu `WATCH READY` sebelum operator menjalankan gangguan yang diizinkan. Tulis tiga observasi aktual secara berurutan ke JSONL: `node_disk_lost`, `old_primary_fenced`, `new_primary_ready`. Setiap baris memuat `event`, `at` (UTC), `node`, `unit`, dan `timeline` (integer PostgreSQL). Dua baris pertama memakai identitas primary lama; primary baru harus merupakan replika sebelumnya dan punya timeline lebih tinggi. Sisakan waktu pemantauan setelah promosi dan pulihkan RF2 sebelum pemeriksaan akhir. Gunakan `--require-partial` hanya jika skenario memang harus memperlihatkan hasil parsial.
 
 Opsional: ikat ID unit ke pod konkret dengan `--placement` (lihat `--help`). Inventaris PVC/PV dan boot ID memeriksa konfigurasi cluster; simpan bukti host fisik, disk, serta log fencing/promosi secara terpisah. Probe membaca endpoint internal yang dipakai Client-Facing API, bukan menggantikan uji end-to-end klien.
+
+### 1a. Pemulihan setelah kehilangan primary pada shard hasil repair (C6)
+
+Gunakan satu ID HazardEvent BMKG dari shard yang telah diperbaiki. Siapkan count dan checksum referensi independen, serta pertahankan populasi BMKG selama pengamatan. Mulai collector sebelum gangguan kedua dan tunggu `WATCH READY`. Operator menjalankan skenario yang telah diizinkan secara terpisah.
+
+```text
+python testing/evidence_repair.py --base-url AGGREGATOR_URL --audit-token-file AUDIT_TOKEN_FILE --hazard-id ID --old-unit OLD_PRIMARY --repaired-unit REPAIRED_REPLICA --expected-count ASSISTANT_COUNT --expected-checksum ASSISTANT_SHA256 --cutover-log cutover.jsonl --output testing/results/repair.json
+```
+
+Catat observasi aktual berikut secara berurutan dalam JSONL. Setiap baris memuat `event`, `at` (UTC), `node`, `unit`, `timeline` (integer PostgreSQL), `system_id` (string desimal), dan `evidence_sha256` (SHA-256 rekaman sumber yang disanitasi).
+
+| `event` | Observasi sumber dan field tambahan |
+| --- | --- |
+| `node_disk_lost` | Tester atau host mengonfirmasi hilangnya disk primary lama. |
+| `old_primary_fenced` | Host mengonfirmasi primary lama tidak dapat kembali menulis. `acknowledged_lsn` adalah batas WAL yang mencakup seluruh transaksi yang telah diakui, berdasarkan jaminan durabilitas deployment. |
+| `candidate_verified` | PostgreSQL melaporkan `replay_lsn` kandidat pada timeline lama sebelum promosi. |
+| `new_primary_ready` | Patroni mengonfirmasi kepemimpinan kandidat pada timeline baru dan platform mengonfirmasi rute primary aktif. |
+| `guard_rebound` | SQL mengonfirmasi guard aktif pada resource dan timeline baru. Catat `previous_epoch` dan `epoch` sebagai integer. |
+
+Collector mencocokkan urutan, anggota, timeline, batas WAL, dan kenaikan epoch dengan lokasi serta checksum yang diamati lewat Audit. Simpan bukti sumber untuk memeriksa fencing, batas WAL, dan guard secara independen. Collector memerlukan sampel selama kehilangan primary dan checksum lengkap setelah guard aktif. Hasilnya mencakup skenario satu shard yang diuji.
 
 ### 2. Fencing dan takeover polling
 
@@ -131,7 +151,7 @@ Untuk JSONL broker, setiap baris memuat `event`, `time`, `vhost`, `queue`, `mess
 | 12 — Readiness | Gunakan fixture shard untuk data lengkap, degradasi parsial, dan tidak ada unit valid. Uji perbedaan `/health`, `/ready`, dan status poll owner, juga batas admission serta propagasi korelasi lintas HTTP. |
 | 13 — Regresi | Dari `bnpb/`, setelah uji terarah berurutan: `go test ./...`, `go vet ./...`, `go build ./cmd/...`, `go test -race ./...`, lalu uji bertag `integration`. `regression_test.go` dan `p1_mapping_test.go` adalah regresi lokal. `p1_integration_test.go` mensyaratkan `postgres-test/bnpb_test` di jaringan Compose profil `tests`; suite Go memakai fixture BMKG/PVMBG dan server HTTP in-process, bukan proses mock hidup. Suite routed memakai `BNPB_M2_LOCAL_TEST_DATABASE_URL` dan tidak menggantikan fixture Compose. Jangan arahkan keduanya ke Canonical Store. |
 
-Untuk bukti terdistribusi, catat revisi dan digest image, hash serta count referensi asisten, konfigurasi efektif, resource Appendix B, identitas node/boot/host dan disk lokal. Gunakan `evidence_topology.py` untuk inventaris, observasi baca berbatas waktu, urutan loss/fence/promote, lokasi, dan checksum sebelum/sesudah satu gangguan. `evidence_catalogue.py` mencatat beban natural/burst; `evidence_polling.py` mencatat takeover; `evidence_delivery.py` mencatat bukti broker dan metadata Anggota 3. Keempatnya tidak melakukan fault. Hasil collector pertama **tidak membuktikan** kontinuitas tulis, WAL cutover yang aman, RF2 pada seluruh populasi, atau toleransi kehilangan kedua.
+Untuk bukti terdistribusi, catat revisi dan digest image, hash serta count referensi asisten, konfigurasi efektif, resource Appendix B, identitas node/boot/host dan disk lokal. Gunakan `evidence_topology.py` untuk inventaris, observasi baca berbatas waktu, urutan loss/fence/promote, lokasi, dan checksum sebelum/sesudah satu gangguan. Gunakan `evidence_repair.py` untuk skenario C6. `evidence_catalogue.py` mencatat beban natural/burst, `evidence_polling.py` mencatat takeover, dan `evidence_delivery.py` mencatat bukti broker serta metadata Anggota 3. Bukti kontinuitas tulis dan RF2 pada seluruh populasi memerlukan pengamatan tambahan.
 
 Setelah ada izin deploy dan fault yang eksplisit, simpan artefak terpisah untuk:
 

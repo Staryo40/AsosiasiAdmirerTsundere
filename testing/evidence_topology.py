@@ -256,8 +256,10 @@ class Probe:
         return observation, body
 
 
-def checksum(probe, expected, timeout):
-    observation, body = probe.get("/internal/audit/checksum", {"source": "BMKG"}, timeout, audit=True)
+def checksum(probe, expected, timeout, *, deadline=None):
+    observation, body = probe.get("/internal/audit/checksum", {"source": "BMKG"}, timeout, audit=True, deadline=deadline)
+    if observation is None:
+        return None
     count, digest = body.get("count"), matched(body.get("checksum"), DIGEST)
     try:
         as_of = utc(body["as_of"]).isoformat()
@@ -270,8 +272,15 @@ def checksum(probe, expected, timeout):
         and type(count) is int and count > 0 and observation["elapsed_ms"] <= timeout * 1000
     )
     partial = body.get("partial")
+    units = body.get("unavailable_units")
+    unavailable = units if isinstance(units, list) and all(matched(unit) for unit in units) else []
     observation.update(count=count if type(count) is int else None, checksum=digest, as_of=as_of,
                        partial=partial if type(partial) is bool else None,
+                       unavailable_units=unavailable,
+                       valid_partial=observation["status"] == 200 and body.get("source") == "BMKG"
+                       and body.get("algorithm") == "sha256" and as_of is not None and digest is not None
+                       and type(count) is int and count >= 0 and partial is True and bool(unavailable)
+                       and len(set(unavailable)) == len(unavailable) and observation["elapsed_ms"] <= timeout * 1000,
                        complete=complete, matches_expected=complete and digest == expected)
     return observation
 
