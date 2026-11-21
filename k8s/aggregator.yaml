@@ -78,6 +78,15 @@ spec:
             - name: BNPB_PANTAI_AUTH_TOKEN
               valueFrom:
                 secretKeyRef: {name: pantai-token, key: token}
+            - name: BNPB_SATELLITE_INGEST_TOKEN
+              valueFrom:
+                secretKeyRef: {name: bnpb-secrets, key: BNPB_SATELLITE_INGEST_TOKEN}
+            - name: BNPB_UNPROCESSED_API_TOKEN
+              valueFrom:
+                secretKeyRef: {name: bnpb-secrets, key: BNPB_UNPROCESSED_API_TOKEN}
+            - name: BNPB_AUDIT_TOKEN
+              valueFrom:
+                secretKeyRef: {name: bnpb-secrets, key: BNPB_AUDIT_TOKEN}
           resources:
             requests: {memory: 256Mi}
             limits: {memory: 512Mi}

@@ -1,0 +1,124 @@
+# Feed Satelit processor. The feed allows one connection per group, so only the replica
+# holding the satellite-feed Lease streams; the other stands by on another node.
+# Each replica keeps its own event log in /data and rebuilds from it when it takes over.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: satellite
+imagePullSecrets:
+  - name: dockerhub-pull
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: satellite-lease
+rules:
+  - apiGroups: [coordination.k8s.io]
+    resources: [leases]
+    verbs: [get, create, update]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: satellite-lease
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: satellite-lease
+subjects:
+  - kind: ServiceAccount
+    name: satellite
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: satellite
+spec:
+  serviceName: satellite
+  replicas: 2
+  podManagementPolicy: Parallel
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: satellite
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: satellite
+        # Appendix B puts stream processors in the broker class.
+        role: broker
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8089"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: satellite
+      securityContext:
+        fsGroup: 65532
+      terminationGracePeriodSeconds: 20
+      affinity:
+        podAntiAffinity:
+          # Preferred: losing a node must not leave the standby unschedulable.
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels:
+                    app.kubernetes.io/name: satellite
+      containers:
+        - name: satellite
+          image: aat/bnpb-satellite
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8089
+          envFrom:
+            - configMapRef:
+                name: bnpb-common
+            - configMapRef:
+                name: satellite-config
+          env:
+            - name: BNPB_SATELLITE_IDENTITY
+              valueFrom:
+                fieldRef: {fieldPath: metadata.name}
+            - name: BNPB_SATELLITE_TOKEN
+              valueFrom:
+                secretKeyRef: {name: satellite-token, key: token}
+            - name: BNPB_SATELLITE_INGEST_TOKEN
+              valueFrom:
+                secretKeyRef: {name: bnpb-secrets, key: BNPB_SATELLITE_INGEST_TOKEN}
+          resources:
+            requests: {memory: 512Mi}
+            limits: {memory: 1Gi}
+          # A standby replica is ready too; /ready reports which one holds the feed.
+          readinessProbe:
+            httpGet: {path: /ready, port: http}
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: {path: /health, port: http}
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          volumeMounts:
+            - name: data
+              mountPath: /data
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: [ReadWriteOnce]
+        storageClassName: local-path
+        resources:
+          requests:
+            storage: 2Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: satellite
+spec:
+  selector:
+    app.kubernetes.io/name: satellite
+  ports:
+    - name: http
+      port: 8089
+      targetPort: http

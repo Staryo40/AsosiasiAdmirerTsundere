@@ -131,6 +131,12 @@ spec:
             - name: BNPB_CONSUMER_3_RABBITMQ_PASSWORD
               valueFrom:
                 secretKeyRef: {name: bnpb-secrets, key: BNPB_CONSUMER_3_RABBITMQ_PASSWORD}
+            - name: BNPB_API_RABBITMQ_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: bnpb-secrets, key: BNPB_API_RABBITMQ_PASSWORD}
+            - name: BNPB_FIELD_INTAKE_RABBITMQ_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: bnpb-secrets, key: BNPB_FIELD_INTAKE_RABBITMQ_PASSWORD}
           resources:
             requests: {memory: 128Mi}
             limits: {memory: 256Mi}
