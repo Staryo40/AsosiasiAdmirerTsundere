@@ -42,6 +42,7 @@ type Config struct {
 	Catalog                                         CatalogConfig
 	PVMBGAdaptation                                 pvmbgAdaptation
 	SatelliteIngestToken                            string
+	PollLease                                       PollLeaseConfig
 	PVMBGCycleTimeout, PollOverlap, RetryMaxBackoff time.Duration
 	WarningReconcileInterval, SourceStaleAfter      time.Duration
 	DBReadTimeout, DBWriteTimeout, PublishTimeout   time.Duration
@@ -134,6 +135,10 @@ func loadConfig(lookup func(string) (string, bool)) (Config, error) {
 		return Config{}, err
 	}
 	cfg.SatelliteIngestToken, err = loadSatelliteIngestToken(lookup)
+	if err != nil {
+		return Config{}, err
+	}
+	cfg.PollLease, err = loadPollLeaseConfig(lookup, shardURLsConfigured != 0)
 	if err != nil {
 		return Config{}, err
 	}

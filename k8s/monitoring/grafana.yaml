@@ -445,6 +445,37 @@ data:
             }
           },
           "description": "From the Aggregator ingesting a hazard to consumer-2 recording its alert. Both clocks are on different nodes, so a clock-skew test distorts this panel."
+        },
+        {
+          "id": 11,
+          "title": "Aggregator source poller (lease holder)",
+          "type": "timeseries",
+          "gridPos": {
+            "h": 8,
+            "w": 24,
+            "x": 0,
+            "y": 40
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "targets": [
+            {
+              "expr": "bnpb_aggregator_poll_leading",
+              "legendFormat": "{{instance}}"
+            },
+            {
+              "expr": "sum(bnpb_aggregator_poll_leading)",
+              "legendFormat": "replicas polling"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short"
+            }
+          },
+          "description": "Exactly one Aggregator replica should poll BMKG, PVMBG and Sensor Pantai. A failover shows as one line dropping and another rising."
         }
       ]
     }

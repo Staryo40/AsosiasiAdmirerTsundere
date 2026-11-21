@@ -67,6 +67,9 @@ var failedMessagesSchema string
 //go:embed migrations/015_source_wildfire.sql
 var sourceWildfireSchema string
 
+//go:embed migrations/016_poll_fence.sql
+var pollFenceSchema string
+
 const currentSchemaVersion = 15
 
 const schemaHistoryQuery = `SELECT COALESCE(max(version), 0), count(*),
@@ -89,6 +92,7 @@ type Store struct {
 	coastal                   coastalIngest
 	pantaiClient              *pantaiClient
 	pvmbg                     pvmbgAdaptation
+	pollLeader                interface{ Leading() bool }
 }
 
 func OpenStore(ctx context.Context, cfg Config, logger *slog.Logger) (*Store, error) {
@@ -274,6 +278,9 @@ func grantFailedMessagePrivileges(ctx context.Context, admin, writer *pgxpool.Po
 	if _, err := tx.Exec(ctx, "GRANT SELECT, INSERT, UPDATE ON failed_messages TO "+pgx.Identifier{role}.Sanitize()); err != nil {
 		return err
 	}
+	if _, err := tx.Exec(ctx, "GRANT SELECT, INSERT, UPDATE ON poll_fence TO "+pgx.Identifier{role}.Sanitize()); err != nil {
+		return err
+	}
 	return tx.Commit(ctx)
 }
 
@@ -393,6 +400,9 @@ func (store *Store) migrate(ctx context.Context, admin *pgxpool.Pool, bootstrap 
 		if _, err := tx.Exec(ctx, failedMessagesSchema); err != nil {
 			return err
 		}
+		if _, err := tx.Exec(ctx, pollFenceSchema); err != nil {
+			return err
+		}
 	}
 	if bootstrap != nil {
 		if err := bootstrapPlacement(ctx, tx, *bootstrap); err != nil {
@@ -489,6 +499,9 @@ func storeError(operation string, err error) error {
 	}
 	if errors.Is(err, errSchemaVersion) {
 		return fmt.Errorf("%s: %w", operation, errSchemaVersion)
+	}
+	if errors.Is(err, errStalePollLease) {
+		return fmt.Errorf("%s: %w", operation, errStalePollLease)
 	}
 	if errors.Is(err, errPlacementChanged) {
 		return fmt.Errorf("%s: %w", operation, errPlacementChanged)

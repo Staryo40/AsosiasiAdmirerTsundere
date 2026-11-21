@@ -116,6 +116,9 @@ func (store *Store) beginWriteMutation(ctx context.Context) (pgx.Tx, error) {
 	if store.shards[0] != nil {
 		return nil, errors.New("ingest: poll authority required")
 	}
+	if lease, ok := pollLeaseFromContext(ctx); ok {
+		return store.beginFencedPollWrite(ctx, lease)
+	}
 	return store.write.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
 }
 

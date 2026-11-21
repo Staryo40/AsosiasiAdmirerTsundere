@@ -334,6 +334,14 @@ The Aggregator keeps every source message it could not use in its `failed_messag
 
 A broken source never stops polling or crashes the Aggregator, and other sources keep polling meanwhile. The API exposes the list and replay to BNPB Internal Ops only (see [Client-Facing API](#client-facing-api-public-8080)). The gauge `bnpb_failed_messages{source,status}` on `/metrics` counts rows for each source and status.
 
+#### One poller per source
+
+With a single canonical store (no `BNPB_SHARD_*` URLs) and `BNPB_AGGREGATOR_LEASE_NAME` set, only the replica holding that Kubernetes Lease polls BMKG, PVMBG and Sensor Pantai. Every replica still serves reads and publishes its outbox. The lease lasts 15 seconds and is renewed every 5. A holder that cannot renew for 10 seconds stops polling before anyone else may take over. The pod name (`BNPB_AGGREGATOR_IDENTITY`) identifies each replica.
+
+Clocks do not decide who may store poll results. Each takeover raises the Lease's `leaseTransitions` counter, and the new holder first records that number and the Lease UID in the one-row `poll_fence` table. Every poll write (records, checkpoint, poll state, the Sensor Pantai cursor) then checks, in its own transaction, that the row still names its term. A replica whose clock ran ahead may take the Lease early, and a frozen replica may wake up still believing it holds it, but neither can store anything once a newer term has claimed the row. Such a write fails with poll category `lease_lost`. The takeover claim waits for any in-flight write of the old term, so no old write commits after it. `/ready` reports `poll_owner` as `leader` or `standby`, `agency_poll` log lines carry `lease_holder` and `lease_generation`, and `bnpb_aggregator_poll_leading` is 1 on the replica that polls.
+
+With the lease name empty (Compose), every replica polls as in Milestone 1. Sharded stores refuse the setting and use the poll authority described above instead.
+
 ### Consumers (internal, `:8085`/`:8086`/`:8087`)
 
 Each consumer exposes only two routes, both unauthenticated (internal network only):

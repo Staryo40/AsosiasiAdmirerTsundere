@@ -122,6 +122,9 @@ func (poller *poller) pollEndpoint(ctx context.Context, endpoint Endpoint) error
 	if owner, epoch, ok := pollAuthorityToken(ctx); ok {
 		fields = append(fields, "owner", owner, "epoch", epoch)
 	}
+	if lease, ok := pollLeaseFromContext(ctx); ok {
+		fields = append(fields, "lease_holder", lease.holder, "lease_generation", lease.generation)
+	}
 	logging.Event(ctx, poller.logger, logging.Record{Level: level, Event: "agency_poll", Message: "agency poll completed"}, fields...)
 	return err
 }
@@ -339,6 +342,9 @@ func (poller *poller) ingestResponse(ctx context.Context, receipt pollReceipt) e
 
 func pollCategory(err error) string {
 	var failure *sourceError
+	if errors.Is(err, errStalePollLease) {
+		return "lease_lost"
+	}
 	if !errors.As(err, &failure) {
 		return "store"
 	}

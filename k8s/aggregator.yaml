@@ -1,3 +1,33 @@
+# Only the replica holding the aggregator-poller Lease polls BMKG, PVMBG and Sensor Pantai.
+# Each new holder claims the canonical store first, so a replica that lost the Lease cannot store poll results.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: aggregator
+imagePullSecrets:
+  - name: dockerhub-pull
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: aggregator-lease
+rules:
+  - apiGroups: [coordination.k8s.io]
+    resources: [leases]
+    verbs: [get, create, update]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: aggregator-lease
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: aggregator-lease
+subjects:
+  - kind: ServiceAccount
+    name: aggregator
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -22,6 +52,7 @@ spec:
         prometheus.io/port: "8083"
         prometheus.io/path: "/metrics"
     spec:
+      serviceAccountName: aggregator
       terminationGracePeriodSeconds: 30
       topologySpreadConstraints:
         - maxSkew: 1
@@ -81,6 +112,9 @@ spec:
             - name: BNPB_SATELLITE_INGEST_TOKEN
               valueFrom:
                 secretKeyRef: {name: bnpb-secrets, key: BNPB_SATELLITE_INGEST_TOKEN}
+            - name: BNPB_AGGREGATOR_IDENTITY
+              valueFrom:
+                fieldRef: {fieldPath: metadata.name}
             - name: BNPB_UNPROCESSED_API_TOKEN
               valueFrom:
                 secretKeyRef: {name: bnpb-secrets, key: BNPB_UNPROCESSED_API_TOKEN}

@@ -18,7 +18,22 @@ func (app application) ownerWorkers(ctx context.Context, cfg Config, logger *slo
 		return nil, err
 	}
 	if !routed {
-		return append(app.pollWorkers(cfg, logger), app.pantaiWorker(cfg, app.pantai, logger), dispatch), nil
+		pollers := append(app.pollWorkers(cfg, logger), app.pantaiWorker(cfg, app.pantai, logger))
+		if cfg.PollLease.Name == "" {
+			pollLeading.Set(1)
+			return append(pollers, dispatch), nil
+		}
+		elector, err := newInClusterPollElector(cfg.PollLease, logger)
+		if err != nil {
+			return nil, err
+		}
+		app.store.pollLeader = elector
+		// Every replica keeps publishing its outbox; only the lease holder polls the sources.
+		return []func(context.Context){dispatch, func(ctx context.Context) {
+			elector.Run(ctx, func(leadCtx context.Context, token pollLeaseToken) {
+				leadPolls(leadCtx, app.store, logger, token, pollers)
+			})
+		}}, nil
 	}
 	stores := []*Store{app.store, app.store.shards[0], app.store.shards[1], app.store.shards[2]}
 	authorityPools := make([]*pgxpool.Pool, 0, len(stores))

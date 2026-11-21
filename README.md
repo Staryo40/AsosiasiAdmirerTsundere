@@ -545,6 +545,7 @@ scenarios only target `node-b`, the worker that is not the control plane.
 | `role=store` data on the node's local disk | PostgreSQL is a StatefulSet on a `local-path` PersistentVolume. |
 | Storage reachable only by its owner (Platform.8) | [`k8s/network-policies.yaml`](k8s/network-policies.yaml): PostgreSQL accepts only the Aggregator, RabbitMQ only the Aggregator, the consumers, `broker-init`, the API (to publish field reports), and `field-intake`. Each satellite replica keeps its feed log on its own `local-path` volume. |
 | Tester Agent not obstructed (TA.2) | The NetworkPolicies select only the PostgreSQL and RabbitMQ pods. No other policy, taint, or quota is applied. |
+| One Aggregator replica polls each source (P2.2–5) | The `aggregator-poller` Lease picks the poller. Each new holder claims the `poll_fence` row in PostgreSQL, which rejects poll writes from an older lease term, so clock skew or a frozen replica cannot store results twice. See [`bnpb/README.md`](bnpb/README.md#one-poller-per-source). |
 | Readiness and liveness probes, spread across nodes | Aggregator and API replicas use `topologySpreadConstraints` and probes; the Aggregator also has a PodDisruptionBudget. |
 
 | Component | Role | Replicas | Memory requests / limits |
@@ -601,6 +602,7 @@ All commands use the `sistem-informasi-kebencanaan-bnpb` namespace; set it once 
 | Kill one pod | `kubectl delete pod <pod-name>` |
 | Observe pod placement and health | `kubectl get pods -o wide -w` |
 | Follow all replicas of a component | `kubectl logs -l app.kubernetes.io/name=aggregator --prefix -f` |
+| Find the Aggregator replica polling the sources | `kubectl get lease aggregator-poller -o jsonpath='{.spec.holderIdentity}'` |
 | Find the satellite replica reading the feed | `kubectl get lease satellite-feed -o jsonpath='{.spec.holderIdentity}'` |
 | Kill the satellite leader (the standby takes over) | `kubectl delete pod --grace-period=0 --force <holder>` |
 | Check fires against a replay of the event log | `kubectl exec <satellite-pod> -- /bnpb-satellite -verify` |
