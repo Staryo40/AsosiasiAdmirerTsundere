@@ -78,7 +78,8 @@ func (store *Store) readAuditEvents(ctx context.Context, query auditQuery) ([]Ha
 }
 
 func readAuditEventPage(ctx context.Context, tx pgx.Tx, query auditQuery) ([]HazardEvent, error) {
-	clauses, args := []string{"TRUE"}, []any{}
+	// Withdrawn fires keep their row for lineage but are not part of the active population.
+	clauses, args := []string{"withdrawn_at IS NULL"}, []any{}
 	add := func(expression string, value any) {
 		args = append(args, value)
 		clauses = append(clauses, fmt.Sprintf(expression, len(args)))
@@ -233,10 +234,10 @@ func (stream *auditStream) next() auditRefHead {
 }
 
 func streamAuditRefs(ctx context.Context, tx pgx.Tx, source *Source, refs chan<- string) error {
-	query := "SELECT source_ref_id FROM hazard_events"
+	query := "SELECT source_ref_id FROM hazard_events WHERE withdrawn_at IS NULL"
 	args := []any{}
 	if source != nil {
-		query += " WHERE source = $1"
+		query += " AND source = $1"
 		args = append(args, string(*source))
 	}
 	query += ` ORDER BY source_ref_id COLLATE "C" ASC`

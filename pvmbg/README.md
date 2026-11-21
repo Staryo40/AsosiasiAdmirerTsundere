@@ -139,7 +139,7 @@ sleep 12
 curl -s -H "Authorization: Bearer $READER" "$BASE/volcanic-reports?since=$LAST"; echo
 ```
 
-**The schema changes while running** (`confidence_level` — no restart needed):
+**The schema changes while running** (`confidence_level` — no restart needed; versions 3-5 break the schema, see [`POST /admin/schema-version`](#post-adminschema-version)):
 
 ```bash
 admin schema-version '{"version":2}'     # expect 204
@@ -217,7 +217,8 @@ Errors are always JSON: `{"error": "<message>"}`.
 | `GET /health` | nothing | Health check: `200 OK`, or `503` during a simulated outage. |
 | `POST /auth/login` | nothing | Exchange client credentials for an access token. |
 | `GET /volcanic-reports?since=<timestamp>` | `read` token | The reports. |
-| `POST /admin/schema-version` | `admin` token | Switch the report schema (adds or removes `confidence_level`). |
+| `POST /admin/schema-version` | `admin` token | Switch the report schema: compatible (1, 2) or incompatible (3, 4, 5). |
+| `POST /admin/payload-fault` | `admin` token | Make `/volcanic-reports` send a corrupted body. |
 | `POST /admin/outage` | `admin` token | Switch the simulated outage on or off. |
 | `POST /admin/response-delay` | `admin` token | Change the response delay range. |
 
@@ -261,7 +262,33 @@ Needs a `read` (or `admin`) token. Returns a JSON array of reports, oldest first
 
 ### `POST /admin/schema-version`
 
-Body `{"version": 1}` or `{"version": 2}`. Answers `204`, takes effect immediately. Any other number is `400`.
+Body `{"version": <1-5>}`. Answers `204`, takes effect immediately. Any other number is `400`.
+
+| Version | Every report is sent as | Compatible with v1 |
+| --- | --- | --- |
+| `1` | The original schema | yes |
+| `2` | v1 plus `confidence_level` | yes, the field is added |
+| `3` | v1 with `alert_level` renamed to `level` | no, a field is renamed |
+| `4` | v1 with `eruption_count_24h` as a string, e.g. `"3"` | no, a type changes |
+| `5` | v1 without `reported_at` | no, a required field is missing |
+
+### `POST /admin/payload-fault`
+
+Body `{"mode": "<mode>"}`. Answers `204`, takes effect immediately and stays on until set back to `none`. An unknown mode is `400`. It is applied on top of the current schema version.
+
+| Mode | `GET /volcanic-reports` sends |
+| --- | --- |
+| `none` | The normal body |
+| `truncated` | The first half of the body's bytes, so it no longer parses |
+| `deep_nesting` | An extra first element nested 5,000 arrays deep, then the real reports |
+| `invalid_utf8` | An extra first element `{"report_id":"fault-…"}` containing the bytes `C3 28`, then the real reports |
+| `oversized` | An extra first element with about 40 MiB of padding, then the real reports, streamed so PVMBG never holds it in memory |
+
+```bash
+admin payload-fault '{"mode":"truncated"}'   # expect 204
+curl -s -H "Authorization: Bearer $READER" "$BASE/volcanic-reports" | tail -c 100; echo   # cut off mid-report
+admin payload-fault '{"mode":"none"}'        # back to normal
+```
 
 ### `POST /admin/outage`
 

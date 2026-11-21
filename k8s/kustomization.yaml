@@ -21,6 +21,8 @@ resources:
   - consumers.yaml
   - dashboard.yaml
   - sensor-pantai.yaml
+  - satellite.yaml
+  - field-intake.yaml
   - network-policies.yaml
 
 configMapGenerator:
@@ -40,6 +42,10 @@ configMapGenerator:
     envs: [config/api.env]
   - name: consumer-config
     envs: [config/consumer.env]
+  - name: satellite-config
+    envs: [config/satellite.env]
+  - name: field-intake-config
+    envs: [config/field-intake.env]
 
 # k8s/secrets.env is git-ignored; generate it from secrets.env.example.
 secretGenerator:
@@ -75,6 +81,12 @@ images:
   - name: aat/broker-init
     newName: docker.io/salmaanhaniif11/aat-bnpb
     newTag: broker-init
+  - name: aat/bnpb-satellite
+    newName: docker.io/salmaanhaniif11/aat-bnpb
+    newTag: satellite
+  - name: aat/bnpb-field-intake
+    newName: docker.io/salmaanhaniif11/aat-bnpb
+    newTag: field-intake
   - name: aat/analytics-dashboard
     newName: docker.io/salmaanhaniif11/aat-bnpb
     newTag: analytics-dashboard

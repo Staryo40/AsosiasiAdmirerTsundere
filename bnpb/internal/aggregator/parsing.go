@@ -30,13 +30,46 @@ func parseObject(raw json.RawMessage) (rawObject, error) {
 	return required[rawObject](rawObject{"record": raw}, "record")
 }
 
+// Source records are two or three levels deep; the bound keeps the recursive key walk below shallow.
+const maxJSONDepth = 32
+
 func validateJSON(raw json.RawMessage) error {
-	if !utf8.Valid(raw) || !json.Valid(raw) || !validUnicodeEscapes(raw) {
+	if !utf8.Valid(raw) {
+		return invalidField("record", InvalidJSON)
+	}
+	if !withinDepth(raw, maxJSONDepth) {
+		return invalidField("record", TooDeep)
+	}
+	if !json.Valid(raw) || !validUnicodeEscapes(raw) {
 		return invalidField("record", InvalidJSON)
 	}
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.UseNumber()
 	return uniqueJSONKeys(decoder)
+}
+
+// Runs before json.Valid, so it cannot assume balanced brackets; brackets inside strings do not count.
+func withinDepth(raw []byte, limit int) bool {
+	depth, inString, escaped := 0, false, false
+	for _, char := range raw {
+		switch {
+		case escaped:
+			escaped = false
+		case inString:
+			escaped = char == '\\'
+			inString = char != '"'
+		case char == '"':
+			inString = true
+		case char == '[' || char == '{':
+			depth++
+			if depth > limit {
+				return false
+			}
+		case char == ']' || char == '}':
+			depth--
+		}
+	}
+	return true
 }
 
 // Syntax is already validated; reject surrogate repair that would alter source identities or keys.

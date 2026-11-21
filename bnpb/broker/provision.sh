@@ -199,5 +199,16 @@ provision_consumer "$BNPB_CONSUMER_1_RABBITMQ_USER" "$BNPB_CONSUMER_1_RABBITMQ_P
 provision_consumer "$BNPB_CONSUMER_2_RABBITMQ_USER" "$BNPB_CONSUMER_2_RABBITMQ_PASSWORD"
 provision_consumer "$BNPB_CONSUMER_3_RABBITMQ_USER" "$BNPB_CONSUMER_3_RABBITMQ_PASSWORD"
 
+# Field reports: declared here so the API's mandatory publish never races field-intake's
+# own declaration; arguments must match field-intake's. Skipped until both identities exist.
+if [ -n "${BNPB_API_RABBITMQ_USER:-}" ] && [ -n "${BNPB_FIELD_INTAKE_RABBITMQ_USER:-}" ]; then
+	put "/queues/%2F/field.reports" '{"durable":true,"auto_delete":false,"arguments":{"x-queue-type":"quorum"}}'
+	# The API publishes through the default exchange only; it reads and configures nothing.
+	ensure_user "$BNPB_API_RABBITMQ_USER" "$BNPB_API_RABBITMQ_PASSWORD"
+	ensure_permissions "$BNPB_API_RABBITMQ_USER" '^$' '^amq\.default$' '^$'
+	ensure_user "$BNPB_FIELD_INTAKE_RABBITMQ_USER" "$BNPB_FIELD_INTAKE_RABBITMQ_PASSWORD"
+	ensure_permissions "$BNPB_FIELD_INTAKE_RABBITMQ_USER" '^field\.reports$' '^$' '^field\.reports$'
+fi
+
 remaining_ms
 log broker_provisioning_complete success "$(( $(now_ms) - started_ms ))" 0

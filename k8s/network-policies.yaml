@@ -34,7 +34,7 @@ spec:
             matchExpressions:
               - key: app.kubernetes.io/name
                 operator: In
-                values: [aggregator, consumer-1, consumer-2, consumer-3, broker-init]
+                values: [aggregator, consumer-1, consumer-2, consumer-3, broker-init, api, field-intake]
       ports:
         - port: 5672
     - from:

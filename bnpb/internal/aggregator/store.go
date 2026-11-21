@@ -61,7 +61,16 @@ var shardRepairSchema string
 //go:embed migrations/014_receipt_binding.sql
 var receiptBindingSchema string
 
-const currentSchemaVersion = 14
+//go:embed migrations/015_failed_messages.sql
+var failedMessagesSchema string
+
+//go:embed migrations/015_source_wildfire.sql
+var sourceWildfireSchema string
+
+//go:embed migrations/016_poll_fence.sql
+var pollFenceSchema string
+
+const currentSchemaVersion = 15
 
 const schemaHistoryQuery = `SELECT COALESCE(max(version), 0), count(*),
     COALESCE(min(version), 0) FROM schema_migrations`
@@ -82,6 +91,8 @@ type Store struct {
 	coastalStale              time.Duration
 	coastal                   coastalIngest
 	pantaiClient              *pantaiClient
+	pvmbg                     pvmbgAdaptation
+	pollLeader                interface{ Leading() bool }
 }
 
 func OpenStore(ctx context.Context, cfg Config, logger *slog.Logger) (*Store, error) {
@@ -180,7 +191,8 @@ func openStore(ctx context.Context, cfg Config, logger *slog.Logger, identity st
 		identity.shardID = &expectedShard
 	}
 	store := &Store{readTimeout: cfg.DBReadTimeout, writeTimeout: cfg.DBWriteTimeout,
-		chunkRecords: cfg.IngestChunkRecords, maxBytes: cfg.MaxResponseBytes, coastalStale: cfg.SourceStaleAfter, storeIdentity: identity}
+		chunkRecords: cfg.IngestChunkRecords, maxBytes: cfg.MaxResponseBytes, coastalStale: cfg.SourceStaleAfter, storeIdentity: identity,
+		pvmbg: cfg.PVMBGAdaptation}
 	connect := func(address string, maximum int) (*pgxpool.Pool, error) {
 		connectCtx, cancel := context.WithTimeout(ctx, cfg.DBWriteTimeout)
 		defer cancel()
@@ -206,6 +218,9 @@ func openStore(ctx context.Context, cfg Config, logger *slog.Logger, identity st
 	}
 	if err == nil && identity.role == "control" {
 		err = grantReceiptBindingPrivileges(ctx, admin, store.write)
+	}
+	if err == nil && identity.role != "shard" {
+		err = grantFailedMessagePrivileges(ctx, admin, store.write)
 	}
 	if err == nil {
 		store.read, err = connect(writerURL, cfg.DBReadMaxConns)
@@ -240,6 +255,33 @@ func grantReceiptBindingPrivileges(ctx context.Context, admin, writer *pgxpool.P
 	}
 	_, err := admin.Exec(ctx, "GRANT SELECT, INSERT ON receipt_bindings TO "+pgx.Identifier{role}.Sanitize())
 	return err
+}
+
+// Concurrent GRANTs on one table can fail with "tuple concurrently updated"; the migration lock serializes them.
+func grantFailedMessagePrivileges(ctx context.Context, admin, writer *pgxpool.Pool) (err error) {
+	var role string
+	if err := writer.QueryRow(ctx, "SELECT current_user").Scan(&role); err != nil {
+		return err
+	}
+	tx, err := admin.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if cleanupErr := rollbackTransaction(ctx, tx); cleanupErr != nil {
+			err = errors.Join(err, cleanupErr)
+		}
+	}()
+	if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock(4031, 0)"); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, "GRANT SELECT, INSERT, UPDATE ON failed_messages TO "+pgx.Identifier{role}.Sanitize()); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, "GRANT SELECT, INSERT, UPDATE ON poll_fence TO "+pgx.Identifier{role}.Sanitize()); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
 }
 
 func openPool(ctx context.Context, address string, maximum int, logger *slog.Logger) (*pgxpool.Pool, error) {
@@ -355,6 +397,12 @@ func (store *Store) migrate(ctx context.Context, admin *pgxpool.Pool, bootstrap 
 		if _, err := tx.Exec(ctx, shardRepairSchema); err != nil {
 			return err
 		}
+		if _, err := tx.Exec(ctx, failedMessagesSchema); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, pollFenceSchema); err != nil {
+			return err
+		}
 	}
 	if bootstrap != nil {
 		if err := bootstrapPlacement(ctx, tx, *bootstrap); err != nil {
@@ -400,7 +448,7 @@ func applyPendingMigrations(ctx context.Context, tx pgx.Tx, version int) error {
 	}{{2, outboxIdentitySchema}, {3, snapshotIndexSchema}, {4, outboxSequenceSchema},
 		{5, coastalSchema}, {6, m2EnumSchema}, {7, shardSchema}, {8, placementGuardSchema}, {9, handledInputsSchema},
 		{10, mutationFenceSchema}, {11, auditIndexSchema}, {12, pollReceiptSchema}, {13, liveMutationGenerationSchema},
-		{14, receiptBindingSchema}} {
+		{14, receiptBindingSchema}, {15, sourceWildfireSchema}} {
 		if version < migration.version {
 			if _, err := tx.Exec(ctx, migration.sql); err != nil {
 				return err
@@ -451,6 +499,9 @@ func storeError(operation string, err error) error {
 	}
 	if errors.Is(err, errSchemaVersion) {
 		return fmt.Errorf("%s: %w", operation, errSchemaVersion)
+	}
+	if errors.Is(err, errStalePollLease) {
+		return fmt.Errorf("%s: %w", operation, errStalePollLease)
 	}
 	if errors.Is(err, errPlacementChanged) {
 		return fmt.Errorf("%s: %w", operation, errPlacementChanged)

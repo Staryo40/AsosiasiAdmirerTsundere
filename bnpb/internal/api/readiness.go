@@ -29,11 +29,15 @@ func Initialize(_ context.Context, mux *http.ServeMux, cfg config.Config, logger
 	if err != nil {
 		return nil, err
 	}
+	if clientConfig.brokerUser != "" {
+		publicAPI.fieldReports = newBrokerPublisher(clientConfig.brokerUser, clientConfig.brokerPassword, clientConfig.brokerAddress)
+	}
 	publicAPI.registerRoutes(mux)
 	authHealthAddress := joinedURL(clientConfig.authBaseURL, "/health", "")
 	mux.HandleFunc("GET /ready", dependencyReadiness(client, address, authHealthAddress))
 	return func(context.Context) error {
 		client.CloseIdleConnections()
+		publicAPI.fieldReports.Close()
 		return nil
 	}, nil
 }

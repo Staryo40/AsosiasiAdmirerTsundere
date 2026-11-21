@@ -8,3 +8,8 @@ services:
   rabbitmq:
     ports:
       - "127.0.0.1:15672:15672"
+
+  # Field report evidence (testing/M2-P3/T05) reads the stored reports here.
+  field-intake:
+    ports:
+      - "127.0.0.1:8088:8088"

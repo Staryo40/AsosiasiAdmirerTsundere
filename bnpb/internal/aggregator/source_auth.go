@@ -88,6 +88,7 @@ func (session *readerSession) fetchReports(ctx context.Context, query url.Values
 
 func (client *sourceClient) fetchRecords(ctx context.Context, request sourceRequest) ([]json.RawMessage, error) {
 	var records []json.RawMessage
+	request.captureBody = true
 	if err := client.doJSON(ctx, request, &records); err != nil {
 		return nil, err
 	}

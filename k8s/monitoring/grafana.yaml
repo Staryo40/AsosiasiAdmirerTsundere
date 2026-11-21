@@ -122,6 +122,363 @@ data:
         }
       ]
     }
+  bnpb-streams.json: |
+    {
+      "title": "BNPB Streams",
+      "uid": "bnpb-streams",
+      "timezone": "browser",
+      "schemaVersion": 39,
+      "version": 1,
+      "refresh": "10s",
+      "tags": [
+        "bnpb"
+      ],
+      "time": {
+        "from": "now-30m",
+        "to": "now"
+      },
+      "panels": [
+        {
+          "id": 1,
+          "title": "Feed lag (events behind the feed)",
+          "type": "timeseries",
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 0
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "targets": [
+            {
+              "expr": "max(bnpb_satellite_feed_lag_events)",
+              "legendFormat": "lag"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short"
+            }
+          },
+          "description": "latest_offset from GET /v1/session minus the next offset the leading replica reads."
+        },
+        {
+          "id": 2,
+          "title": "Feed events per second by kind",
+          "type": "timeseries",
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 0
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "targets": [
+            {
+              "expr": "sum by (kind) (rate(bnpb_satellite_feed_events_total[1m]))",
+              "legendFormat": "{{kind}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "ops"
+            }
+          }
+        },
+        {
+          "id": 3,
+          "title": "Arrival to stored latency",
+          "type": "timeseries",
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 8
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "targets": [
+            {
+              "expr": "histogram_quantile(0.50, sum by (le) (rate(bnpb_satellite_store_latency_seconds_bucket[1m])))",
+              "legendFormat": "p50"
+            },
+            {
+              "expr": "histogram_quantile(0.95, sum by (le) (rate(bnpb_satellite_store_latency_seconds_bucket[1m])))",
+              "legendFormat": "p95"
+            },
+            {
+              "expr": "histogram_quantile(0.99, sum by (le) (rate(bnpb_satellite_store_latency_seconds_bucket[1m])))",
+              "legendFormat": "p99"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s"
+            }
+          },
+          "description": "From a feed event arriving at the satellite service to the Aggregator storing the fire change."
+        },
+        {
+          "id": 4,
+          "title": "Outbox backlog (fire changes not yet delivered)",
+          "type": "timeseries",
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 8
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "targets": [
+            {
+              "expr": "bnpb_satellite_outbox_backlog",
+              "legendFormat": "{{instance}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short"
+            }
+          }
+        },
+        {
+          "id": 5,
+          "title": "Late data per second",
+          "type": "timeseries",
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 16
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "targets": [
+            {
+              "expr": "sum(rate(bnpb_satellite_engine_events_total{outcome=\"late\"}[1m]))",
+              "legendFormat": "late detections"
+            },
+            {
+              "expr": "sum(rate(bnpb_satellite_engine_events_total{outcome=\"late_update\"}[1m]))",
+              "legendFormat": "late updates/retracts"
+            },
+            {
+              "expr": "sum(rate(bnpb_satellite_engine_events_total{outcome=\"duplicate\"}[1m]))",
+              "legendFormat": "duplicates"
+            },
+            {
+              "expr": "sum(rate(bnpb_satellite_engine_events_total{outcome=\"orphan\"}[1m]))",
+              "legendFormat": "orphans"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "ops"
+            }
+          },
+          "description": "Late detections are counted, not applied silently."
+        },
+        {
+          "id": 6,
+          "title": "Fires",
+          "type": "timeseries",
+          "gridPos": {
+            "h": 8,
+            "w": 6,
+            "x": 12,
+            "y": 16
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "targets": [
+            {
+              "expr": "max(bnpb_satellite_active_fires)",
+              "legendFormat": "active"
+            },
+            {
+              "expr": "max(bnpb_satellite_singleton_fires)",
+              "legendFormat": "singletons"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short"
+            }
+          }
+        },
+        {
+          "id": 7,
+          "title": "Feed lease and connection",
+          "type": "timeseries",
+          "gridPos": {
+            "h": 8,
+            "w": 6,
+            "x": 18,
+            "y": 16
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "targets": [
+            {
+              "expr": "bnpb_satellite_leading",
+              "legendFormat": "leading {{instance}}"
+            },
+            {
+              "expr": "bnpb_satellite_connected",
+              "legendFormat": "connected {{instance}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short"
+            }
+          },
+          "description": "Exactly one replica should lead and be connected."
+        },
+        {
+          "id": 8,
+          "title": "Failed messages by source and status",
+          "type": "timeseries",
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 24
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "targets": [
+            {
+              "expr": "max by (source, status) (bnpb_failed_messages)",
+              "legendFormat": "{{source}} {{status}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short"
+            }
+          },
+          "description": "Parked rows wait for Ops replay; retrying rows are retried by the next poll."
+        },
+        {
+          "id": 9,
+          "title": "Field reports per second by outcome",
+          "type": "timeseries",
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 24
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "targets": [
+            {
+              "expr": "sum by (outcome) (rate(bnpb_field_reports_total[1m]))",
+              "legendFormat": "{{outcome}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "ops"
+            }
+          }
+        },
+        {
+          "id": 10,
+          "title": "Field Team alert latency (p95, target 5 s)",
+          "type": "timeseries",
+          "gridPos": {
+            "h": 8,
+            "w": 24,
+            "x": 0,
+            "y": 32
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "targets": [
+            {
+              "expr": "histogram_quantile(0.95, sum by (le, source) (rate(bnpb_notification_latency_seconds_bucket[5m])))",
+              "legendFormat": "p95 {{source}}"
+            },
+            {
+              "expr": "histogram_quantile(0.95, sum by (le) (rate(bnpb_notification_latency_seconds_bucket{source=\"SENSOR_PANTAI\",severity=\"AWAS\"}[5m])))",
+              "legendFormat": "p95 critical coastal"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {"color": "green", "value": null},
+                  {"color": "red", "value": 5}
+                ]
+              },
+              "custom": {
+                "thresholdsStyle": {"mode": "line"}
+              }
+            }
+          },
+          "description": "From the Aggregator ingesting a hazard to consumer-2 recording its alert. Both clocks are on different nodes, so a clock-skew test distorts this panel."
+        },
+        {
+          "id": 11,
+          "title": "Aggregator source poller (lease holder)",
+          "type": "timeseries",
+          "gridPos": {
+            "h": 8,
+            "w": 24,
+            "x": 0,
+            "y": 40
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "targets": [
+            {
+              "expr": "bnpb_aggregator_poll_leading",
+              "legendFormat": "{{instance}}"
+            },
+            {
+              "expr": "sum(bnpb_aggregator_poll_leading)",
+              "legendFormat": "replicas polling"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short"
+            }
+          },
+          "description": "Exactly one Aggregator replica should poll BMKG, PVMBG and Sensor Pantai. A failover shows as one line dropping and another rising."
+        }
+      ]
+    }
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -195,6 +552,8 @@ spec:
             items:
               - key: bnpb-http.json
                 path: bnpb-http.json
+              - key: bnpb-streams.json
+                path: bnpb-streams.json
 ---
 apiVersion: v1
 kind: Service

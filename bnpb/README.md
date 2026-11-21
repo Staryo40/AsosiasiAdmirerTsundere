@@ -15,6 +15,8 @@ Only the Client-Facing API (`:8080`) is reachable from outside the Docker networ
   - [Auth](#auth-internal-8084)
   - [Aggregator](#aggregator-internal-8083)
   - [Consumers](#consumers-internal-8085-8086-8087)
+  - [Field intake](#field-intake-internal-8088)
+  - [Satellite feed](#satellite-feed-internal-8089)
   - [Shared platform behavior](#shared-platform-behavior)
 
 ## Technology and Frameworks
@@ -157,6 +159,9 @@ Platform-wide conventions apply to every service below (see [Shared platform beh
 | `POST /auth/refresh` | none | Rotate a refresh token for a new pair |
 | `GET /v1/hazards` | Bearer token | List hazards, filtered and paginated |
 | `GET /v1/hazards/{hazard_id}` | Bearer token | One hazard |
+| `GET /v1/ops/failed-messages` | Bearer token, `ops` role | Failed messages with their payloads |
+| `POST /v1/ops/failed-messages/replay` | Bearer token, `ops` role | Process parked records again |
+| `POST /v1/field-reports` | Bearer token, `field` role | Submit a field report; `202` once durably queued |
 | `GET /health` / `GET /ready` | none | Liveness / dependency readiness |
 
 **`POST /auth/login`** — body `{"client_id":"...","client_secret":"..."}`, both required non-empty. Forwards to Auth's `/internal/auth/login`. Success `200`: `{"access_token","token_type":"Bearer","expires_in","refresh_token","refresh_expires_in"}`, with `Cache-Control: no-store`. Request body capped at 16 KiB; unknown or trailing JSON fields are rejected.
@@ -179,6 +184,24 @@ Only `BMKG/SEISMIC`, `PVMBG/VOLCANIC`, `SATELIT/WILDFIRE`, and `SENSOR_PANTAI/CO
 
 **`GET /v1/hazards/{hazard_id}`** — only `view` is accepted (same enum/role rules as list). `hazard_id` empty or >256 chars → `400`. Not-found and most upstream errors are passed through verbatim from the Aggregator (see below); if the Aggregator's response body isn't valid JSON, the API answers `503 dependency_unavailable` instead of passing a broken body through.
 
+**`GET /v1/ops/failed-messages`** and **`POST /v1/ops/failed-messages/replay`** — only a token with `role=ops` passes; `media` and `field` get `403 forbidden` before anything reaches the Aggregator. The list accepts `source`, `limit` (1–20, default 20) and `cursor`, and forwards to the Aggregator's `GET /internal/dlq/messages`. Each item carries the message metadata plus `payload_base64`, `payload_bytes` and `payload_truncated`.
+
+Replay takes a JSON body, `{}` or `{"source":"PVMBG"}`, and forwards to `POST /internal/dlq/replay`. Parked records are re-ingested in `source_ref_id` order with their original input identity, so a record is applied at most once. A call stops starting new rows after 3 seconds. When the response has `"remaining": true`, send again with `{"continue": "<continue value>"}` to finish the same pass. The response counts `attempted`, `recovered`, `still_parked` and `skipped`. Aggregator errors are not passed through on these routes: a rejected request is `400`, anything else is `503 dependency_unavailable`.
+
+```bash
+curl -s -H "Authorization: Bearer $OPS_TOKEN" "$API/v1/ops/failed-messages?source=PVMBG" | jq '.items[] | {message_id, reason, status, attempts}'
+curl -s -X POST -H "Authorization: Bearer $OPS_TOKEN" -H 'Content-Type: application/json' -d '{"source":"PVMBG"}' "$API/v1/ops/failed-messages/replay"
+```
+
+**`POST /v1/field-reports`** — only `role=field`; `media` and `ops` get `403 forbidden`. Body, with unknown or trailing fields rejected:
+
+```json
+{"report_id":"fr-2026-11-21-0001","reported_at":"2026-11-21T03:00:00Z","latitude":-2.51,"longitude":113.80,
+ "hazard_type":"WILDFIRE","description":"Api terlihat di sisi timur desa","related_hazard_id":null}
+```
+
+`report_id` is 1–128 of `[A-Za-z0-9._-]` and is the idempotency key, scoped to the sending client. `reported_at` is RFC 3339 and not in the future. `hazard_type` is `SEISMIC`, `VOLCANIC`, `WILDFIRE`, `COASTAL` or `OTHER`. `description` is 1–2000 characters, and `related_hazard_id` is optional. The API publishes the report as a persistent message to the `field.reports` quorum queue and answers `202 {"report_id","accepted_at"}` only after RabbitMQ confirms it. If the broker is unreachable or does not confirm within 2 seconds, the answer is `503 intake_unavailable` with `Retry-After`, and nothing is promised; retry with the same `report_id`. A retry of a report that was in fact queued is stored once (see [Field intake](#field-intake-internal-8088)).
+
 **Response shapes** — `view=full` passes the Aggregator's record through after re-validating it:
 ```json
 {"items": [{"hazard_id":"...","source":"BMKG","source_ref_id":"...","hazard_type":"SEISMIC","severity":"AWAS","area_name":"...","latitude":0.0,"longitude":0.0,"occurred_at":"...","ingested_at":"...","attributes":{}}], "next_cursor": "opaque-or-null", "sources": {}, "as_of": "..."}
@@ -196,7 +219,7 @@ Only `BMKG/SEISMIC`, `PVMBG/VOLCANIC`, `SATELIT/WILDFIRE`, and `SENSOR_PANTAI/CO
 | `invalid_token` | 401 | Malformed header, or the token is inactive per Auth |
 | `invalid_credentials` | 401 | Login: wrong client id/secret |
 | `invalid_refresh_token` | 401 | Refresh: invalid/expired refresh token |
-| `forbidden` | 403 | `role=media` + `view=full` |
+| `forbidden` | 403 | `role=media` + `view=full`, or a non-`ops` role on `/v1/ops/*` |
 | `dependency_unavailable` | 503 | Auth or Aggregator unreachable, or returned something the API can't trust (invalid JSON, inconsistent shape) |
 | passthrough | 400/404/429/503 | The Aggregator itself returned one of these with a valid JSON body — forwarded verbatim, unchanged |
 
@@ -300,6 +323,25 @@ M2-only optional configuration is kept commented out in `.env.example`; configur
 
 Authority fields/domains are all-or-none. Host-native configuration must bind every allowed owner domain UUID to its actual PostgreSQL guard target(s) using a bounded resource file and privileged guard-only credentials; physical mappings, credential values, and native Secret/config paths have not been supplied. Missing/incomplete/mismatched bindings fail closed. The host `init` and `serve` source commands accept `--resources-file` (and the other flags shown in source), but native build/run/fencing proof is missing; those flag names are not an installation procedure. Graceful owner shutdown cancels and joins workers, then closes guards; takeover fences the old owner domain.
 
+#### Failed messages
+
+The Aggregator keeps every source message it could not use in its `failed_messages` table, with the original payload (up to 1 MiB; `payload_truncated` marks a cut). The same payload seen again raises `attempts` instead of adding a row. There are two kinds:
+
+| Kind | Example | Status | What happens next |
+| --- | --- | --- | --- |
+| `response` | A truncated, deeply nested, non-UTF-8, or oversized PVMBG body | `retrying`, retryable | The next complete poll of that endpoint fetches the same data again and marks it `resolved`. No Ops action is needed. |
+| `record` | A PVMBG report from schema version 3–5 that the strict mapping rejects | `parked`, not retryable | Waits for Ops. Ops sets a `BNPB_PVMBG_*` adaptation value, restarts the Aggregator, and replays it. A recovered record becomes `resolved`. |
+
+A broken source never stops polling or crashes the Aggregator, and other sources keep polling meanwhile. The API exposes the list and replay to BNPB Internal Ops only (see [Client-Facing API](#client-facing-api-public-8080)). The gauge `bnpb_failed_messages{source,status}` on `/metrics` counts rows for each source and status.
+
+#### One poller per source
+
+With a single canonical store (no `BNPB_SHARD_*` URLs) and `BNPB_AGGREGATOR_LEASE_NAME` set, only the replica holding that Kubernetes Lease polls BMKG, PVMBG and Sensor Pantai. Every replica still serves reads and publishes its outbox. The lease lasts 15 seconds and is renewed every 5. A holder that cannot renew for 10 seconds stops polling before anyone else may take over. The pod name (`BNPB_AGGREGATOR_IDENTITY`) identifies each replica.
+
+Clocks do not decide who may store poll results. Each takeover raises the Lease's `leaseTransitions` counter, and the new holder first records that number and the Lease UID in the one-row `poll_fence` table. Every poll write (records, checkpoint, poll state, the Sensor Pantai cursor) then checks, in its own transaction, that the row still names its term. A replica whose clock ran ahead may take the Lease early, and a frozen replica may wake up still believing it holds it, but neither can store anything once a newer term has claimed the row. Such a write fails with poll category `lease_lost`. The takeover claim waits for any in-flight write of the old term, so no old write commits after it. `/ready` reports `poll_owner` as `leader` or `standby`, `agency_poll` log lines carry `lease_holder` and `lease_generation`, and `bnpb_aggregator_poll_leading` is 1 on the replica that polls.
+
+With the lease name empty (Compose), every replica polls as in Milestone 1. Sharded stores refuse the setting and use the poll authority described above instead.
+
 ### Consumers (internal, `:8085`/`:8086`/`:8087`)
 
 Each consumer exposes only two routes, both unauthenticated (internal network only):
@@ -311,6 +353,65 @@ Each consumer exposes only two routes, both unauthenticated (internal network on
 | consumer-3 (portal feed) | `{"feed_entries": <int>, "messages_seen": <int>}` |
 
 `GET /health` behaves the same as every other service. There is no write endpoint anywhere — consumers are driven entirely by the broker, never by direct HTTP calls.
+
+### Field intake (internal, `:8088`)
+
+`field-intake` consumes the `field.reports` quorum queue and stores each report in its own SQLite (`BNPB_FIELD_INTAKE_DB_PATH`). It acknowledges a delivery only after the SQLite commit, so a crash before the ack makes the broker redeliver it. The primary key `(client_id, report_id)` turns that redelivery, or a client retry, into a counted duplicate instead of a second report.
+
+| Case | What is stored |
+| --- | --- |
+| First copy of a report | One row in `field_reports` |
+| Same report again (redelivery or client retry; `accepted_at` may differ) | Nothing new; `deliveries` on the row increases |
+| Same `(client_id, report_id)` with different content | The first copy stays; the new one is kept in `report_conflicts` |
+| Unreadable or oversized message | A row in `rejected_reports`, then acked so it cannot block the queue |
+
+`GET /internal/field-reports?after=<seq>&limit=<1-1000>` needs `X-BNPB-Internal-Key` set to `BNPB_FIELD_INTAKE_INTERNAL_KEY`. It returns `{"items":[{seq, client_id, report_id, message_id, hazard_type, reported_at, accepted_at, stored_at, deliveries}], "next_after", "stored", "conflicts", "rejected"}`, for comparing stored reports with the 202 answers a client received. The counter `bnpb_field_reports_total{outcome}` on `/metrics` counts settled deliveries by outcome.
+
+### Satellite feed (internal, `:8089`)
+
+The satellite service reads the course's Feed Satelit, an SSE stream at `GET /v1/stream?from=<offset>`. It turns hotspot detections into fires and delivers fire changes to the Aggregator, which stores them as `SATELIT`/`WILDFIRE` hazards.
+
+**One reader at a time.** On Kubernetes two replicas run. Only the holder of the Lease `BNPB_SATELLITE_LEASE_NAME` (`satellite-feed`) connects to the feed; the other waits as a standby. The lease lasts 15 seconds and is renewed every 5. A holder that cannot renew for 10 seconds stops reading before anyone else can take over. In Compose the lease name is empty and the single instance always reads.
+
+**Checkpoint and resume.** Each replica keeps its own SQLite file (`BNPB_SATELLITE_DB_PATH`) with three parts:
+
+- an append-only log of feed events
+- `next_offset`, the checkpoint
+- an outbox of fire changes
+
+Every event is logged and applied in the same transaction as the checkpoint. After a crash or reconnect the service reconnects with `from=next_offset`, so nothing is skipped or applied twice. On startup it rebuilds its fire state by replaying the log. A standby that has never held the lease starts from offset 0 and catches up on its own. If the feed sends an offset higher than expected, the service reconnects instead of skipping ahead, and logs `feed_disconnected` with category `offset_gap`.
+
+**Clustering rules.** Two detections belong to the same fire when they are at most 1 km and 360 minutes apart, directly or through other detections.
+
+- Low-confidence (`l`) detections and retracted detections are not clustered.
+- A single detection is held back until a second one joins it.
+- `update` and `retract` events change an existing detection and can split or merge fires.
+- Data more than 360 minutes older than the newest detection is late. It is counted but not applied, so the published result stays the same as a replay of the log.
+- Severity is `AWAS` with 20 or more detections or a total FRP of at least 100, `SIAGA` with 6 or more detections or at least 30, and otherwise `WASPADA`.
+- A fire's ID is derived from its first detection, so a replay names every fire the same way.
+
+**Delivery.** Each fire change is written to the outbox in the same transaction as the event that caused it. A sender posts outbox rows to the Aggregator's `POST /internal/satellite/fires` with `Bearer BNPB_SATELLITE_INGEST_TOKEN`, and marks them sent only after a `200`. The Aggregator deduplicates by input identity, so a resend after a crash changes nothing. With an empty ingest token the service keeps reading but leaves fires in the outbox.
+
+| Route | Purpose |
+| --- | --- |
+| `GET /health` | Process liveness |
+| `GET /ready` | Always `200`, with diagnostics: `leading`, `connected`, `next_offset`, event counts, fire statistics (`active`, `singletons`, `late`, `late_updates`, `orphans`, `duplicates`, `watermark`), and delivery `backlog`/`sent`/`refused` |
+| `GET /metrics` | `bnpb_satellite_*` series: `leading`, `connected`, `next_offset`, `feed_latest_offset`, `feed_lag_events`, `feed_events_total{kind}`, `engine_events_total{outcome}`, `active_fires`, `singleton_fires`, `watermark_timestamp_seconds`, `outbox_backlog`, `delivered_total{result}`, and the `store_latency_seconds` histogram (from an event arriving to the Aggregator storing its fire change) |
+
+Only the leader reports `feed_lag_events`: the feed's latest offset from `GET /v1/session`, plus one, minus `next_offset`. A reading older than one minute is dropped instead of reported. The Grafana dashboard **BNPB Streams** shows these series.
+
+**Checking the result.** `bnpb-satellite -verify [database path]` opens the database read-only, so it can run beside the live service. It compares three sets of fires:
+
+- the newest fire published in the outbox
+- a fresh replay of the event log
+- a one-shot batch clustering of the same detections
+
+It prints JSON with `published_equals_rebuild`, `published_equals_batch`, the fires found in only one of them, every fire's detection keys, and `undelivered_changes`. It exits `1` on any mismatch.
+
+```text
+docker compose exec satellite /bnpb-satellite -verify
+kubectl -n sistem-informasi-kebencanaan-bnpb exec satellite-0 -- /bnpb-satellite -verify
+```
 
 ### Shared platform behavior
 

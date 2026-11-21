@@ -88,6 +88,11 @@ services:
       BNPB_CONSUMER_2_RABBITMQ_PASSWORD: ${BNPB_CONSUMER_2_RABBITMQ_PASSWORD:?Set BNPB_CONSUMER_2_RABBITMQ_PASSWORD in .env}
       BNPB_CONSUMER_3_RABBITMQ_USER: ${BNPB_CONSUMER_3_RABBITMQ_USER:-demo}
       BNPB_CONSUMER_3_RABBITMQ_PASSWORD: ${BNPB_CONSUMER_3_RABBITMQ_PASSWORD:?Set BNPB_CONSUMER_3_RABBITMQ_PASSWORD in .env}
+      # Field reports are provisioned only when both identities are set.
+      BNPB_API_RABBITMQ_USER: ${BNPB_API_RABBITMQ_USER:-}
+      BNPB_API_RABBITMQ_PASSWORD: ${BNPB_API_RABBITMQ_PASSWORD:-}
+      BNPB_FIELD_INTAKE_RABBITMQ_USER: ${BNPB_FIELD_INTAKE_RABBITMQ_USER:-}
+      BNPB_FIELD_INTAKE_RABBITMQ_PASSWORD: ${BNPB_FIELD_INTAKE_RABBITMQ_PASSWORD:-}
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -105,10 +110,15 @@ services:
       BNPB_AGGREGATOR_INTERNAL_KEY: ${BNPB_AGGREGATOR_INTERNAL_KEY:?Set BNPB_AGGREGATOR_INTERNAL_KEY in .env}
       BNPB_AUTH_BASE_URL: ${BNPB_AUTH_BASE_URL:-http://auth:8084}
       BNPB_AUTH_INTERNAL_KEY: ${BNPB_AUTH_INTERNAL_KEY:?Set BNPB_AUTH_INTERNAL_KEY in .env}
+      # Without both, POST /v1/field-reports answers 503.
+      BNPB_API_RABBITMQ_USER: ${BNPB_API_RABBITMQ_USER:-}
+      BNPB_API_RABBITMQ_PASSWORD: ${BNPB_API_RABBITMQ_PASSWORD:-}
+      BNPB_RABBITMQ_ADDR: rabbitmq:5672
     ports:
       - "8080:8080"
     networks:
       - backend
+      - events
     depends_on:
       aggregator:
         condition: service_healthy
@@ -158,6 +168,10 @@ services:
       BNPB_LIST_MAX_LIMIT: ${BNPB_LIST_MAX_LIMIT:-500}
       BNPB_PUBLISH_TIMEOUT: ${BNPB_PUBLISH_TIMEOUT:-5s}
       BNPB_OUTBOX_BATCH_SIZE: ${BNPB_OUTBOX_BATCH_SIZE:-100}
+      BNPB_PVMBG_FIELD_ALIASES: ${BNPB_PVMBG_FIELD_ALIASES:-}
+      BNPB_PVMBG_NUMERIC_STRINGS: ${BNPB_PVMBG_NUMERIC_STRINGS:-}
+      BNPB_PVMBG_MISSING_TIME_FALLBACK: ${BNPB_PVMBG_MISSING_TIME_FALLBACK:-}
+      BNPB_SATELLITE_INGEST_TOKEN: ${BNPB_SATELLITE_INGEST_TOKEN:-}
     stop_grace_period: 15s
     depends_on:
       postgres:
@@ -265,6 +279,61 @@ services:
       timeout: 3s
       retries: 5
 
+  # Opt-in: docker compose --profile satellite up. Values use :- because Compose
+  # interpolates disabled profiles too; the service itself refuses a missing token.
+  satellite:
+    profiles: [satellite]
+    build:
+      context: .
+      dockerfile: cmd/satellite/Dockerfile
+    environment:
+      <<: *bnpb-environment
+      BNPB_SATELLITE_HTTP_ADDR: ${BNPB_SATELLITE_HTTP_ADDR:-:8089}
+      BNPB_SATELLITE_TOKEN: ${BNPB_SATELLITE_TOKEN:-}
+      BNPB_SATELLITE_BASE_URL: ${BNPB_SATELLITE_BASE_URL:-https://satellite.naufarrel.dev}
+      BNPB_SATELLITE_DB_PATH: /data/satellite.db
+      BNPB_SATELLITE_AGGREGATOR_URL: ${BNPB_SATELLITE_AGGREGATOR_URL:-http://aggregator:8083}
+      BNPB_SATELLITE_INGEST_TOKEN: ${BNPB_SATELLITE_INGEST_TOKEN:-}
+    volumes:
+      - satellite-data:/data
+    depends_on:
+      aggregator:
+        condition: service_healthy
+    networks:
+      - backend
+    healthcheck:
+      test: [CMD, /bnpb-satellite, -healthcheck]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  # Opt-in: docker compose --profile field-reports up (needs the field-intake identity).
+  field-intake:
+    profiles: [field-reports]
+    build:
+      context: .
+      dockerfile: cmd/field-intake/Dockerfile
+    environment:
+      <<: *bnpb-environment
+      BNPB_FIELD_INTAKE_HTTP_ADDR: ${BNPB_FIELD_INTAKE_HTTP_ADDR:-:8088}
+      BNPB_FIELD_INTAKE_RABBITMQ_USER: ${BNPB_FIELD_INTAKE_RABBITMQ_USER:-}
+      BNPB_FIELD_INTAKE_RABBITMQ_PASSWORD: ${BNPB_FIELD_INTAKE_RABBITMQ_PASSWORD:-}
+      BNPB_FIELD_INTAKE_INTERNAL_KEY: ${BNPB_FIELD_INTAKE_INTERNAL_KEY:-}
+      BNPB_FIELD_INTAKE_DB_PATH: /data/field-intake.db
+      BNPB_RABBITMQ_ADDR: rabbitmq:5672
+    volumes:
+      - field-intake-data:/data
+    depends_on:
+      broker-init:
+        condition: service_completed_successfully
+    networks:
+      - events
+    healthcheck:
+      test: [CMD, /bnpb-field-intake, -healthcheck]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
 networks:
   backend:
   canonical-store:
@@ -277,3 +346,5 @@ volumes:
   consumer-1-data:
   consumer-2-data:
   consumer-3-data:
+  satellite-data:
+  field-intake-data:

@@ -1,0 +1,79 @@
+# Stores Tim Lapangan field reports from the field.reports queue in its own SQLite file.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: field-intake
+spec:
+  serviceName: field-intake
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: field-intake
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: field-intake
+        role: consumer
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8088"
+        prometheus.io/path: "/metrics"
+    spec:
+      securityContext:
+        fsGroup: 65532
+      containers:
+        - name: field-intake
+          image: aat/bnpb-field-intake
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8088
+          envFrom:
+            - configMapRef:
+                name: bnpb-common
+            - configMapRef:
+                name: field-intake-config
+          env:
+            - name: BNPB_FIELD_INTAKE_RABBITMQ_USER
+              valueFrom:
+                configMapKeyRef: {name: bnpb-identities, key: BNPB_FIELD_INTAKE_RABBITMQ_USER}
+            - name: BNPB_FIELD_INTAKE_RABBITMQ_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: bnpb-secrets, key: BNPB_FIELD_INTAKE_RABBITMQ_PASSWORD}
+            - name: BNPB_FIELD_INTAKE_INTERNAL_KEY
+              valueFrom:
+                secretKeyRef: {name: bnpb-secrets, key: BNPB_FIELD_INTAKE_INTERNAL_KEY}
+          resources:
+            requests: {memory: 128Mi}
+            limits: {memory: 256Mi}
+          readinessProbe:
+            httpGet: {path: /health, port: http}
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: {path: /health, port: http}
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          volumeMounts:
+            - name: data
+              mountPath: /data
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: [ReadWriteOnce]
+        storageClassName: local-path
+        resources:
+          requests:
+            storage: 1Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: field-intake
+spec:
+  selector:
+    app.kubernetes.io/name: field-intake
+  ports:
+    - name: http
+      port: 8088
+      targetPort: http

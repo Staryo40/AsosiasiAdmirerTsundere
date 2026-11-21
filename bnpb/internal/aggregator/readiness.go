@@ -120,6 +120,12 @@ func (store *Store) readinessPrimary(ctx context.Context, id int16, routed bool)
 func (store *Store) pollOwnerReadiness(ctx context.Context) string {
 	authority := store.authority
 	if authority == nil {
+		if store.shards[0] == nil && store.pollLeader != nil {
+			if store.pollLeader.Leading() {
+				return "leader"
+			}
+			return "standby"
+		}
 		if store.shards[0] == nil {
 			return "local"
 		}

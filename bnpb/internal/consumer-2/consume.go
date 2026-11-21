@@ -34,6 +34,7 @@ type envelope struct {
 		Severity   string    `json:"severity"`
 		AreaName   string    `json:"area_name"`
 		OccurredAt time.Time `json:"occurred_at"`
+		IngestedAt time.Time `json:"ingested_at"`
 	} `json:"hazard_event"`
 	CorrelationID string `json:"correlation_id"`
 }
@@ -182,6 +183,7 @@ func (worker *consumer) applyEnvelope(ctx context.Context, messageID string, env
 
 func (worker *consumer) logApplied(ctx context.Context, env envelope, applied ApplyResult) {
 	if applied.AlertSent {
+		observeAlertLatency(env, time.Now())
 		// Logged only after Apply's transaction committed, so a log line
 		// never claims an alert the DB doesn't record.
 		logging.Event(ctx, worker.logger, logging.Record{Level: slog.LevelWarn, Event: "alert_sent", Message: "alert recorded for a SIAGA/AWAS hazard"}, "hazard_id", env.HazardID, "severity", env.HazardEvent.Severity)

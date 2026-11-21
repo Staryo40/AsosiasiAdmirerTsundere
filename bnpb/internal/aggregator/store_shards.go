@@ -111,7 +111,7 @@ func openUnavailableShardStore(cfg Config, logger *slog.Logger, identity storeId
 	store := &Store{
 		readTimeout: cfg.DBReadTimeout, writeTimeout: cfg.DBWriteTimeout,
 		chunkRecords: cfg.IngestChunkRecords, maxBytes: cfg.MaxResponseBytes,
-		storeIdentity: identity,
+		storeIdentity: identity, pvmbg: cfg.PVMBGAdaptation,
 	}
 	store.startupUnverified.Store(true)
 	admin, err := newLazyPool(cfg.DatabaseURL, cfg.DBWriteMaxConns, logger)

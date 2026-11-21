@@ -116,13 +116,33 @@ func (poller *poller) pollEndpoint(ctx context.Context, endpoint Endpoint) error
 			logging.Event(ctx, poller.logger, logging.Record{Level: slog.LevelError, Event: "poll_state_failed", Message: "could not persist poll failure"}, "endpoint", string(endpoint), "category", "store")
 		}
 	}
+	poller.trackUnreadableResponse(ctx, endpoint, started, err)
 	fields := []any{"endpoint", string(endpoint), "period", pollPeriod(poller.cfg, endpoint, started),
 		"category", category, "duration_ms", time.Since(started).Milliseconds()}
 	if owner, epoch, ok := pollAuthorityToken(ctx); ok {
 		fields = append(fields, "owner", owner, "epoch", epoch)
 	}
+	if lease, ok := pollLeaseFromContext(ctx); ok {
+		fields = append(fields, "lease_holder", lease.holder, "lease_generation", lease.generation)
+	}
 	logging.Event(ctx, poller.logger, logging.Record{Level: level, Event: "agency_poll", Message: "agency poll completed"}, fields...)
 	return err
+}
+
+func (poller *poller) trackUnreadableResponse(ctx context.Context, endpoint Endpoint, started time.Time, pollErr error) {
+	var failure *sourceError
+	var err error
+	switch {
+	case pollErr == nil:
+		err = poller.store.resolveUnreadableResponses(ctx, endpoint)
+	case errors.As(pollErr, &failure) && failure.payload != nil:
+		err = poller.store.recordUnreadableResponse(ctx, endpoint, started, failure)
+	default:
+		return
+	}
+	if err != nil {
+		logging.Event(ctx, poller.logger, logging.Record{Level: slog.LevelError, Event: "failed_message_state_failed", Message: "could not update unreadable response state"}, "endpoint", string(endpoint), "category", "store")
+	}
 }
 
 func (poller *poller) pollOnce(ctx context.Context, endpoint Endpoint, started time.Time) error {
@@ -322,6 +342,9 @@ func (poller *poller) ingestResponse(ctx context.Context, receipt pollReceipt) e
 
 func pollCategory(err error) string {
 	var failure *sourceError
+	if errors.Is(err, errStalePollLease) {
+		return "lease_lost"
+	}
 	if !errors.As(err, &failure) {
 		return "store"
 	}

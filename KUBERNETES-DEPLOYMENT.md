@@ -99,6 +99,25 @@ Get-Content k8s/secrets.env.example | Where-Object { $_ -match '^[A-Z0-9_]+=$' }
 One value is used by both sides (for example `BMKG_API_KEY` for BMKG and the Aggregator), so the
 credentials between components always match.
 
+If `k8s/secrets.env` already exists, do not regenerate it: a new `POSTGRES_PASSWORD` no longer matches
+the stored database. Append only the keys it is missing:
+
+```bash
+grep -E '^[A-Z0-9_]+=$' k8s/secrets.env.example | while read -r line; do
+  grep -q "^${line}" k8s/secrets.env || echo "${line}$(openssl rand -hex 32)"
+done >> k8s/secrets.env
+```
+
+Two tokens come from the course assistants, so they live in their own Secrets instead of
+`secrets.env`. Create both before deploying, since the Aggregator and the satellite service do not
+start without them:
+
+```text
+kubectl apply -f k8s/namespace.yaml
+kubectl -n sistem-informasi-kebencanaan-bnpb create secret generic pantai-token --from-literal=token=<sensor-pantai-token>
+kubectl -n sistem-informasi-kebencanaan-bnpb create secret generic satellite-token --from-literal=token=<feed-satelit-token>
+```
+
 ## 4. Images
 
 k3s nodes cannot see Docker images on the local machine, so images are built locally, pushed to a
@@ -115,6 +134,8 @@ component. The repository name is set in the `images` section of `k8s/kustomizat
 | `auth` | `bnpb/cmd/auth/Dockerfile` | `bnpb` |
 | `consumer-1`, `consumer-2`, `consumer-3` | `bnpb/cmd/consumer-N/Dockerfile` | `bnpb` |
 | `broker-init` | `bnpb/broker/init.Dockerfile` | `bnpb` |
+| `satellite` | `bnpb/cmd/satellite/Dockerfile` | `bnpb` |
+| `field-intake` | `bnpb/cmd/field-intake/Dockerfile` | `bnpb` |
 
 Build and push, where `<repo>` is `<dockerhub-user>/<repository-name>`:
 
@@ -128,6 +149,8 @@ docker build -t <repo>:consumer-1 -f bnpb/cmd/consumer-1/Dockerfile bnpb
 docker build -t <repo>:consumer-2 -f bnpb/cmd/consumer-2/Dockerfile bnpb
 docker build -t <repo>:consumer-3 -f bnpb/cmd/consumer-3/Dockerfile bnpb
 docker build -t <repo>:broker-init -f bnpb/broker/init.Dockerfile bnpb
+docker build -t <repo>:satellite -f bnpb/cmd/satellite/Dockerfile bnpb
+docker build -t <repo>:field-intake -f bnpb/cmd/field-intake/Dockerfile bnpb
 docker push --all-tags <repo>
 ```
 
@@ -199,8 +222,7 @@ HTTP middleware sets `X-BNPB-Correlation-ID` and W3C `traceparent` on responses
 and includes both in structured access logs. Outbound calls from the
 Client-Facing API forward `traceparent` to the Aggregator.
 
-**Sensor Pantai:** create Secret `pantai-token` (see `k8s/pantai-token.secret.example.yaml`),
-then `GET /v1/coastal/status` on the Client-Facing API returns breaker and poll
+**Sensor Pantai:** with Secret `pantai-token` in place (see `k8s/pantai-token.secret.example.yaml`), `GET /v1/coastal/status` on the Client-Facing API returns breaker and poll
 state plus the last known coastal hazard when the upstream is slow or open.
 
 Load-test scripts (run outside the cluster): `loadtest/k6-api-sustained.js`,

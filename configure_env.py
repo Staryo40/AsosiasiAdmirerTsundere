@@ -39,6 +39,10 @@ def credential_values() -> dict:
             "BNPB_CONSUMER_1_RABBITMQ_PASSWORD": token_hex(32),
             "BNPB_CONSUMER_2_RABBITMQ_PASSWORD": token_hex(32),
             "BNPB_CONSUMER_3_RABBITMQ_PASSWORD": token_hex(32),
+            "BNPB_API_RABBITMQ_PASSWORD": token_hex(32),
+            "BNPB_FIELD_INTAKE_RABBITMQ_PASSWORD": token_hex(32),
+            "BNPB_FIELD_INTAKE_INTERNAL_KEY": token_hex(32),
+            "BNPB_SATELLITE_INGEST_TOKEN": token_hex(32),
         },
     }
 

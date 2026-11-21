@@ -34,6 +34,31 @@ PVMBG memetakan `report_id`, `reported_at`, dan `alert_level`. Nama serta koordi
 
 Atribut tambahan, termasuk JSON bersarang dan bilangan besar, dipertahankan. Benturan dengan nama cadangan `source_extras` atau `tsunami_warnings` pada data seismik masuk ke `attributes.source_extras[nama_asli]`; nilai sumber bernama `source_extras` masuk ke `attributes.source_extras.source_extras`. Rekaman tidak valid dikarantina. Atribut wajib hilang, tipe berubah, enum baru, JSON rusak atau berkunci ganda, gunung tidak dikenal, dan identitas sumber yang dipakai ulang untuk kejadian berbeda tidak didukung.
 
+### Kebijakan Perubahan Skema PVMBG
+
+Aggregator memeriksa setiap rekaman PVMBG terhadap aturan berikut sebelum memetakannya. Rekaman yang ditolak tidak dibuang: rekaman tersebut disimpan utuh beserta alasannya agar dapat diproses ulang setelah Aggregator disesuaikan.
+
+| Perubahan dari PVMBG | Contoh (mode mock) | Perlakuan | Alasan |
+| --- | --- | --- | --- |
+| Field baru ditambahkan | `confidence_level` (versi 2), field lain yang tidak dikenal | Diterima otomatis; field disimpan di `attributes` | Data lama tetap bermakna dan tidak ada nilai yang ditebak |
+| Urutan field berubah | — | Diterima otomatis | JSON tidak bergantung pada urutan field |
+| Field wajib berganti nama | `alert_level` → `level` (versi 3) | Ditolak (`missing_field`) | Aggregator tidak menebak bahwa dua nama berarti sama |
+| Tipe field berubah | `eruption_count_24h` menjadi teks `"3"` (versi 4) | Ditolak (`wrong_type`) | Teks dapat berisi nilai yang bukan angka |
+| Field wajib hilang | `reported_at` tidak dikirim (versi 5) | Ditolak (`missing_field`) | Waktu kejadian tidak dapat diturunkan dari isi rekaman |
+| Nilai enum baru | `alert_level` bernilai di luar Normal/Waspada/Siaga/Awas | Ditolak (`invalid_value`) | Tingkat ancaman tidak boleh ditebak |
+| JSON rusak | UTF-8 tidak valid, kunci ganda | Ditolak (`invalid_json`, `duplicate_key`) | Isi rekaman dapat dibaca lebih dari satu cara |
+| Struktur terlalu dalam | Lebih dari 32 tingkat (mode `deep_nesting`) | Ditolak (`too_deep`) | Mencegah pemrosesan berulang yang tidak terbatas |
+
+Setelah PVMBG mengubah skema, Ops dapat menyesuaikan Aggregator melalui konfigurasi tanpa mengubah kode. Seluruh nilai bawaan kosong sehingga Aggregator tetap ketat.
+
+| Variabel | Contoh | Efek |
+| --- | --- | --- |
+| `BNPB_PVMBG_FIELD_ALIASES` | `level:alert_level` | Field `level` dibaca sebagai `alert_level`. Rekaman yang memuat kedua nama ditolak (`ambiguous_field`). |
+| `BNPB_PVMBG_NUMERIC_STRINGS` | `eruption_count_24h` | Teks berisi bilangan desimal sederhana (misalnya `"3"` atau `"4.5"`) dibaca sebagai angka. Teks lain tetap ditolak. |
+| `BNPB_PVMBG_MISSING_TIME_FALLBACK` | `received_at` | Rekaman tanpa `reported_at` memakai waktu pertama kali BNPB menerima laporan tersebut. Rekaman ditandai `attributes.occurred_at_inferred: true`. |
+
+Penyesuaian hanya mengubah salinan rekaman yang dipetakan. Bita asli yang disimpan tidak berubah, sehingga pemrosesan ulang selalu berangkat dari data yang diterima dari PVMBG. Untuk laporan yang sudah tersimpan, waktu pengganti memakai `occurred_at` yang sudah ada sehingga pengiriman ulang tidak mengubah waktu kejadian.
+
 ## API Internal
 
 Hanya Aggregator yang mengakses Canonical Store langsung. API membaca data tersimpan tanpa menunggu instansi atau broker.

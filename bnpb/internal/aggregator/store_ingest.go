@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"math"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -20,6 +21,7 @@ const (
 	WarningEndpoint  Endpoint = "warnings"
 	VolcanicEndpoint Endpoint = "volcanic"
 	CoastalEndpoint  Endpoint = "coastal"
+	WildfireEndpoint Endpoint = "wildfire"
 )
 
 type IngestChunk struct {
@@ -44,6 +46,7 @@ var ingestEndpoints = map[Endpoint]endpointFields{
 	WarningEndpoint:  {"warning_id", "issued_at", 1},
 	VolcanicEndpoint: {"report_id", "reported_at", 2},
 	CoastalEndpoint:  {"observation_id", "observed_at", 3},
+	WildfireEndpoint: {"source_ref_id", "occurred_at", 4},
 }
 
 // Ingest commits one bounded chunk. Callers must decode a complete response before submitting chunks.
@@ -113,6 +116,9 @@ func (store *Store) beginWriteMutation(ctx context.Context) (pgx.Tx, error) {
 	if store.shards[0] != nil {
 		return nil, errors.New("ingest: poll authority required")
 	}
+	if lease, ok := pollLeaseFromContext(ctx); ok {
+		return store.beginFencedPollWrite(ctx, lease)
+	}
 	return store.write.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
 }
 
@@ -139,6 +145,7 @@ func (store *Store) validateChunk(chunk IngestChunk) error {
 func (store *Store) writeChunk(ctx context.Context, tx pgx.Tx, chunk IngestChunk, policy checkpointPolicy) error {
 	var checkpoint *time.Time
 	completeTimestamps := true
+	outcomes := make([]recordOutcome, 0, len(chunk.Records))
 	for index, raw := range chunk.Records {
 		recordChunk := chunk
 		recordChunk.InputOffset += index
@@ -154,11 +161,13 @@ func (store *Store) writeChunk(ctx context.Context, tx pgx.Tx, chunk IngestChunk
 			return err
 		}
 		if exists {
+			outcome := recordOutcome{offset: index, raw: raw, applied: status == "applied"}
 			if status == "retained" {
-				if err := retryRetainedInput(ctx, tx, store, recordChunk, raw); err != nil {
+				if outcome.applied, outcome.reason, err = retryRetainedInput(ctx, tx, store, recordChunk, raw); err != nil {
 					return err
 				}
 			}
+			outcomes = append(outcomes, outcome)
 			continue
 		}
 		status, reason, err := store.writeRecord(ctx, tx, recordChunk, raw)
@@ -168,6 +177,10 @@ func (store *Store) writeChunk(ctx context.Context, tx pgx.Tx, chunk IngestChunk
 		if err := insertHandledInput(ctx, tx, recordChunk, raw, status, reason); err != nil {
 			return err
 		}
+		outcomes = append(outcomes, recordOutcome{offset: index, raw: raw, applied: status == "applied", reason: displayReason(reason)})
+	}
+	if err := recordOutcomes(ctx, tx, chunk, outcomes); err != nil {
+		return err
 	}
 	if policy.omitPollState {
 		return nil
@@ -211,6 +224,12 @@ func (store *Store) writeRecord(ctx context.Context, tx pgx.Tx, chunk IngestChun
 	return "retained", category + ":" + field, nil
 }
 
+// handled_inputs keeps "code:field"; failed_messages shows "code: field".
+func displayReason(stored string) string {
+	category, field, _ := strings.Cut(stored, ":")
+	return failedReason(category, field)
+}
+
 func (store *Store) writeSourceRecord(ctx context.Context, tx pgx.Tx, chunk IngestChunk, raw json.RawMessage) error {
 	switch chunk.Endpoint {
 	case WarningEndpoint:
@@ -219,8 +238,14 @@ func (store *Store) writeSourceRecord(ctx context.Context, tx pgx.Tx, chunk Inge
 		return store.writeSeismic(ctx, tx, chunk, raw)
 	case CoastalEndpoint:
 		return store.writeCoastal(ctx, tx, chunk, raw)
+	case WildfireEndpoint:
+		return store.writeWildfire(ctx, tx, chunk, raw)
 	default:
-		hazard, err := MapVolcanic(raw, newReceipt(chunk.ReceivedAt))
+		adapted, err := store.adaptVolcanic(ctx, tx, chunk, raw)
+		if err != nil {
+			return err
+		}
+		hazard, err := MapVolcanic(adapted, newReceipt(chunk.ReceivedAt))
 		if err != nil {
 			return err
 		}

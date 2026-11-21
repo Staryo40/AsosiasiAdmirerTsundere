@@ -43,14 +43,19 @@ type sourceRequest struct {
 	query        url.Values
 	header       http.Header
 	body         []byte
+	// Only data fetches set this; login bodies carry tokens and are never kept.
+	captureBody bool
 }
 
-// Error messages omit source URLs, credentials and bodies.
+// Error messages omit source URLs, credentials and bodies; payload is kept for the failed-message store only.
 type sourceError struct {
-	category   string
-	statusCode int
-	cause      error
-	retryAfter time.Duration
+	category         string
+	statusCode       int
+	cause            error
+	retryAfter       time.Duration
+	payload          []byte
+	payloadBytes     int64
+	payloadTruncated bool
 }
 
 func (err *sourceError) Error() string {
@@ -170,7 +175,7 @@ func (client *sourceClient) doJSON(ctx context.Context, request sourceRequest, t
 		return &sourceError{category: "http_status", statusCode: response.StatusCode,
 			retryAfter: retryAfter(response.Header.Get("Retry-After"), time.Now())}
 	}
-	return client.decode(response, target)
+	return client.decode(response, target, request.captureBody)
 }
 
 func retryAfter(header string, now time.Time) time.Duration {
@@ -186,21 +191,38 @@ func retryAfter(header string, now time.Time) time.Duration {
 	return 0
 }
 
-func (client *sourceClient) decode(response *http.Response, target any) error {
+func (client *sourceClient) decode(response *http.Response, target any, capture bool) error {
 	if response.ContentLength > client.maxBytes {
-		return &sourceError{category: "response_too_large"}
+		failure := &sourceError{category: "response_too_large"}
+		if capture {
+			prefix, _ := io.ReadAll(io.LimitReader(response.Body, failedPayloadLimit))
+			failure.payload, failure.payloadBytes, failure.payloadTruncated = prefix, response.ContentLength, true
+		}
+		return failure
 	}
 	body, err := io.ReadAll(io.LimitReader(response.Body, client.maxBytes+1))
 	if err != nil {
 		return safeSourceFailure("read_error", err)
 	}
 	if int64(len(body)) > client.maxBytes {
-		return &sourceError{category: "response_too_large"}
+		return capturedFailure("response_too_large", body, capture)
 	}
 	if err := json.Unmarshal(body, target); err != nil {
-		return &sourceError{category: "invalid_json"}
+		return capturedFailure("invalid_json", body, capture)
 	}
 	return nil
+}
+
+// For an over-limit body the true size is unknown; payloadBytes is what was read.
+func capturedFailure(category string, body []byte, capture bool) error {
+	failure := &sourceError{category: category}
+	if capture {
+		failure.payloadBytes = int64(len(body))
+		failure.payload, failure.payloadTruncated = boundedPayload(body)
+		failure.payload = bytes.Clone(failure.payload)
+		failure.payloadTruncated = failure.payloadTruncated || category == "response_too_large"
+	}
+	return failure
 }
 
 func safeSourceFailure(category string, err error) error {
