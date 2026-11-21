@@ -41,6 +41,7 @@ type Config struct {
 	Audit                                           AuditConfig
 	Catalog                                         CatalogConfig
 	PVMBGAdaptation                                 pvmbgAdaptation
+	SatelliteIngestToken                            string
 	PVMBGCycleTimeout, PollOverlap, RetryMaxBackoff time.Duration
 	WarningReconcileInterval, SourceStaleAfter      time.Duration
 	DBReadTimeout, DBWriteTimeout, PublishTimeout   time.Duration
@@ -132,6 +133,10 @@ func loadConfig(lookup func(string) (string, bool)) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	cfg.SatelliteIngestToken, err = loadSatelliteIngestToken(lookup)
+	if err != nil {
+		return Config{}, err
+	}
 	credentials := []string{cfg.InternalKey, cfg.BMKGAPIKey, cfg.PVMBGReaderClientID, cfg.PVMBGReaderClientSecret, cfg.PantaiAuthToken}
 	for _, credential := range credentials {
 		if cfg.Audit.Token != "" && credential != "" && cfg.Audit.Token == credential {
@@ -141,6 +146,11 @@ func loadConfig(lookup func(string) (string, bool)) (Config, error) {
 	for _, credential := range append(credentials, cfg.Audit.Token) {
 		if cfg.Catalog.Token != "" && credential != "" && cfg.Catalog.Token == credential {
 			return Config{}, fmt.Errorf("BNPB_CATALOG_TOKEN: must not reuse another service credential")
+		}
+	}
+	for _, credential := range append(credentials, cfg.Audit.Token, cfg.Catalog.Token, cfg.Audit.UnprocessedToken) {
+		if cfg.SatelliteIngestToken != "" && credential == cfg.SatelliteIngestToken {
+			return Config{}, fmt.Errorf("BNPB_SATELLITE_INGEST_TOKEN: must not reuse another service credential")
 		}
 	}
 	if err := loadBudgets(lookup, &cfg); err != nil {

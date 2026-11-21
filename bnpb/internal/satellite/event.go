@@ -52,6 +52,7 @@ type Event struct {
 	Changes    map[string]json.RawMessage
 	Reason     string
 	VirtualNow time.Time
+	Raw        []byte
 }
 
 type envelope struct {
@@ -72,7 +73,7 @@ func parseEvent(frame sseFrame) (Event, error) {
 	if err := decoder.Decode(&body); err != nil || body.Offset == nil {
 		return Event{}, errMalformedEvent
 	}
-	event := Event{Offset: *body.Offset, Kind: frame.event}
+	event := Event{Offset: *body.Offset, Kind: frame.event, Raw: bytes.Clone(frame.data)}
 	if frame.id != "" && frame.id != fmt.Sprint(event.Offset) {
 		return Event{}, fmt.Errorf("%w: id %s does not match offset %d", errMalformedEvent, frame.id, event.Offset)
 	}

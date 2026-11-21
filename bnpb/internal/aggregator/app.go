@@ -40,6 +40,7 @@ func Initialize(ctx context.Context, mux *http.ServeMux, platform config.Config,
 	registerCoastalRoutes(mux, snapshot)
 	registerAuditRoutes4(mux, store, cfg, platform.WriteTimeout)
 	registerDLQRoutes(mux, store, cfg, platform.WriteTimeout, store.authority)
+	registerWildfireRoute(mux, store, cfg, store.authority)
 	if cfg.PantaiAuthToken != "" {
 		store.attachPantaiBreaker(app.pantai)
 	}

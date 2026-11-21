@@ -44,7 +44,7 @@ const analyticsGroupsSQL = `WITH classified AS (
            h.severity,
            h.area_name COLLATE "C" AS area_name
     FROM hazard_events h
-    WHERE h.occurred_at >= $1 AND h.occurred_at < $2
+    WHERE h.occurred_at >= $1 AND h.occurred_at < $2 AND h.withdrawn_at IS NULL
 ), grouped AS (
     SELECT bucket, category, severity, area_name, count(*) AS event_count
     FROM classified

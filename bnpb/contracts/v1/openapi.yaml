@@ -449,6 +449,40 @@ paths:
           $ref: '#/components/responses/AdmissionLimited'
         '503':
           $ref: '#/components/responses/ReadUnavailable'
+  /internal/satellite/fires:
+    post:
+      operationId: ingestSatelliteFires
+      summary: Store fire changes from the satellite service
+      description: >-
+        Same receipt shape and owner forwarding as the catalog route, on the
+        wildfire endpoint. Each record is one fire lineage with a growing
+        feed_revision; a revision not newer than the stored one is accepted as
+        a no-op, so resends and replays never apply twice. occurred_at may
+        move earlier when a late detection joins. A record with active false
+        withdraws the fire: its row and hazard_id stay for revival, but the
+        Audit API, analytics and public reads leave it out. Invalid records
+        are kept as failed messages and the request still answers 200.
+      security:
+        - SatelliteBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CatalogBatch'
+      responses:
+        '200':
+          description: The receipt is durably handled by the owner.
+        '400':
+          $ref: '#/components/responses/ReadError'
+        '401':
+          $ref: '#/components/responses/MissingCredential'
+        '403':
+          $ref: '#/components/responses/InvalidCredential'
+        '409':
+          $ref: '#/components/responses/ReadError'
+        '503':
+          $ref: '#/components/responses/ReadUnavailable'
   /internal/dlq/unprocessed:
     get:
       operationId: dlqUnprocessed
@@ -564,6 +598,10 @@ components:
       type: http
       scheme: bearer
       description: Dedicated catalog token; separate from Audit and internal keys.
+    SatelliteBearer:
+      type: http
+      scheme: bearer
+      description: BNPB_SATELLITE_INGEST_TOKEN, held only by the Aggregator and the satellite service.
     UnprocessedBearer:
       type: http
       scheme: bearer

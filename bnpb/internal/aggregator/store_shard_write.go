@@ -205,9 +205,9 @@ func inputShard(endpoint Endpoint, raw json.RawMessage) (int16, error) {
 	if err != nil || identity == "" {
 		return 0, fmt.Errorf("missing routable %s", identityField)
 	}
-	source := BMKG
-	if endpoint == VolcanicEndpoint {
-		source = PVMBG
+	source, known := endpointSources[endpoint]
+	if !known {
+		return 0, fmt.Errorf("endpoint %s has no source", endpoint)
 	}
 	return logicalShard(source, identity)
 }

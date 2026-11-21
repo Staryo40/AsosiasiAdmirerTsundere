@@ -18,6 +18,7 @@ const failedPayloadLimit = 1 << 20
 
 var endpointSources = map[Endpoint]Source{
 	SeismicEndpoint: BMKG, WarningEndpoint: BMKG, VolcanicEndpoint: PVMBG, CoastalEndpoint: SensorPantai,
+	WildfireEndpoint: Satelit,
 }
 
 type execer interface {

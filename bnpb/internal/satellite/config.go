@@ -22,11 +22,14 @@ type LeaseConfig struct {
 }
 
 type Config struct {
-	BaseURL     *url.URL
-	Token       string
-	DBPath      string
-	IdleTimeout time.Duration
-	Lease       LeaseConfig
+	BaseURL       *url.URL
+	Token         string
+	DBPath        string
+	IdleTimeout   time.Duration
+	Lease         LeaseConfig
+	AggregatorURL *url.URL
+	// Without it fires are still recognised and kept in the outbox, but nothing is delivered.
+	IngestToken string
 }
 
 func LoadConfig() (Config, error) {
@@ -45,6 +48,15 @@ func loadConfig(lookup func(string) (string, bool)) (Config, error) {
 		return Config{}, fmt.Errorf("BNPB_SATELLITE_BASE_URL: must be an HTTP(S) origin without path or credentials")
 	}
 	cfg.BaseURL = base
+	aggregator, err := url.Parse(envOrDefault(lookup, "BNPB_SATELLITE_AGGREGATOR_URL", "http://aggregator:8083"))
+	if err != nil || (aggregator.Scheme != "https" && aggregator.Scheme != "http") || aggregator.Host == "" || aggregator.User != nil || strings.Trim(aggregator.Path, "/") != "" {
+		return Config{}, fmt.Errorf("BNPB_SATELLITE_AGGREGATOR_URL: must be an HTTP(S) origin without path or credentials")
+	}
+	cfg.AggregatorURL = aggregator
+	cfg.IngestToken, _ = lookup("BNPB_SATELLITE_INGEST_TOKEN")
+	if cfg.IngestToken != "" && (len(cfg.IngestToken) < 32 || strings.TrimSpace(cfg.IngestToken) != cfg.IngestToken) {
+		return Config{}, fmt.Errorf("BNPB_SATELLITE_INGEST_TOKEN: must contain at least 32 bytes without surrounding whitespace")
+	}
 	cfg.Lease.Name, _ = lookup("BNPB_SATELLITE_LEASE_NAME")
 	if cfg.Lease.Name == "" {
 		return cfg, nil

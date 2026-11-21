@@ -102,7 +102,7 @@ func (store *Store) listHazards(requestCtx context.Context, query hazardQuery, c
 			}
 			for _, source := range selected {
 				var cached bool
-				if err := tx.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM hazard_events WHERE source = $1)", string(source)).Scan(&cached); err != nil {
+				if err := tx.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM hazard_events WHERE source = $1 AND withdrawn_at IS NULL)", string(source)).Scan(&cached); err != nil {
 					return storeError("read shard cache", err)
 				}
 				value.Cached[source] = cached
@@ -197,7 +197,7 @@ func (store *Store) hazardDetail(requestCtx context.Context, hazardID string, cf
 	results := fanoutLogicalReads(ctx, stores, func(ctx context.Context, unit logicalReadStore) (located, error) {
 		var value located
 		err := unit.Store.primarySnapshot(ctx, func(ctx context.Context, tx pgx.Tx) error {
-			hazard, err := scanHazard(tx.QueryRow(ctx, "SELECT "+hazardColumns+" FROM hazard_events WHERE hazard_id = $1", hazardID))
+			hazard, err := scanHazard(tx.QueryRow(ctx, "SELECT "+hazardColumns+" FROM hazard_events WHERE hazard_id = $1 AND withdrawn_at IS NULL", hazardID))
 			if errors.Is(err, pgx.ErrNoRows) {
 				return nil
 			}
@@ -279,7 +279,7 @@ func readHazardPage(ctx context.Context, tx pgx.Tx, query hazardQuery) ([]Hazard
 }
 
 func hazardPageSQL(query hazardQuery) (string, []any) {
-	clauses, args := []string{"TRUE"}, []any{}
+	clauses, args := []string{"withdrawn_at IS NULL"}, []any{}
 	add := func(expression string, argument any) {
 		args = append(args, argument)
 		clauses = append(clauses, fmt.Sprintf(expression, len(args)))
@@ -348,7 +348,7 @@ func readEndpointSnapshots(ctx context.Context, tx pgx.Tx, selected []Source) (m
 		names = append(names, string(source))
 	}
 	rows, err := tx.Query(ctx, `SELECT endpoint, source, last_successful_poll, stale_since, last_attempt_at,
-        error_category, EXISTS (SELECT 1 FROM hazard_events h WHERE h.source = p.source)
+        error_category, EXISTS (SELECT 1 FROM hazard_events h WHERE h.source = p.source AND h.withdrawn_at IS NULL)
         FROM poll_state p WHERE source = ANY($1::text[])
         ORDER BY CASE endpoint WHEN 'seismic' THEN 1 WHEN 'warnings' THEN 2 WHEN 'coastal' THEN 3 ELSE 4 END`, names)
 	if err != nil {
@@ -387,7 +387,7 @@ func readUnconfiguredSource(ctx context.Context, tx pgx.Tx, source Source) (sour
 	category := "source_not_configured"
 	state := sourceState{pollObservation: pollObservation{Status: "unavailable", ErrorCategory: &category},
 		Endpoints: make(map[string]pollObservation)}
-	err := tx.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM hazard_events WHERE source = $1)", string(source)).Scan(&state.HasCachedData)
+	err := tx.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM hazard_events WHERE source = $1 AND withdrawn_at IS NULL)", string(source)).Scan(&state.HasCachedData)
 	if state.HasCachedData {
 		state.Status = "stale"
 	}

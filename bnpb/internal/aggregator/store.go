@@ -64,7 +64,10 @@ var receiptBindingSchema string
 //go:embed migrations/015_failed_messages.sql
 var failedMessagesSchema string
 
-const currentSchemaVersion = 14
+//go:embed migrations/015_source_wildfire.sql
+var sourceWildfireSchema string
+
+const currentSchemaVersion = 15
 
 const schemaHistoryQuery = `SELECT COALESCE(max(version), 0), count(*),
     COALESCE(min(version), 0) FROM schema_migrations`
@@ -435,7 +438,7 @@ func applyPendingMigrations(ctx context.Context, tx pgx.Tx, version int) error {
 	}{{2, outboxIdentitySchema}, {3, snapshotIndexSchema}, {4, outboxSequenceSchema},
 		{5, coastalSchema}, {6, m2EnumSchema}, {7, shardSchema}, {8, placementGuardSchema}, {9, handledInputsSchema},
 		{10, mutationFenceSchema}, {11, auditIndexSchema}, {12, pollReceiptSchema}, {13, liveMutationGenerationSchema},
-		{14, receiptBindingSchema}} {
+		{14, receiptBindingSchema}, {15, sourceWildfireSchema}} {
 		if version < migration.version {
 			if _, err := tx.Exec(ctx, migration.sql); err != nil {
 				return err
