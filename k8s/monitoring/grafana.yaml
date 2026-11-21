@@ -404,6 +404,47 @@ data:
               "unit": "ops"
             }
           }
+        },
+        {
+          "id": 10,
+          "title": "Field Team alert latency (p95, target 5 s)",
+          "type": "timeseries",
+          "gridPos": {
+            "h": 8,
+            "w": 24,
+            "x": 0,
+            "y": 32
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "targets": [
+            {
+              "expr": "histogram_quantile(0.95, sum by (le, source) (rate(bnpb_notification_latency_seconds_bucket[5m])))",
+              "legendFormat": "p95 {{source}}"
+            },
+            {
+              "expr": "histogram_quantile(0.95, sum by (le) (rate(bnpb_notification_latency_seconds_bucket{source=\"SENSOR_PANTAI\",severity=\"AWAS\"}[5m])))",
+              "legendFormat": "p95 critical coastal"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {"color": "green", "value": null},
+                  {"color": "red", "value": 5}
+                ]
+              },
+              "custom": {
+                "thresholdsStyle": {"mode": "line"}
+              }
+            }
+          },
+          "description": "From the Aggregator ingesting a hazard to consumer-2 recording its alert. Both clocks are on different nodes, so a clock-skew test distorts this panel."
         }
       ]
     }
