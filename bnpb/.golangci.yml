@@ -37,6 +37,8 @@ linters:
             - '!**/internal/consumer-3/**'
             - '!**/cmd/field-intake/**'
             - '!**/internal/field-intake/**'
+            - '!**/cmd/satellite/**'
+            - '!**/internal/satellite/**'
             - '!**/cmd/fence-host/**'
             - '!**/internal/fencehost/**'
             - '!**/cmd/catalog-load/**'
@@ -130,6 +132,18 @@ linters:
           allow:
             - github.com/Staryo40/AsosiasiAdmirerTsundere/bnpb/internal/field-intake$
             - github.com/Staryo40/AsosiasiAdmirerTsundere/bnpb/internal/field-intake/
+            - github.com/Staryo40/AsosiasiAdmirerTsundere/bnpb/internal/platform$
+            - github.com/Staryo40/AsosiasiAdmirerTsundere/bnpb/internal/platform/
+          deny: *bnpb-boundary
+
+        satellite:
+          list-mode: lax
+          files:
+            - '**/cmd/satellite/**'
+            - '**/internal/satellite/**'
+          allow:
+            - github.com/Staryo40/AsosiasiAdmirerTsundere/bnpb/internal/satellite$
+            - github.com/Staryo40/AsosiasiAdmirerTsundere/bnpb/internal/satellite/
             - github.com/Staryo40/AsosiasiAdmirerTsundere/bnpb/internal/platform$
             - github.com/Staryo40/AsosiasiAdmirerTsundere/bnpb/internal/platform/
           deny: *bnpb-boundary
