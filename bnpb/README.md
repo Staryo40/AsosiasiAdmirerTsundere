@@ -15,6 +15,8 @@ Only the Client-Facing API (`:8080`) is reachable from outside the Docker networ
   - [Auth](#auth-internal-8084)
   - [Aggregator](#aggregator-internal-8083)
   - [Consumers](#consumers-internal-8085-8086-8087)
+  - [Field intake](#field-intake-internal-8088)
+  - [Satellite feed](#satellite-feed-internal-8089)
   - [Shared platform behavior](#shared-platform-behavior)
 
 ## Technology and Frameworks
@@ -321,6 +323,17 @@ M2-only optional configuration is kept commented out in `.env.example`; configur
 
 Authority fields/domains are all-or-none. Host-native configuration must bind every allowed owner domain UUID to its actual PostgreSQL guard target(s) using a bounded resource file and privileged guard-only credentials; physical mappings, credential values, and native Secret/config paths have not been supplied. Missing/incomplete/mismatched bindings fail closed. The host `init` and `serve` source commands accept `--resources-file` (and the other flags shown in source), but native build/run/fencing proof is missing; those flag names are not an installation procedure. Graceful owner shutdown cancels and joins workers, then closes guards; takeover fences the old owner domain.
 
+#### Failed messages
+
+The Aggregator keeps every source message it could not use in its `failed_messages` table, with the original payload (up to 1 MiB; `payload_truncated` marks a cut). The same payload seen again raises `attempts` instead of adding a row. There are two kinds:
+
+| Kind | Example | Status | What happens next |
+| --- | --- | --- | --- |
+| `response` | A truncated, deeply nested, non-UTF-8, or oversized PVMBG body | `retrying`, retryable | The next complete poll of that endpoint fetches the same data again and marks it `resolved`. No Ops action is needed. |
+| `record` | A PVMBG report from schema version 3–5 that the strict mapping rejects | `parked`, not retryable | Waits for Ops. Ops sets a `BNPB_PVMBG_*` adaptation value, restarts the Aggregator, and replays it. A recovered record becomes `resolved`. |
+
+A broken source never stops polling or crashes the Aggregator, and other sources keep polling meanwhile. The API exposes the list and replay to BNPB Internal Ops only (see [Client-Facing API](#client-facing-api-public-8080)). The gauge `bnpb_failed_messages{source,status}` on `/metrics` counts rows for each source and status.
+
 ### Consumers (internal, `:8085`/`:8086`/`:8087`)
 
 Each consumer exposes only two routes, both unauthenticated (internal network only):
@@ -344,7 +357,53 @@ Each consumer exposes only two routes, both unauthenticated (internal network on
 | Same `(client_id, report_id)` with different content | The first copy stays; the new one is kept in `report_conflicts` |
 | Unreadable or oversized message | A row in `rejected_reports`, then acked so it cannot block the queue |
 
-`GET /internal/field-reports?after=<seq>&limit=<1-1000>` needs `X-BNPB-Internal-Key` set to `BNPB_FIELD_INTAKE_INTERNAL_KEY`. It returns `{"items":[{seq, client_id, report_id, message_id, hazard_type, reported_at, accepted_at, stored_at, deliveries}], "next_after", "stored", "conflicts", "rejected"}`, for comparing stored reports with the 202 answers a client received.
+`GET /internal/field-reports?after=<seq>&limit=<1-1000>` needs `X-BNPB-Internal-Key` set to `BNPB_FIELD_INTAKE_INTERNAL_KEY`. It returns `{"items":[{seq, client_id, report_id, message_id, hazard_type, reported_at, accepted_at, stored_at, deliveries}], "next_after", "stored", "conflicts", "rejected"}`, for comparing stored reports with the 202 answers a client received. The counter `bnpb_field_reports_total{outcome}` on `/metrics` counts settled deliveries by outcome.
+
+### Satellite feed (internal, `:8089`)
+
+The satellite service reads the course's Feed Satelit, an SSE stream at `GET /v1/stream?from=<offset>`. It turns hotspot detections into fires and delivers fire changes to the Aggregator, which stores them as `SATELIT`/`WILDFIRE` hazards.
+
+**One reader at a time.** On Kubernetes two replicas run. Only the holder of the Lease `BNPB_SATELLITE_LEASE_NAME` (`satellite-feed`) connects to the feed; the other waits as a standby. The lease lasts 15 seconds and is renewed every 5. A holder that cannot renew for 10 seconds stops reading before anyone else can take over. In Compose the lease name is empty and the single instance always reads.
+
+**Checkpoint and resume.** Each replica keeps its own SQLite file (`BNPB_SATELLITE_DB_PATH`) with three parts:
+
+- an append-only log of feed events
+- `next_offset`, the checkpoint
+- an outbox of fire changes
+
+Every event is logged and applied in the same transaction as the checkpoint. After a crash or reconnect the service reconnects with `from=next_offset`, so nothing is skipped or applied twice. On startup it rebuilds its fire state by replaying the log. A standby that has never held the lease starts from offset 0 and catches up on its own. If the feed sends an offset higher than expected, the service reconnects instead of skipping ahead, and logs `feed_disconnected` with category `offset_gap`.
+
+**Clustering rules.** Two detections belong to the same fire when they are at most 1 km and 360 minutes apart, directly or through other detections.
+
+- Low-confidence (`l`) detections and retracted detections are not clustered.
+- A single detection is held back until a second one joins it.
+- `update` and `retract` events change an existing detection and can split or merge fires.
+- Data more than 360 minutes older than the newest detection is late. It is counted but not applied, so the published result stays the same as a replay of the log.
+- Severity is `AWAS` with 20 or more detections or a total FRP of at least 100, `SIAGA` with 6 or more detections or at least 30, and otherwise `WASPADA`.
+- A fire's ID is derived from its first detection, so a replay names every fire the same way.
+
+**Delivery.** Each fire change is written to the outbox in the same transaction as the event that caused it. A sender posts outbox rows to the Aggregator's `POST /internal/satellite/fires` with `Bearer BNPB_SATELLITE_INGEST_TOKEN`, and marks them sent only after a `200`. The Aggregator deduplicates by input identity, so a resend after a crash changes nothing. With an empty ingest token the service keeps reading but leaves fires in the outbox.
+
+| Route | Purpose |
+| --- | --- |
+| `GET /health` | Process liveness |
+| `GET /ready` | Always `200`, with diagnostics: `leading`, `connected`, `next_offset`, event counts, fire statistics (`active`, `singletons`, `late`, `late_updates`, `orphans`, `duplicates`, `watermark`), and delivery `backlog`/`sent`/`refused` |
+| `GET /metrics` | `bnpb_satellite_*` series: `leading`, `connected`, `next_offset`, `feed_latest_offset`, `feed_lag_events`, `feed_events_total{kind}`, `engine_events_total{outcome}`, `active_fires`, `singleton_fires`, `watermark_timestamp_seconds`, `outbox_backlog`, `delivered_total{result}`, and the `store_latency_seconds` histogram (from an event arriving to the Aggregator storing its fire change) |
+
+Only the leader reports `feed_lag_events`: the feed's latest offset from `GET /v1/session`, plus one, minus `next_offset`. A reading older than one minute is dropped instead of reported. The Grafana dashboard **BNPB Streams** shows these series.
+
+**Checking the result.** `bnpb-satellite -verify [database path]` opens the database read-only, so it can run beside the live service. It compares three sets of fires:
+
+- the newest fire published in the outbox
+- a fresh replay of the event log
+- a one-shot batch clustering of the same detections
+
+It prints JSON with `published_equals_rebuild`, `published_equals_batch`, the fires found in only one of them, every fire's detection keys, and `undelivered_changes`. It exits `1` on any mismatch.
+
+```text
+docker compose exec satellite /bnpb-satellite -verify
+kubectl -n sistem-informasi-kebencanaan-bnpb exec satellite-0 -- /bnpb-satellite -verify
+```
 
 ### Shared platform behavior
 

@@ -15,6 +15,7 @@ Milestone 2 runs the same system on a two-node Kubernetes (k3s) cluster; see [Ru
 - [Running the Application](#running-the-application)
 - [Running on Kubernetes (Milestone 2)](#running-on-kubernetes-milestone-2)
 - [Acceptance Testing (P01–P05)](#acceptance-testing-p01p05)
+- [Milestone 2 Scenarios (P3 and P4)](#milestone-2-scenarios-p3-and-p4)
 - [Endpoints](#endpoints)
 - [Creators](#creators)
 
@@ -46,7 +47,7 @@ Simplified file layout:
 ├── pvmbg/                  # Mock PVMBG (Kotlin/Ktor)
 │   └── src/                # main, test
 ├── bnpb/                   # BNPB backend (Go)
-│   ├── cmd/                # aggregator, api, auth, consumer-1/2/3
+│   ├── cmd/                # aggregator, api, auth, consumer-1/2/3, field-intake, satellite
 │   ├── internal/           # per-service packages + shared platform/
 │   ├── broker/             # RabbitMQ provisioning
 │   └── contracts/v1/       # OpenAPI contract + schemas
@@ -55,6 +56,7 @@ Simplified file layout:
 │   └── secrets.env.example # Secret keys (fill secrets.env locally; not tracked)
 ├── testing/                # acceptance suites (Python), per Problem
 │   ├── P01/ P02/ P03/ P04/ P05/
+│   ├── M2-P3/ M2-P4/       # Milestone 2: failed messages, field reports, Feed Satelit
 │   └── common/             # shared test helpers
 ├── docs/architecture.svg   # diagram used above
 ├── KUBERNETES-DEPLOYMENT.md # step-by-step k3s install and deploy
@@ -283,6 +285,49 @@ accepts `BNPB_RABBITMQ_ADDR` (default `rabbitmq:5672`) and
 `/data/consumer-2.db`, and `/data/consumer-3.db`). The root Compose file keeps
 those defaults and does not forward these standalone-only overrides.
 
+#### `bnpb/.env`: field reports
+
+`configure_env.py` generates the passwords and the key below. `broker-init`
+provisions the `field.reports` quorum queue and both users whenever both user
+names are set. The API refuses to start if its user is set without a password.
+To run without field reports, clear both `BNPB_API_RABBITMQ_*` values: the API
+then answers `503` on `POST /v1/field-reports`.
+
+| Variable | Default | Purpose / constraint |
+| --- | --- | --- |
+| `BNPB_API_RABBITMQ_USER` | `api-field-reports` | RabbitMQ user the API publishes field reports with; it can only publish to `field.reports`. |
+| `BNPB_API_RABBITMQ_PASSWORD` | `required` | Password for that user; set it together with the user. |
+| `BNPB_FIELD_INTAKE_RABBITMQ_USER` | `field-intake` | RabbitMQ user `field-intake` reads the queue with. |
+| `BNPB_FIELD_INTAKE_RABBITMQ_PASSWORD` | `required` | Password for that user. |
+| `BNPB_FIELD_INTAKE_INTERNAL_KEY` | `required` | Key for `GET /internal/field-reports`, sent as `X-BNPB-Internal-Key`; at least 32 bytes. |
+| `BNPB_FIELD_INTAKE_HTTP_ADDR` | `:8088` | `field-intake` listen address. |
+| `BNPB_FIELD_INTAKE_DB_PATH` | `/data/field-intake.db` | `field-intake` SQLite file. |
+
+#### `bnpb/.env`: Feed Satelit
+
+| Variable | Default | Purpose / constraint |
+| --- | --- | --- |
+| `BNPB_SATELLITE_TOKEN` | `required` | Group token for the course's Feed Satelit, from the assistants. Fill it in by hand; the service refuses to start without it. |
+| `BNPB_SATELLITE_BASE_URL` | `https://satellite.naufarrel.dev` | Feed origin without a path. |
+| `BNPB_SATELLITE_HTTP_ADDR` | `:8089` | Satellite service listen address. |
+| `BNPB_SATELLITE_DB_PATH` | `/data/satellite.db` | SQLite file holding the event log, the checkpoint, and the fire outbox. |
+| `BNPB_SATELLITE_LEASE_NAME` | empty | Kubernetes Lease that picks the one replica allowed to read the feed. Leave it empty in Compose, where a single instance runs. |
+| `BNPB_SATELLITE_INGEST_TOKEN` | `required / match` | Bearer token for the Aggregator's `POST /internal/satellite/fires`; the satellite service and the Aggregator read the same value. At least 32 bytes. When it is empty, fires stay in the outbox and are not delivered. |
+| `BNPB_SATELLITE_AGGREGATOR_URL` | `http://aggregator:8083` | Where fire changes are delivered. |
+
+#### `bnpb/.env`: PVMBG schema adaptation
+
+All three are empty by default, which is the strict policy: PVMBG schema
+versions 1 and 2 are accepted, and records from versions 3–5 are parked as
+failed messages with their reason. BNPB Internal Ops sets one of these values,
+restarts the Aggregator, and then replays the parked records.
+
+| Variable | Default | Purpose / constraint |
+| --- | --- | --- |
+| `BNPB_PVMBG_FIELD_ALIASES` | empty | Comma-separated `new_name:pvmbg_field` pairs, e.g. `level:alert_level` for schema version 3. The target must be a known PVMBG field. |
+| `BNPB_PVMBG_NUMERIC_STRINGS` | empty | Comma-separated numeric fields that may arrive as decimal strings: `eruption_count_24h`, `ash_column_height_m`, `confidence_level`. |
+| `BNPB_PVMBG_MISSING_TIME_FALLBACK` | empty | `received_at` lets a record without a report time use the time BNPB received it. |
+
 #### Acceptance-runner variables
 
 These are session variables for the test runners, not service credentials:
@@ -394,6 +439,41 @@ docker compose --profile demo down -v
 The `demo` profile is included so these commands also remove `consumer-3` if it
 was started during the live-consumer demonstration.
 
+### 6. Field reports and the satellite feed (opt-in)
+
+`field-intake` and the satellite service sit behind their own Compose profiles,
+`field-reports` and `satellite`. A plain `docker compose up` leaves them out,
+so the core system runs without the Feed Satelit token. Fill
+`BNPB_SATELLITE_TOKEN` in `bnpb/.env` first, then start everything:
+
+**PowerShell:**
+
+```powershell
+$env:COMPOSE_PROFILES = "satellite,field-reports"
+docker compose up -d --build --wait --wait-timeout 180
+```
+
+**Bash/zsh:**
+
+```bash
+export COMPOSE_PROFILES=satellite,field-reports
+docker compose up -d --build --wait --wait-timeout 180
+```
+
+Use `--profile satellite` or `--profile field-reports` instead to start only
+one of them, and add the same profiles to `docker compose down`. Then check:
+
+```text
+docker compose logs satellite
+docker compose ps satellite field-intake
+```
+
+A `feed_connected` log line shows the offset the satellite service resumed
+from. `field-intake` answers on <http://localhost:8088/health>. Port
+`8088` comes from `compose.override.yaml`. The satellite service has no host
+port; it is reached with `docker compose exec`, as in the
+[Milestone 2 scenarios](#milestone-2-scenarios-p3-and-p4).
+
 ### Other useful commands
 
 Service names, as Compose knows them (use any of these in place of `<service-name>` below):
@@ -408,6 +488,8 @@ Service names, as Compose knows them (use any of these in place of `<service-nam
 | `consumer-1` | Dashboard updater — latest state per hazard |
 | `consumer-2` | Notifier — records SIAGA/AWAS alerts |
 | `consumer-3` | Regional portal feed — append-only log (`demo` profile only) |
+| `field-intake` | Stores field reports from the `field.reports` queue exactly once (`field-reports` profile only) |
+| `satellite` | Reads Feed Satelit, clusters detections into fires, and delivers fire changes to the Aggregator (`satellite` profile only) |
 | `postgres` | The Canonical Store, owned solely by the Aggregator |
 | `rabbitmq` | The message broker (`hazard.events` fanout exchange) |
 | `broker-init` | One-shot: provisions the exchange and per-service users before startup. Source policy changes for no-TTL/no-expiry `reject-publish` queues are authorized but have not been applied to the live broker. |
@@ -425,7 +507,8 @@ The same system runs on a Kubernetes cluster (k3s) with at least two nodes that 
 running system, is in [`KUBERNETES-DEPLOYMENT.md`](KUBERNETES-DEPLOYMENT.md). In short:
 
 1. Install k3s on both nodes and point `kubectl` at the cluster (guide sections 1–2).
-2. Create `k8s/secrets.env` from [`k8s/secrets.env.example`](k8s/secrets.env.example) (section 3).
+2. Create `k8s/secrets.env` from [`k8s/secrets.env.example`](k8s/secrets.env.example), plus the `pantai-token` and
+   `satellite-token` Secrets that hold the course feed tokens (section 3).
 3. Build the images, push them to the registry or import them into each node, and create the pull secret (section 4).
 4. Deploy the whole system with **one command** from the repository root:
 
@@ -460,7 +543,7 @@ scenarios only target `node-b`, the worker that is not the control plane.
 | `resources.requests` / `limits` (Appendix B) | Set on every container, see the table below. |
 | Credentials as Secret, configuration as ConfigMap | `k8s/secrets.env` generates the Secrets, `k8s/config/*.env` generate the ConfigMaps (see `kustomization.yaml`). |
 | `role=store` data on the node's local disk | PostgreSQL is a StatefulSet on a `local-path` PersistentVolume. |
-| Storage reachable only by its owner (Platform.8) | [`k8s/network-policies.yaml`](k8s/network-policies.yaml): PostgreSQL accepts only the Aggregator, RabbitMQ only the Aggregator, the consumers, and `broker-init`. |
+| Storage reachable only by its owner (Platform.8) | [`k8s/network-policies.yaml`](k8s/network-policies.yaml): PostgreSQL accepts only the Aggregator, RabbitMQ only the Aggregator, the consumers, `broker-init`, the API (to publish field reports), and `field-intake`. Each satellite replica keeps its feed log on its own `local-path` volume. |
 | Tester Agent not obstructed (TA.2) | The NetworkPolicies select only the PostgreSQL and RabbitMQ pods. No other policy, taint, or quota is applied. |
 | Readiness and liveness probes, spread across nodes | Aggregator and API replicas use `topologySpreadConstraints` and probes; the Aggregator also has a PodDisruptionBudget. |
 
@@ -470,6 +553,8 @@ scenarios only target `node-b`, the worker that is not the control plane.
 | PostgreSQL | `store` | 1 | 512Mi / 1Gi |
 | RabbitMQ | `broker` | 1 | 512Mi / 1Gi |
 | consumer-1, consumer-2, consumer-3 | `consumer` | 1, 1, 0 (scaled on demand) | 128Mi / 256Mi |
+| field-intake | `consumer` | 1 | 128Mi / 256Mi |
+| Satellite service (stream processor) | `broker` | 2 (one holds the `satellite-feed` Lease and reads the feed; the other waits as standby) | 512Mi / 1Gi |
 | Auth | `api` | 1 (tokens are held in process memory, so it must stay a single instance) | 128Mi / 256Mi |
 | Client-Facing API | `api` | 2 | 128Mi / 256Mi |
 | Mock BMKG, Mock PVMBG | `mock` | 1 each | 64Mi / 128Mi |
@@ -490,7 +575,8 @@ Edit a value in `k8s/config/*.env`, run `kubectl apply -k k8s`, and Kustomize ro
 
 | Service | Address |
 | --- | --- |
-| Client-Facing API | `http://<node-ip>:30080` (`/auth/login`, `/auth/refresh`, `/v1/hazards`, `/v1/hazards/{hazard_id}`, `/v1/coastal/status`, `/health`) |
+| Client-Facing API | `http://<node-ip>:30080` (`/auth/login`, `/auth/refresh`, `/v1/hazards`, `/v1/hazards/{hazard_id}`, `/v1/coastal/status`, `/v1/ops/failed-messages`, `/v1/ops/failed-messages/replay`, `/v1/field-reports`, `/health`) |
+| field-intake, satellite service | Cluster-internal only: `kubectl port-forward svc/field-intake 8088` and `svc/satellite 8089` |
 | Analytics dashboard (UI) | `http://<node-ip>:30081` |
 | Aggregator (internal read API, Audit API) | `http://<node-ip>:30083` |
 | RabbitMQ management | `kubectl -n sistem-informasi-kebencanaan-bnpb port-forward svc/rabbitmq 15672`, then <http://localhost:15672> |
@@ -515,6 +601,10 @@ All commands use the `sistem-informasi-kebencanaan-bnpb` namespace; set it once 
 | Kill one pod | `kubectl delete pod <pod-name>` |
 | Observe pod placement and health | `kubectl get pods -o wide -w` |
 | Follow all replicas of a component | `kubectl logs -l app.kubernetes.io/name=aggregator --prefix -f` |
+| Find the satellite replica reading the feed | `kubectl get lease satellite-feed -o jsonpath='{.spec.holderIdentity}'` |
+| Kill the satellite leader (the standby takes over) | `kubectl delete pod --grace-period=0 --force <holder>` |
+| Check fires against a replay of the event log | `kubectl exec <satellite-pod> -- /bnpb-satellite -verify` |
+| Stop storing field reports (they wait in the queue) | `kubectl scale statefulset field-intake --replicas=0`, later `--replicas=1` |
 
 Node-failure, clock-skew, and network-partition scenarios are performed by the Tester Agent during the exam, or by hand
 on `node-b` (for example `sudo poweroff` on the VM).
@@ -789,6 +879,197 @@ teardown and the `aat_events` network can remain attached.
 Runtime evidence is written under `testing/results/P01`–`testing/results/P04`
 or to the P05 log file. An exit code of `0` only means that the selected
 automated scenario passed. 
+
+## Milestone 2 Scenarios (P3 and P4)
+
+These scripts produce the evidence for Milestone 2 Problem 3 (failed messages,
+schema changes, field reports) and Problem 4 (Feed Satelit). Each scenario is
+one `run.py` under `testing/M2-P3/` or `testing/M2-P4/`. Each one prints a line
+per check, ends with `PASS` or `FAIL`, and exits with `0` or `1`. It writes a
+JSON evidence file to `testing/results/M2-P3/` or `testing/results/M2-P4/`,
+and prints its path. They need Python 3.11+, which parses the nanosecond
+timestamps the services return, and no extra packages.
+
+### Where they run
+
+Every script takes `--target compose` (the default) or `--target k8s`, or
+reads `M2_TARGET`. The target only changes how a component is killed,
+stopped, or inspected: `docker compose` or `kubectl`. Credentials come from
+`bnpb/.env` and `pvmbg/.env` in Compose, or from `k8s/config/*.env` and
+`k8s/secrets.env` on Kubernetes.
+
+**Compose:** start the system with both opt-in profiles, as in
+[step 6](#6-field-reports-and-the-satellite-feed-opt-in). An existing `bnpb/.env`
+created before these services existed needs the
+[field-report](#bnpbenv-field-reports) and [Feed Satelit](#bnpbenv-feed-satelit)
+values added by hand, since `configure_env.py` never overwrites a file.
+
+**Kubernetes:** the API and Aggregator are reached on the NodePorts, and
+PVMBG and `field-intake` through port-forwards. Keep these running in a
+second terminal:
+
+```text
+kubectl -n sistem-informasi-kebencanaan-bnpb port-forward svc/pvmbg 8082
+kubectl -n sistem-informasi-kebencanaan-bnpb port-forward svc/field-intake 8088
+```
+
+Set `M2_TARGET=k8s` and `NODE_IP` to either node's IP, for example
+`192.168.56.10`. Any address can be overridden with `API_BASE`,
+`AGGREGATOR_BASE`, `PVMBG_BASE`, `INTAKE_BASE`, or `PROMETHEUS_BASE`.
+
+### Problem 3: failed messages and field reports
+
+**T01, schema change policy.** The script switches PVMBG through schema
+versions 1–5 and waits 45 seconds on each one (`--wait`). It passes when
+versions 1 and 2 are stored normally and versions 3–5 are parked as failed
+messages with a reason and `retryable: false`. PVMBG is put back on version 1
+at the end. The three `BNPB_PVMBG_*` adaptation values must be empty when it
+starts.
+
+```text
+python testing/M2-P3/T01-schema-policy/run.py
+```
+
+**T02, malformed payloads.** The script makes PVMBG answer with each of its
+four broken bodies: `truncated`, `deep_nesting`, `invalid_utf8`, and
+`oversized`. For each one it checks four things:
+
+- The broken response is kept as a `retrying`, retryable failed message,
+  with its payload.
+- The failed message becomes `resolved` once PVMBG answers normally again.
+- BMKG polling kept succeeding while PVMBG was broken.
+- The Aggregator never restarted and still answers `/health`.
+
+```text
+python testing/M2-P3/T02-malformed-payloads/run.py
+```
+
+**T03, adaptation and replay.** This scenario has three steps, with Ops
+work in between.
+
+1. `park` switches PVMBG to schema version 3, which renames `alert_level` to
+   `level`. It waits until those reports are parked, then saves their IDs to
+   `testing/results/M2-P3/T03-state.json`.
+2. Ops declares the new field. Set `BNPB_PVMBG_FIELD_ALIASES=level:alert_level`
+   (in `bnpb/.env`, or in `k8s/config/aggregator.env` on Kubernetes) and
+   restart the Aggregator. The script prints the exact commands.
+3. `replay` replays every parked PVMBG record through
+   `POST /v1/ops/failed-messages/replay`, following `continue` until nothing
+   remains.
+4. `verify` checks that no replayed record is still parked, every parked
+   report is now a hazard, no hazard is duplicated, and the newest report of
+   each `source_ref_id` won. It then puts PVMBG back on version 1.
+
+```text
+python testing/M2-P3/T03-replay/run.py park
+python testing/M2-P3/T03-replay/run.py replay
+python testing/M2-P3/T03-replay/run.py verify
+```
+
+Clear the alias again before running T01 a second time.
+
+**T04, Ops-only access.** The script checks who can read and replay failed
+messages:
+
+- Without a token the API answers `401`.
+- With a Media or Field Team token it answers `403`.
+- With an Ops token it answers `200`.
+- The Aggregator's own route refuses an Ops client token.
+
+```text
+python testing/M2-P3/T04-ops-only/run.py
+```
+
+**T05, field reports.** The script sends 500 reports from 32 parallel
+clients, then sends 50 of them again with the same body. Every `503` or
+`5xx` is retried with the same `report_id`, like a real client. It then
+reads `field-intake` and checks four things:
+
+- Every report answered with `202` is stored.
+- No report is stored twice.
+- Nothing is stored that never got a `202`.
+- The resent reports were accepted again.
+
+It also reports the p50 and p95 of the `202` latency. Two options add
+failures:
+
+- `--stop-intake` keeps `field-intake` stopped while the reports are sent.
+  They wait in the queue and are stored once it starts again.
+- `--kill api` or `--kill field-intake` kills that component halfway
+  through.
+
+```text
+python testing/M2-P3/T05-field-reports/run.py
+python testing/M2-P3/T05-field-reports/run.py --stop-intake
+python testing/M2-P3/T05-field-reports/run.py --kill field-intake
+python testing/M2-P3/T05-field-reports/run.py --kill api
+```
+
+### Problem 4: Feed Satelit
+
+These scenarios need the live course feed and a valid `BNPB_SATELLITE_TOKEN`.
+They use `bnpb-satellite -verify`, which runs inside the satellite container
+(see [the satellite service](bnpb/README.md#satellite-feed-internal-8089)). It
+rebuilds every fire from the stored event log and from a one-shot batch
+clustering, and compares both with the fires the service published.
+
+**T06, crash equivalence.** The script lets the feed stream for 60 seconds
+(`--warmup`), then kills the replica reading the feed. On Kubernetes this
+means the Lease holder, killed with no grace period. It waits until the
+replica now reading the feed is past the offset of the kill and has delivered
+everything. Then it checks two things:
+
+- The published fires equal an uninterrupted replay and the batch clustering.
+- The Aggregator's `SATELIT` hazards have no missing, extra, differing, or
+  duplicate fire.
+
+```text
+python testing/M2-P4/T06-crash-equivalence/run.py
+```
+
+**T07, comparison with the reference.** This needs the reference result
+published by the assistants. The script matches fires by their detection keys
+and reports how many are exact, split, missing, or extra, and which have a
+different severity. The reference format had not been published when this
+was written. The script accepts a JSON list of fires, or `{"fires": [...]}`,
+with a `detection_keys` list on each fire or inside its `attributes`.
+
+```text
+python testing/M2-P4/T07-reference-compare/run.py <reference.json>
+```
+
+**T08, 60× burst.** This runs on Kubernetes, because it reads Prometheus and
+Compose has none. Run it after the assistants' burst, with the burst's start
+and end times. Without `--burst-end`, it measures from the moment the lag
+peaked. It reports three things:
+
+- the p50, p95, and p99 of the time from a feed event reaching the satellite
+  service to the Aggregator storing the fire change
+- the peak lag in events
+- how many seconds the lag took to return to zero, which passes at 60 seconds
+  or less
+
+```text
+python testing/M2-P4/T08-burst/run.py --target k8s --start 2026-11-21T10:00:00+07:00 --burst-end 2026-11-21T10:05:00+07:00
+```
+
+The same numbers are on the Grafana dashboard **BNPB Streams**.
+
+**T09, disconnect and resume.** The script cuts the feed connection and
+checks where the service resumes:
+
+- In Compose it disconnects the satellite container from its networks for
+  45 seconds (`--outage`).
+- On Kubernetes it deletes the leader pod gracefully, so the standby takes
+  over from its own checkpoint.
+
+It passes when the first `feed_connected` log line resumes at the saved
+offset, no `offset_gap` is reported, the offset moves forward again, and
+`-verify` still finds the fires equal.
+
+```text
+python testing/M2-P4/T09-reconnect/run.py
+```
 
 ## Endpoints
 
