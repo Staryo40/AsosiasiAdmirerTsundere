@@ -38,6 +38,8 @@ func Initialize(ctx context.Context, mux *http.ServeMux, _ config.Config, logger
 		logging.Event(ctx, logger, logging.Record{Level: slog.LevelWarn, Event: "fire_delivery_disabled", Message: "BNPB_SATELLITE_INGEST_TOKEN is empty; fires stay in the outbox"})
 	}
 	mux.HandleFunc("GET /ready", readyHandler(leader, feed, processor, delivery))
+	session := newSessionPoller(cfg, logger)
+	registerMetrics(&satelliteCollector{leader: leader, feed: feed, processor: processor, delivery: delivery, session: session})
 
 	ctx, cancel := context.WithCancel(ctx)
 	done := make(chan struct{})
@@ -46,6 +48,7 @@ func Initialize(ctx context.Context, mux *http.ServeMux, _ config.Config, logger
 		leader.Run(ctx, func(leadCtx context.Context) {
 			var group sync.WaitGroup
 			group.Go(func() { feed.run(leadCtx) })
+			group.Go(func() { session.run(leadCtx) })
 			if cfg.IngestToken != "" {
 				group.Go(func() { delivery.run(leadCtx) })
 			}

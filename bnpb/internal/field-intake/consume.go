@@ -9,6 +9,8 @@ import (
 	"net"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
 	amqp "github.com/rabbitmq/amqp091-go"
 
 	"github.com/Staryo40/AsosiasiAdmirerTsundere/bnpb/internal/platform/amqplog"
@@ -24,6 +26,11 @@ const (
 )
 
 var reconnectBackoff = []time.Duration{time.Second, 2 * time.Second, 5 * time.Second, 10 * time.Second}
+
+var reportOutcomes = promauto.NewCounterVec(prometheus.CounterOpts{
+	Name: "bnpb_field_reports_total",
+	Help: "Field reports settled from the queue, by outcome.",
+}, []string{"outcome"})
 
 // Must match the arguments broker-init declares, or the declaration is refused.
 var queueArguments = amqp.Table{"x-queue-type": "quorum"}
@@ -44,6 +51,9 @@ type session struct {
 
 func run(ctx context.Context, cfg Config, store *Store, logger *slog.Logger) {
 	worker := &consumer{cfg: cfg, store: store, logger: logger}
+	for _, outcome := range []string{string(Stored), string(Duplicate), string(Conflict), "rejected"} {
+		reportOutcomes.WithLabelValues(outcome)
+	}
 	for attempt := 0; ctx.Err() == nil; attempt++ {
 		if err := worker.consumeOnce(ctx); err != nil && ctx.Err() == nil {
 			logging.Event(ctx, logger, logging.Record{Level: slog.LevelError, Event: "broker_connection_lost", Message: "AMQP connection or channel closed"}, "category", "broker")
@@ -104,6 +114,7 @@ func (worker *consumer) handle(ctx context.Context, current *session, delivery a
 	if err != nil {
 		return err
 	}
+	reportOutcomes.WithLabelValues(string(outcome)).Inc()
 	level := slog.LevelInfo
 	if outcome == Conflict {
 		level = slog.LevelWarn
@@ -121,6 +132,7 @@ func (worker *consumer) reject(ctx context.Context, current *session, delivery a
 	if err := worker.store.Reject(ctx, delivery.MessageId, reason, payload); err != nil {
 		return err
 	}
+	reportOutcomes.WithLabelValues("rejected").Inc()
 	logging.Event(ctx, worker.logger, logging.Record{Level: slog.LevelWarn, Event: "field_report_rejected", Message: "field report could not be read"},
 		"message_id", delivery.MessageId, "reason", reason)
 	return worker.settle(ctx, current, delivery)

@@ -102,6 +102,9 @@ func (s *sender) send(ctx context.Context, rows []outboxRow) error {
 	switch {
 	case response.StatusCode == http.StatusOK:
 		s.sent.Add(int64(len(rows)))
+		for _, row := range rows {
+			storeLatency.Observe(time.Since(row.receivedAt).Seconds())
+		}
 	case response.StatusCode == http.StatusBadRequest || response.StatusCode == http.StatusConflict:
 		// The same bytes would be refused again; record it loudly instead of blocking every later change.
 		s.refused.Add(int64(len(rows)))
