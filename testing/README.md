@@ -170,3 +170,36 @@ Setelah ada izin deploy dan fault yang eksplisit, simpan artefak terpisah untuk:
 2. **Pemulihan RF2 dan kehilangan berikutnya:** simpan placement dengan status copying/ready/retiring serta byte, I/O dan replay WAL pada node kosong sewaktu trafik berjalan. Verifikasi dua salinan yang benar-benar aman pada node berbeda untuk setiap shard, tidak satu node menyimpan seluruh populasi, baru jalankan fault kedua pada target yang diizinkan. Bandingkan lagi count dan SHA-256 Audit BMKG lengkap (`partial:false`, `unavailable_units:[]`) dengan referensi asisten, bukan dengan checksum parsial atau checksum yang dibuat dari respons yang sedang diuji.
 3. **Backend sehat:** simpan `kubectl get pods` dan EndpointSlice Service dengan waktu dari pengamat independen. Sebelum fault, minimal tiga backend siap di tiga node dengan kernel berbeda. Korelasikan permintaan baru melalui Service dengan access log dari setiap pod; setelah backend ditandai tidak siap dan EndpointSlice berubah, tidak ada permintaan baru yang mencapai backend itu sementara backend sehat masih menjawab. Catat koneksi lama terpisah dari koneksi baru. Periksa respons follower ketika hanya sebagian shard atau poll owner yang terganggu.
 4. **UI dan observabilitas:** simpan dua pilihan rentang, angka per kategori/severity/area, dan bukti UI masih tampil dengan penanda parsial. Tangkap dashboard metrik per layanan, satu trace lintas layanan yang benar-benar diekspor dengan durasi, serta log sanitasi dengan ID korelasi. Tangkap layar, log aksi, log aplikasi, dan hasil pengukuran Tester Agent practice hanya untuk skenario yang diizinkan secara eksplisit.
+
+## Milestone 2: P3 dan P4
+
+Skenario M2 ada di `testing/M2-P3/` (pesan gagal dan laporan lapangan) dan `testing/M2-P4/` (Feed Satelit).
+Setiap skenario adalah satu `run.py` dengan `--target compose|k8s`; target hanya mengubah cara pod dihentikan
+dan diperiksa. Kredensial dibaca dari `bnpb/.env` dan `pvmbg/.env` (Compose) atau `k8s/secrets.env` dan
+`k8s/config/*.env` (Kubernetes). Hasil ditulis ke `testing/results/M2-P3/` dan `testing/results/M2-P4/`.
+
+Pada Kubernetes, PVMBG, field-intake, dan Prometheus dijangkau lewat port-forward:
+
+```text
+kubectl -n sistem-informasi-kebencanaan-bnpb port-forward svc/pvmbg 8082 &
+kubectl -n sistem-informasi-kebencanaan-bnpb port-forward svc/field-intake 8088 &
+```
+
+URL dapat diganti dengan `API_BASE`, `AGGREGATOR_BASE`, `PVMBG_BASE`, `INTAKE_BASE`, `PROMETHEUS_BASE`, atau
+`NODE_IP`. Pada Compose, jalankan dengan `COMPOSE_PROFILES=satellite,field-reports docker compose up -d`.
+
+| Skenario | Perintah |
+| --- | --- |
+| T01 kebijakan skema PVMBG | `python testing/M2-P3/T01-schema-policy/run.py` |
+| T02 payload rusak | `python testing/M2-P3/T02-malformed-payloads/run.py` |
+| T03 adaptasi dan replay | `python testing/M2-P3/T03-replay/run.py park`, ubah alias dan restart Aggregator, lalu `replay` dan `verify` |
+| T04 hanya Ops | `python testing/M2-P3/T04-ops-only/run.py` |
+| T05 laporan lapangan | `python testing/M2-P3/T05-field-reports/run.py [--stop-intake] [--kill api\|field-intake]` |
+| T06 crash pemroses | `python testing/M2-P4/T06-crash-equivalence/run.py` |
+| T07 banding referensi | `python testing/M2-P4/T07-reference-compare/run.py <file-referensi>` |
+| T08 lonjakan 60x | `python testing/M2-P4/T08-burst/run.py --start <ISO> --burst-end <ISO>` |
+| T09 putus dan sambung | `python testing/M2-P4/T09-reconnect/run.py` |
+
+T01 dan T03 mengharuskan kebijakan adaptasi PVMBG kosong saat mulai. Pemeriksaan kebakaran memakai
+`bnpb-satellite -verify` di dalam pod pemegang lease, yang membandingkan hasil terbit dengan replay log
+kejadian dan dengan pengelompokan batch.
