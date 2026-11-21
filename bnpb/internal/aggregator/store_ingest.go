@@ -220,7 +220,11 @@ func (store *Store) writeSourceRecord(ctx context.Context, tx pgx.Tx, chunk Inge
 	case CoastalEndpoint:
 		return store.writeCoastal(ctx, tx, chunk, raw)
 	default:
-		hazard, err := MapVolcanic(raw, newReceipt(chunk.ReceivedAt))
+		adapted, err := store.adaptVolcanic(ctx, tx, chunk, raw)
+		if err != nil {
+			return err
+		}
+		hazard, err := MapVolcanic(adapted, newReceipt(chunk.ReceivedAt))
 		if err != nil {
 			return err
 		}

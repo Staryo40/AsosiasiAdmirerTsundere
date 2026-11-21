@@ -40,6 +40,7 @@ type Config struct {
 	Authority                                       AuthorityConfig
 	Audit                                           AuditConfig
 	Catalog                                         CatalogConfig
+	PVMBGAdaptation                                 pvmbgAdaptation
 	PVMBGCycleTimeout, PollOverlap, RetryMaxBackoff time.Duration
 	WarningReconcileInterval, SourceStaleAfter      time.Duration
 	DBReadTimeout, DBWriteTimeout, PublishTimeout   time.Duration
@@ -124,6 +125,10 @@ func loadConfig(lookup func(string) (string, bool)) (Config, error) {
 		return Config{}, err
 	}
 	cfg.Catalog, err = loadCatalogConfig(lookup)
+	if err != nil {
+		return Config{}, err
+	}
+	cfg.PVMBGAdaptation, err = loadPVMBGAdaptation(lookup)
 	if err != nil {
 		return Config{}, err
 	}

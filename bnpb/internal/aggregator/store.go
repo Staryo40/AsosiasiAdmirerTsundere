@@ -82,6 +82,7 @@ type Store struct {
 	coastalStale              time.Duration
 	coastal                   coastalIngest
 	pantaiClient              *pantaiClient
+	pvmbg                     pvmbgAdaptation
 }
 
 func OpenStore(ctx context.Context, cfg Config, logger *slog.Logger) (*Store, error) {
@@ -180,7 +181,8 @@ func openStore(ctx context.Context, cfg Config, logger *slog.Logger, identity st
 		identity.shardID = &expectedShard
 	}
 	store := &Store{readTimeout: cfg.DBReadTimeout, writeTimeout: cfg.DBWriteTimeout,
-		chunkRecords: cfg.IngestChunkRecords, maxBytes: cfg.MaxResponseBytes, coastalStale: cfg.SourceStaleAfter, storeIdentity: identity}
+		chunkRecords: cfg.IngestChunkRecords, maxBytes: cfg.MaxResponseBytes, coastalStale: cfg.SourceStaleAfter, storeIdentity: identity,
+		pvmbg: cfg.PVMBGAdaptation}
 	connect := func(address string, maximum int) (*pgxpool.Pool, error) {
 		connectCtx, cancel := context.WithTimeout(ctx, cfg.DBWriteTimeout)
 		defer cancel()

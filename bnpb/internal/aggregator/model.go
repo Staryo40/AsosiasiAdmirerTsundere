@@ -70,6 +70,8 @@ const (
 	InvalidJSON    ValidationCode = "invalid_json"
 	DuplicateKey   ValidationCode = "duplicate_key"
 	UnknownVolcano ValidationCode = "unknown_volcano"
+	TooDeep        ValidationCode = "too_deep"
+	AmbiguousField ValidationCode = "ambiguous_field"
 )
 
 // ValidationError is safe to log: neither source values nor unknown key names appear.
