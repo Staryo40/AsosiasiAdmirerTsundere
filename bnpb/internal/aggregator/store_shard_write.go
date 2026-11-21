@@ -27,23 +27,36 @@ func (store *Store) ingestShardChunk(ctx context.Context, chunk IngestChunk, pol
 		}
 		return storeError("bind routed receipt", err)
 	}
+	outcomes := make([]recordOutcome, 0, len(chunk.Records))
 	for index, raw := range chunk.Records {
 		recordChunk := chunk
 		recordChunk.InputOffset += index
 		shardID := bindings.destinations[index]
 		if shardID == controlReceiptDestination {
-			if err := store.writeUnroutable(ctx, recordChunk, raw, bindings.routeErrors[index]); err != nil {
+			outcome, err := store.writeUnroutable(ctx, recordChunk, raw, bindings.routeErrors[index])
+			if err != nil {
 				return storeError("retain unroutable input", err)
 			}
+			outcome.offset = index
+			outcomes = append(outcomes, outcome)
 			continue
 		}
 		shard, err := store.shardStore(ctx, shardID)
 		if err != nil {
+			store.noteShardFailure(ctx, recordChunk, raw, shardID, err)
 			return storeError("resolve input shard", err)
 		}
-		if err := shard.writeShardInput(ctx, recordChunk, raw); err != nil {
+		outcome, err := shard.writeShardInput(ctx, recordChunk, raw)
+		if err != nil {
+			store.noteShardFailure(ctx, recordChunk, raw, shardID, err)
 			return storeError("write shard input", err)
 		}
+		outcome.offset = index
+		outcomes = append(outcomes, outcome)
+	}
+	// Shard outcomes are already durable; a lost write here is repeated when the receipt is retried.
+	if err := store.recordRoutedOutcomes(ctx, chunk, outcomes); err != nil {
+		return storeError("record failed messages", err)
 	}
 	return store.writeShardCheckpoint(ctx, chunk, policy)
 }
@@ -199,12 +212,13 @@ func inputShard(endpoint Endpoint, raw json.RawMessage) (int16, error) {
 	return logicalShard(source, identity)
 }
 
-func (store *Store) writeShardInput(ctx context.Context, chunk IngestChunk, raw json.RawMessage) (err error) {
+func (store *Store) writeShardInput(ctx context.Context, chunk IngestChunk, raw json.RawMessage) (outcome recordOutcome, err error) {
 	ctx, cancel := context.WithTimeout(ctx, store.writeTimeout)
 	defer cancel()
+	outcome.raw = raw
 	tx, err := store.beginWriteMutation(ctx)
 	if err != nil {
-		return err
+		return outcome, err
 	}
 	defer func() {
 		if cleanupErr := rollbackTransaction(ctx, tx); cleanupErr != nil {
@@ -212,56 +226,63 @@ func (store *Store) writeShardInput(ctx context.Context, chunk IngestChunk, raw 
 		}
 	}()
 	if _, err = tx.Exec(ctx, "SELECT pg_advisory_xact_lock(4031, $1)", ingestEndpoints[chunk.Endpoint].lock); err != nil {
-		return err
+		return outcome, err
 	}
 	status, exists, err := handledInputStatus(ctx, tx, chunk, raw)
 	if err != nil {
-		return err
+		return outcome, err
 	}
 	if exists {
+		outcome.applied = status == "applied"
 		if status == "retained" {
-			if err := retryRetainedInput(ctx, tx, store, chunk, raw); err != nil {
-				return err
+			if outcome.applied, outcome.reason, err = retryRetainedInput(ctx, tx, store, chunk, raw); err != nil {
+				return outcome, err
 			}
 		}
-		return tx.Commit(ctx)
+		return outcome, tx.Commit(ctx)
 	}
 	applyTx, err := tx.Begin(ctx)
 	if err != nil {
-		return err
+		return outcome, err
 	}
 	applyErr := store.writeSourceRecord(ctx, applyTx, chunk, raw)
 	status, reason := "applied", ""
 	if applyErr == nil {
 		if err = applyTx.Commit(ctx); err != nil {
-			return err
+			return outcome, err
 		}
 	} else {
 		if cleanupErr := rollbackTransaction(ctx, applyTx); cleanupErr != nil {
-			return errors.Join(applyErr, cleanupErr)
+			return outcome, errors.Join(applyErr, cleanupErr)
 		}
 		category, field := rejectReason(applyErr)
 		if category == "" {
-			return applyErr
+			return outcome, applyErr
 		}
 		status, reason = "retained", category+":"+field
 		if err = writeReject(ctx, tx, chunk, rejectedRecord{raw, ValidationError{Code: ValidationCode(category), Field: field}}); err != nil {
-			return err
+			return outcome, err
 		}
 	}
 	if err := insertHandledInput(ctx, tx, chunk, raw, status, reason); err != nil {
-		return err
+		return outcome, err
 	}
-	return tx.Commit(ctx)
+	outcome.applied, outcome.reason = status == "applied", displayReason(reason)
+	return outcome, tx.Commit(ctx)
 }
 
 // A receipt retained as unroutable in the control store stays there; schema fixes cannot infer its owner.
-func (store *Store) writeUnroutable(ctx context.Context, chunk IngestChunk, raw json.RawMessage, cause error) (err error) {
+func (store *Store) writeUnroutable(ctx context.Context, chunk IngestChunk, raw json.RawMessage, cause error) (outcome recordOutcome, err error) {
 	ctx, cancel := context.WithTimeout(ctx, store.writeTimeout)
 	defer cancel()
+	category, field := rejectReason(cause)
+	if category == "" {
+		category, field = "invalid_value", "identity"
+	}
+	outcome = recordOutcome{raw: raw, reason: failedReason(category, field)}
 	tx, err := store.beginWriteMutation(ctx)
 	if err != nil {
-		return err
+		return outcome, err
 	}
 	defer func() {
 		if cleanupErr := rollbackTransaction(ctx, tx); cleanupErr != nil {
@@ -270,25 +291,21 @@ func (store *Store) writeUnroutable(ctx context.Context, chunk IngestChunk, raw 
 	}()
 	// An identical retry can overlap before the first retained outcome exists.
 	if _, err = tx.Exec(ctx, "SELECT pg_advisory_xact_lock(4031, $1)", ingestEndpoints[chunk.Endpoint].lock); err != nil {
-		return err
+		return outcome, err
 	}
 	_, exists, err := handledInputStatus(ctx, tx, chunk, raw)
 	if err != nil {
-		return err
+		return outcome, err
 	}
 	if !exists {
-		category, field := rejectReason(cause)
-		if category == "" {
-			category, field = "invalid_value", "identity"
-		}
 		if err = writeReject(ctx, tx, chunk, rejectedRecord{raw, ValidationError{Code: ValidationCode(category), Field: field}}); err != nil {
-			return err
+			return outcome, err
 		}
 		if err = insertHandledInput(ctx, tx, chunk, raw, "retained", "unroutable_identity"); err != nil {
-			return err
+			return outcome, err
 		}
 	}
-	return tx.Commit(ctx)
+	return outcome, tx.Commit(ctx)
 }
 
 func inputHash(chunk IngestChunk) []byte {
@@ -322,32 +339,32 @@ func handledInputStatus(ctx context.Context, tx pgx.Tx, chunk IngestChunk, raw [
 }
 
 // Retried retained payloads never create duplicate reject records; only successful mapping advances the ledger.
-func retryRetainedInput(ctx context.Context, tx pgx.Tx, store *Store, chunk IngestChunk, raw json.RawMessage) error {
+func retryRetainedInput(ctx context.Context, tx pgx.Tx, store *Store, chunk IngestChunk, raw json.RawMessage) (bool, string, error) {
 	applyTx, err := tx.Begin(ctx)
 	if err != nil {
-		return err
+		return false, "", err
 	}
 	if err := store.writeSourceRecord(ctx, applyTx, chunk, raw); err != nil {
 		if cleanupErr := rollbackTransaction(ctx, applyTx); cleanupErr != nil {
-			return errors.Join(err, cleanupErr)
+			return false, "", errors.Join(err, cleanupErr)
 		}
-		if category, _ := rejectReason(err); category != "" {
-			return nil
+		if category, field := rejectReason(err); category != "" {
+			return false, failedReason(category, field), nil
 		}
-		return err
+		return false, "", err
 	}
 	if err := applyTx.Commit(ctx); err != nil {
-		return err
+		return false, "", err
 	}
 	tag, err := tx.Exec(ctx, `UPDATE handled_inputs SET status='applied', reason=NULL
 		WHERE endpoint=$1 AND input_hash=$2 AND status='retained'`, string(chunk.Endpoint), inputHash(chunk))
 	if err != nil {
-		return err
+		return false, "", err
 	}
 	if tag.RowsAffected() != 1 {
-		return errors.New("retained handled input transition lost")
+		return false, "", errors.New("retained handled input transition lost")
 	}
-	return nil
+	return true, "", nil
 }
 
 func insertHandledInput(ctx context.Context, tx pgx.Tx, chunk IngestChunk, raw []byte, status, reason string) error {

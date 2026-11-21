@@ -61,6 +61,9 @@ var shardRepairSchema string
 //go:embed migrations/014_receipt_binding.sql
 var receiptBindingSchema string
 
+//go:embed migrations/015_failed_messages.sql
+var failedMessagesSchema string
+
 const currentSchemaVersion = 14
 
 const schemaHistoryQuery = `SELECT COALESCE(max(version), 0), count(*),
@@ -209,6 +212,9 @@ func openStore(ctx context.Context, cfg Config, logger *slog.Logger, identity st
 	if err == nil && identity.role == "control" {
 		err = grantReceiptBindingPrivileges(ctx, admin, store.write)
 	}
+	if err == nil && identity.role != "shard" {
+		err = grantFailedMessagePrivileges(ctx, admin, store.write)
+	}
 	if err == nil {
 		store.read, err = connect(writerURL, cfg.DBReadMaxConns)
 	}
@@ -242,6 +248,30 @@ func grantReceiptBindingPrivileges(ctx context.Context, admin, writer *pgxpool.P
 	}
 	_, err := admin.Exec(ctx, "GRANT SELECT, INSERT ON receipt_bindings TO "+pgx.Identifier{role}.Sanitize())
 	return err
+}
+
+// Concurrent GRANTs on one table can fail with "tuple concurrently updated"; the migration lock serializes them.
+func grantFailedMessagePrivileges(ctx context.Context, admin, writer *pgxpool.Pool) (err error) {
+	var role string
+	if err := writer.QueryRow(ctx, "SELECT current_user").Scan(&role); err != nil {
+		return err
+	}
+	tx, err := admin.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if cleanupErr := rollbackTransaction(ctx, tx); cleanupErr != nil {
+			err = errors.Join(err, cleanupErr)
+		}
+	}()
+	if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock(4031, 0)"); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, "GRANT SELECT, INSERT, UPDATE ON failed_messages TO "+pgx.Identifier{role}.Sanitize()); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
 }
 
 func openPool(ctx context.Context, address string, maximum int, logger *slog.Logger) (*pgxpool.Pool, error) {
@@ -355,6 +385,9 @@ func (store *Store) migrate(ctx context.Context, admin *pgxpool.Pool, bootstrap 
 	// Repair metadata must not change the canonical version required to recover an offline shard.
 	if identity.role == "control" || identity.role == "" {
 		if _, err := tx.Exec(ctx, shardRepairSchema); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, failedMessagesSchema); err != nil {
 			return err
 		}
 	}

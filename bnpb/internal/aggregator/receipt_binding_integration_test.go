@@ -191,10 +191,10 @@ func TestReceiptBindingIntegrationProtectsLegacyOutcomes(t *testing.T) {
 			seed := receiptBindingFixture(t, 0)
 			if tc.destination == -1 {
 				seed = receiptBindingFixture(t, 3)
-				if err := store.writeUnroutable(ctx, seed, seed.Records[0], errors.New("legacy unroutable identity")); err != nil {
+				if _, err := store.writeUnroutable(ctx, seed, seed.Records[0], errors.New("legacy unroutable identity")); err != nil {
 					t.Fatal(err)
 				}
-			} else if err := store.shards[tc.destination].writeShardInput(ctx, seed, seed.Records[0]); err != nil {
+			} else if _, err := store.shards[tc.destination].writeShardInput(ctx, seed, seed.Records[0]); err != nil {
 				t.Fatal(err)
 			}
 			before := receiptEffectCounts(t, store)
