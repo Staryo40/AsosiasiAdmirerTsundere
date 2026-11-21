@@ -157,6 +157,8 @@ Platform-wide conventions apply to every service below (see [Shared platform beh
 | `POST /auth/refresh` | none | Rotate a refresh token for a new pair |
 | `GET /v1/hazards` | Bearer token | List hazards, filtered and paginated |
 | `GET /v1/hazards/{hazard_id}` | Bearer token | One hazard |
+| `GET /v1/ops/failed-messages` | Bearer token, `ops` role | Failed messages with their payloads |
+| `POST /v1/ops/failed-messages/replay` | Bearer token, `ops` role | Process parked records again |
 | `GET /health` / `GET /ready` | none | Liveness / dependency readiness |
 
 **`POST /auth/login`** — body `{"client_id":"...","client_secret":"..."}`, both required non-empty. Forwards to Auth's `/internal/auth/login`. Success `200`: `{"access_token","token_type":"Bearer","expires_in","refresh_token","refresh_expires_in"}`, with `Cache-Control: no-store`. Request body capped at 16 KiB; unknown or trailing JSON fields are rejected.
@@ -179,6 +181,15 @@ Only `BMKG/SEISMIC`, `PVMBG/VOLCANIC`, `SATELIT/WILDFIRE`, and `SENSOR_PANTAI/CO
 
 **`GET /v1/hazards/{hazard_id}`** — only `view` is accepted (same enum/role rules as list). `hazard_id` empty or >256 chars → `400`. Not-found and most upstream errors are passed through verbatim from the Aggregator (see below); if the Aggregator's response body isn't valid JSON, the API answers `503 dependency_unavailable` instead of passing a broken body through.
 
+**`GET /v1/ops/failed-messages`** and **`POST /v1/ops/failed-messages/replay`** — only a token with `role=ops` passes; `media` and `field` get `403 forbidden` before anything reaches the Aggregator. The list accepts `source`, `limit` (1–20, default 20) and `cursor`, and forwards to the Aggregator's `GET /internal/dlq/messages`. Each item carries the message metadata plus `payload_base64`, `payload_bytes` and `payload_truncated`.
+
+Replay takes a JSON body, `{}` or `{"source":"PVMBG"}`, and forwards to `POST /internal/dlq/replay`. Parked records are re-ingested in `source_ref_id` order with their original input identity, so a record is applied at most once. A call stops starting new rows after 3 seconds. When the response has `"remaining": true`, send again with `{"continue": "<continue value>"}` to finish the same pass. The response counts `attempted`, `recovered`, `still_parked` and `skipped`. Aggregator errors are not passed through on these routes: a rejected request is `400`, anything else is `503 dependency_unavailable`.
+
+```bash
+curl -s -H "Authorization: Bearer $OPS_TOKEN" "$API/v1/ops/failed-messages?source=PVMBG" | jq '.items[] | {message_id, reason, status, attempts}'
+curl -s -X POST -H "Authorization: Bearer $OPS_TOKEN" -H 'Content-Type: application/json' -d '{"source":"PVMBG"}' "$API/v1/ops/failed-messages/replay"
+```
+
 **Response shapes** — `view=full` passes the Aggregator's record through after re-validating it:
 ```json
 {"items": [{"hazard_id":"...","source":"BMKG","source_ref_id":"...","hazard_type":"SEISMIC","severity":"AWAS","area_name":"...","latitude":0.0,"longitude":0.0,"occurred_at":"...","ingested_at":"...","attributes":{}}], "next_cursor": "opaque-or-null", "sources": {}, "as_of": "..."}
@@ -196,7 +207,7 @@ Only `BMKG/SEISMIC`, `PVMBG/VOLCANIC`, `SATELIT/WILDFIRE`, and `SENSOR_PANTAI/CO
 | `invalid_token` | 401 | Malformed header, or the token is inactive per Auth |
 | `invalid_credentials` | 401 | Login: wrong client id/secret |
 | `invalid_refresh_token` | 401 | Refresh: invalid/expired refresh token |
-| `forbidden` | 403 | `role=media` + `view=full` |
+| `forbidden` | 403 | `role=media` + `view=full`, or a non-`ops` role on `/v1/ops/*` |
 | `dependency_unavailable` | 503 | Auth or Aggregator unreachable, or returned something the API can't trust (invalid JSON, inconsistent shape) |
 | passthrough | 400/404/429/503 | The Aggregator itself returned one of these with a valid JSON body — forwarded verbatim, unchanged |
 

@@ -145,7 +145,7 @@ func TestUnprocessedPagesSatisfyTheAuditProxy(t *testing.T) {
 	cfg.DBReadTimeout = 2 * time.Second
 	cfg.Audit.UnprocessedToken = "metadata-token-" + rand.Text()
 	mux := http.NewServeMux()
-	registerDLQRoutes(mux, store, cfg, 10*time.Second)
+	registerDLQRoutes(mux, store, cfg, 10*time.Second, nil)
 	owner := httptest.NewServer(mux)
 	t.Cleanup(owner.Close)
 

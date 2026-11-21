@@ -449,6 +449,104 @@ paths:
           $ref: '#/components/responses/AdmissionLimited'
         '503':
           $ref: '#/components/responses/ReadUnavailable'
+  /internal/dlq/unprocessed:
+    get:
+      operationId: dlqUnprocessed
+      summary: Failed-message metadata for the Audit unprocessed proxy
+      description: >-
+        Served by every Aggregator from the control store when
+        BNPB_UNPROCESSED_API_TOKEN is set. Lists open rows only, ascending by
+        received_at then message_id; resolved messages never appear. Reasons
+        name BNPB codes and fields, never source values or payloads.
+      security:
+        - UnprocessedBearer: []
+      parameters:
+        - name: source
+          in: query
+          schema:
+            $ref: './schemas/hazard-event.schema.json#/properties/source'
+        - $ref: '#/components/parameters/AuditLimit'
+        - $ref: '#/components/parameters/AuditCursor'
+      responses:
+        '200':
+          description: One page of open failed messages.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuditUnprocessed'
+        '400':
+          $ref: '#/components/responses/AuditInvalidQuery'
+        '401':
+          $ref: '#/components/responses/AuditMissingCredential'
+        '403':
+          $ref: '#/components/responses/AuditInvalidCredential'
+        '503':
+          $ref: '#/components/responses/AuditUnavailable'
+  /internal/dlq/messages:
+    get:
+      operationId: dlqMessages
+      summary: Failed messages with their payloads, for Internal Ops
+      description: >-
+        Same order and cursor as /internal/dlq/unprocessed, plus the stored
+        payload in base64. At most 20 per page because a payload can be 1 MiB.
+        The Client-Facing API exposes it only to the ops role.
+      parameters:
+        - name: source
+          in: query
+          schema:
+            $ref: './schemas/hazard-event.schema.json#/properties/source'
+        - name: limit
+          in: query
+          schema: {type: integer, minimum: 1, maximum: 20, default: 20}
+        - $ref: '#/components/parameters/AuditCursor'
+      responses:
+        '200':
+          description: One page of open failed messages with payloads.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FailedMessages'
+        '400':
+          $ref: '#/components/responses/AuditInvalidQuery'
+        '401':
+          $ref: '#/components/responses/MissingCredential'
+        '403':
+          $ref: '#/components/responses/InvalidCredential'
+        '503':
+          $ref: '#/components/responses/ReadUnavailable'
+  /internal/dlq/replay:
+    post:
+      operationId: dlqReplay
+      summary: Process parked records again through normal ingest
+      description: >-
+        Runs on the poll owner; a follower forwards the request once. Takes
+        parked record rows in endpoint, source_ref_id, source time, received
+        time order and re-ingests each with its original input identity and
+        bytes, so a record is never applied twice. Stops starting new rows
+        after 3 seconds; when remaining is true, call again with continue to
+        resume the same pass. Unreadable responses and payloads cut at 1 MiB
+        are not replayed.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReplayRequest'
+      responses:
+        '200':
+          description: Counts for this call of the pass.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReplayResult'
+        '400':
+          $ref: '#/components/responses/ReadError'
+        '401':
+          $ref: '#/components/responses/MissingCredential'
+        '403':
+          $ref: '#/components/responses/InvalidCredential'
+        '503':
+          $ref: '#/components/responses/ReadUnavailable'
 components:
   securitySchemes:
     InternalKey:
@@ -466,6 +564,10 @@ components:
       type: http
       scheme: bearer
       description: Dedicated catalog token; separate from Audit and internal keys.
+    UnprocessedBearer:
+      type: http
+      scheme: bearer
+      description: BNPB_UNPROCESSED_API_TOKEN, used by the Audit unprocessed proxy only.
   parameters:
     CorrelationId:
       name: X-Correlation-ID
@@ -837,6 +939,58 @@ components:
               status: {type: string, enum: [retrying, parked]}
         next_cursor:
           anyOf: [{type: string, maxLength: 4096}, {type: 'null'}]
+    FailedMessages:
+      type: object
+      required: [items, next_cursor]
+      additionalProperties: false
+      properties:
+        items:
+          type: array
+          maxItems: 20
+          items:
+            type: object
+            additionalProperties: false
+            required: [message_id, source, endpoint, kind, source_ref_id, received_at, last_seen_at, reason,
+              retryable, attempts, status, payload_base64, payload_bytes, payload_truncated]
+            properties:
+              message_id: {type: string, minLength: 1}
+              source:
+                $ref: './schemas/hazard-event.schema.json#/properties/source'
+              endpoint: {type: string, enum: [seismic, warnings, volcanic, coastal]}
+              kind: {type: string, enum: [record, response]}
+              source_ref_id: {type: [string, 'null']}
+              received_at: {$ref: '#/components/schemas/UtcTimestamp'}
+              last_seen_at: {$ref: '#/components/schemas/UtcTimestamp'}
+              reason: {type: string, minLength: 1}
+              retryable: {type: boolean}
+              attempts: {type: integer, minimum: 1}
+              status: {type: string, enum: [retrying, parked]}
+              payload_base64: {type: string, contentEncoding: base64}
+              payload_bytes: {type: integer, minimum: 0}
+              payload_truncated: {type: boolean}
+        next_cursor:
+          anyOf: [{type: string, maxLength: 4096}, {type: 'null'}]
+    ReplayRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        source:
+          $ref: './schemas/hazard-event.schema.json#/properties/source'
+        continue:
+          type: string
+          format: date-time
+          description: The continue value of the previous call in the same pass.
+    ReplayResult:
+      type: object
+      additionalProperties: false
+      required: [attempted, recovered, still_parked, skipped, remaining, continue]
+      properties:
+        attempted: {type: integer, minimum: 0}
+        recovered: {type: integer, minimum: 0}
+        still_parked: {type: integer, minimum: 0}
+        skipped: {type: integer, minimum: 0}
+        remaining: {type: boolean}
+        continue: {type: [string, 'null']}
     CatalogBatch:
       type: object
       required: [input_id, input_offset, received_at, records]

@@ -26,5 +26,8 @@ REVOKE ALL ON failed_messages FROM PUBLIC;
 
 CREATE INDEX IF NOT EXISTS failed_messages_open
     ON failed_messages (received_at, message_id COLLATE "C") WHERE status <> 'resolved';
+-- Marks rows a replay pass already tried, so a pass split across calls never repeats or skips a row.
+ALTER TABLE failed_messages ADD COLUMN IF NOT EXISTS replay_round timestamptz;
+
 CREATE INDEX IF NOT EXISTS failed_messages_replay
     ON failed_messages (endpoint, source_ref_id COLLATE "C", source_timestamp, received_at) WHERE status = 'parked';

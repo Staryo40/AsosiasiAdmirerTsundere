@@ -180,6 +180,95 @@ func (store *Store) noteShardFailure(ctx context.Context, chunk IngestChunk, raw
 	_ = writeFailedRecord(ctx, store.write, chunk, 0, raw, failedReason("shard_unavailable", fmt.Sprintf("shard-%d", shardID)), true)
 }
 
+const replayBatch = 500
+
+type replayResult struct {
+	Attempted   int     `json:"attempted"`
+	Recovered   int     `json:"recovered"`
+	StillParked int     `json:"still_parked"`
+	Skipped     int     `json:"skipped"`
+	Remaining   bool    `json:"remaining"`
+	Continue    *string `json:"continue"`
+}
+
+type replayCandidate struct {
+	key              []byte
+	endpoint         Endpoint
+	inputID          string
+	inputOffset      int
+	receivedAt       time.Time
+	payload          []byte
+	payloadTruncated bool
+}
+
+// One pass tries every parked record once, in source_ref_id then source-time order, stopping early at the budget.
+func (store *Store) replayParked(ctx context.Context, source Source, round time.Time, budget time.Duration) (replayResult, error) {
+	deadline := time.Now().Add(budget)
+	result := replayResult{}
+	for {
+		batch, err := store.nextReplayBatch(ctx, source, round)
+		if err != nil || len(batch) == 0 {
+			return result, err
+		}
+		for _, candidate := range batch {
+			if time.Now().After(deadline) {
+				token := round.UTC().Format(time.RFC3339Nano)
+				result.Remaining, result.Continue = true, &token
+				return result, nil
+			}
+			if err := store.replayOne(ctx, candidate, round, &result); err != nil {
+				return result, err
+			}
+		}
+	}
+}
+
+func (store *Store) nextReplayBatch(ctx context.Context, source Source, round time.Time) ([]replayCandidate, error) {
+	rows, err := store.read.Query(ctx, `SELECT message_key, endpoint, input_id, input_offset, received_at, payload, payload_truncated
+        FROM failed_messages
+        WHERE status = 'parked' AND kind = 'record' AND ($1 = '' OR source = $1) AND replay_round IS DISTINCT FROM $2
+        ORDER BY endpoint, source_ref_id COLLATE "C" NULLS LAST, source_timestamp NULLS LAST, received_at, message_id COLLATE "C"
+        LIMIT $3`, string(source), round, replayBatch)
+	if err != nil {
+		return nil, err
+	}
+	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (replayCandidate, error) {
+		var candidate replayCandidate
+		var endpoint string
+		err := row.Scan(&candidate.key, &endpoint, &candidate.inputID, &candidate.inputOffset, &candidate.receivedAt,
+			&candidate.payload, &candidate.payloadTruncated)
+		candidate.endpoint = Endpoint(endpoint)
+		return candidate, err
+	})
+}
+
+// Replays the original input identity, so ingest finds the retained outcome and can never apply it twice.
+func (store *Store) replayOne(ctx context.Context, candidate replayCandidate, round time.Time, result *replayResult) error {
+	if _, err := store.write.Exec(ctx, "UPDATE failed_messages SET replay_round = $2 WHERE message_key = $1", candidate.key, round); err != nil {
+		return err
+	}
+	if candidate.payloadTruncated {
+		result.Skipped++
+		return nil
+	}
+	chunk := IngestChunk{Endpoint: candidate.endpoint, Records: []json.RawMessage{candidate.payload},
+		ReceivedAt: candidate.receivedAt, InputID: candidate.inputID, InputOffset: candidate.inputOffset}
+	if err := store.ingestChunk(ctx, chunk, checkpointPolicy{omitPollState: true}); err != nil {
+		return err
+	}
+	var status string
+	if err := store.read.QueryRow(ctx, "SELECT status FROM failed_messages WHERE message_key = $1", candidate.key).Scan(&status); err != nil {
+		return err
+	}
+	result.Attempted++
+	if status == "resolved" {
+		result.Recovered++
+	} else {
+		result.StillParked++
+	}
+	return nil
+}
+
 type failedCursor struct {
 	ReceivedAt time.Time `json:"r"`
 	MessageID  string    `json:"m"`

@@ -106,7 +106,7 @@ func TestUnprocessedRouteChecksTokenAndQuery(t *testing.T) {
 	cfg := Config{DBReadTimeout: time.Second}
 	cfg.Audit.UnprocessedToken = "metadata-token"
 	mux := http.NewServeMux()
-	registerDLQRoutes(mux, nil, cfg, 10*time.Second)
+	registerDLQRoutes(mux, nil, cfg, 10*time.Second, nil)
 	for _, test := range []struct {
 		query, header string
 		want          int
@@ -134,7 +134,7 @@ func TestUnprocessedRouteChecksTokenAndQuery(t *testing.T) {
 
 func TestUnprocessedRouteIsAbsentWithoutAToken(t *testing.T) {
 	mux := http.NewServeMux()
-	registerDLQRoutes(mux, nil, Config{}, 10*time.Second)
+	registerDLQRoutes(mux, nil, Config{}, 10*time.Second, nil)
 	recorder := httptest.NewRecorder()
 	mux.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/internal/dlq/unprocessed", nil))
 	if recorder.Code != http.StatusNotFound {
