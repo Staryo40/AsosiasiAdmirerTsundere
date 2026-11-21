@@ -39,17 +39,19 @@ type authIntrospection struct {
 }
 
 type publicService struct {
-	config    clientConfig
-	client    *http.Client
-	logger    *slog.Logger
-	admission *admissionController
+	config       clientConfig
+	client       *http.Client
+	logger       *slog.Logger
+	admission    *admissionController
+	fieldReports reportPublisher
 }
 
 func newPublicService(config clientConfig, client *http.Client, logger *slog.Logger) (*publicService, error) {
 	if client == nil || logger == nil {
 		return nil, errors.New("HTTP client and logger are required")
 	}
-	return &publicService{config: config, client: client, logger: logger, admission: newAdmissionController()}, nil
+	return &publicService{config: config, client: client, logger: logger, admission: newAdmissionController(),
+		fieldReports: unconfiguredPublisher{}}, nil
 }
 
 func (service *publicService) authCall(ctx context.Context, path string, input, output any) (int, error) {

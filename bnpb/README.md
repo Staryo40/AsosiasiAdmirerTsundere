@@ -159,6 +159,7 @@ Platform-wide conventions apply to every service below (see [Shared platform beh
 | `GET /v1/hazards/{hazard_id}` | Bearer token | One hazard |
 | `GET /v1/ops/failed-messages` | Bearer token, `ops` role | Failed messages with their payloads |
 | `POST /v1/ops/failed-messages/replay` | Bearer token, `ops` role | Process parked records again |
+| `POST /v1/field-reports` | Bearer token, `field` role | Submit a field report; `202` once durably queued |
 | `GET /health` / `GET /ready` | none | Liveness / dependency readiness |
 
 **`POST /auth/login`** — body `{"client_id":"...","client_secret":"..."}`, both required non-empty. Forwards to Auth's `/internal/auth/login`. Success `200`: `{"access_token","token_type":"Bearer","expires_in","refresh_token","refresh_expires_in"}`, with `Cache-Control: no-store`. Request body capped at 16 KiB; unknown or trailing JSON fields are rejected.
@@ -189,6 +190,15 @@ Replay takes a JSON body, `{}` or `{"source":"PVMBG"}`, and forwards to `POST /i
 curl -s -H "Authorization: Bearer $OPS_TOKEN" "$API/v1/ops/failed-messages?source=PVMBG" | jq '.items[] | {message_id, reason, status, attempts}'
 curl -s -X POST -H "Authorization: Bearer $OPS_TOKEN" -H 'Content-Type: application/json' -d '{"source":"PVMBG"}' "$API/v1/ops/failed-messages/replay"
 ```
+
+**`POST /v1/field-reports`** — only `role=field`; `media` and `ops` get `403 forbidden`. Body, with unknown or trailing fields rejected:
+
+```json
+{"report_id":"fr-2026-11-21-0001","reported_at":"2026-11-21T03:00:00Z","latitude":-2.51,"longitude":113.80,
+ "hazard_type":"WILDFIRE","description":"Api terlihat di sisi timur desa","related_hazard_id":null}
+```
+
+`report_id` is 1–128 of `[A-Za-z0-9._-]` and is the idempotency key, scoped to the sending client. `reported_at` is RFC 3339 and not in the future. `hazard_type` is `SEISMIC`, `VOLCANIC`, `WILDFIRE`, `COASTAL` or `OTHER`. `description` is 1–2000 characters, and `related_hazard_id` is optional. The API publishes the report as a persistent message to the `field.reports` quorum queue and answers `202 {"report_id","accepted_at"}` only after RabbitMQ confirms it. If the broker is unreachable or does not confirm within 2 seconds, the answer is `503 intake_unavailable` with `Retry-After`, and nothing is promised; retry with the same `report_id`. A retry of a report that was in fact queued is stored once (see [Field intake](#field-intake-internal-8088)).
 
 **Response shapes** — `view=full` passes the Aggregator's record through after re-validating it:
 ```json
@@ -322,6 +332,19 @@ Each consumer exposes only two routes, both unauthenticated (internal network on
 | consumer-3 (portal feed) | `{"feed_entries": <int>, "messages_seen": <int>}` |
 
 `GET /health` behaves the same as every other service. There is no write endpoint anywhere — consumers are driven entirely by the broker, never by direct HTTP calls.
+
+### Field intake (internal, `:8088`)
+
+`field-intake` consumes the `field.reports` quorum queue and stores each report in its own SQLite (`BNPB_FIELD_INTAKE_DB_PATH`). It acknowledges a delivery only after the SQLite commit, so a crash before the ack makes the broker redeliver it. The primary key `(client_id, report_id)` turns that redelivery, or a client retry, into a counted duplicate instead of a second report.
+
+| Case | What is stored |
+| --- | --- |
+| First copy of a report | One row in `field_reports` |
+| Same report again (redelivery or client retry; `accepted_at` may differ) | Nothing new; `deliveries` on the row increases |
+| Same `(client_id, report_id)` with different content | The first copy stays; the new one is kept in `report_conflicts` |
+| Unreadable or oversized message | A row in `rejected_reports`, then acked so it cannot block the queue |
+
+`GET /internal/field-reports?after=<seq>&limit=<1-1000>` needs `X-BNPB-Internal-Key` set to `BNPB_FIELD_INTAKE_INTERNAL_KEY`. It returns `{"items":[{seq, client_id, report_id, message_id, hazard_type, reported_at, accepted_at, stored_at, deliveries}], "next_after", "stored", "conflicts", "rejected"}`, for comparing stored reports with the 202 answers a client received.
 
 ### Shared platform behavior
 

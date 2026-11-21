@@ -19,6 +19,8 @@ type clientConfig struct {
 	aggregatorBaseURL *url.URL
 	authInternalKey   string
 	aggregatorKey     string
+	// Optional: without a broker identity POST /v1/field-reports answers 503.
+	brokerUser, brokerPassword, brokerAddress string
 }
 
 func loadClientConfig() (clientConfig, error) {
@@ -42,10 +44,20 @@ func loadClientConfigFrom(lookup func(string) (string, bool)) (clientConfig, err
 	if err != nil {
 		return clientConfig{}, err
 	}
-	return clientConfig{
+	config := clientConfig{
 		authBaseURL: authURL, aggregatorBaseURL: aggregatorURL,
 		authInternalKey: authKey, aggregatorKey: aggregatorKey,
-	}, nil
+	}
+	config.brokerUser, _ = lookup("BNPB_API_RABBITMQ_USER")
+	config.brokerPassword, _ = lookup("BNPB_API_RABBITMQ_PASSWORD")
+	if (config.brokerUser == "") != (config.brokerPassword == "") {
+		return clientConfig{}, fmt.Errorf("BNPB_API_RABBITMQ_USER and BNPB_API_RABBITMQ_PASSWORD: configure both or neither")
+	}
+	config.brokerAddress = "rabbitmq:5672"
+	if address, exists := lookup("BNPB_RABBITMQ_ADDR"); exists && address != "" {
+		config.brokerAddress = address
+	}
+	return config, nil
 }
 
 func baseURLSetting(lookup func(string) (string, bool), name, fallback string) (*url.URL, error) {
