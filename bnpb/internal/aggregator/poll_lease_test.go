@@ -181,6 +181,12 @@ func TestPollLeaseRecreatedObjectGetsANewUID(t *testing.T) {
 	}
 }
 
+func TestStalePollLeaseKeepsItsCategoryThroughStoreErrors(t *testing.T) {
+	if got := pollCategory(storeError("commit ingest", storeError("begin ingest", errStalePollLease))); got != "lease_lost" {
+		t.Fatalf("category %q, want lease_lost", got)
+	}
+}
+
 func TestPollLeaseConfigOnlyForASingleStore(t *testing.T) {
 	values := map[string]string{"BNPB_AGGREGATOR_LEASE_NAME": "aggregator-poller",
 		"BNPB_AGGREGATOR_LEASE_NAMESPACE": "bnpb", "BNPB_AGGREGATOR_IDENTITY": "aggregator-0"}

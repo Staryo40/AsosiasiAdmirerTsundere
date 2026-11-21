@@ -173,7 +173,7 @@ Setelah ada izin deploy dan fault yang eksplisit, simpan artefak terpisah untuk:
 
 ## Milestone 2: P3 dan P4
 
-Skenario M2 ada di `testing/M2-P3/` (pesan gagal dan laporan lapangan) dan `testing/M2-P4/` (Feed Satelit).
+Skenario M2 ada di `testing/M2-P2/` (satu poller Aggregator), `testing/M2-P3/` (pesan gagal dan laporan lapangan) dan `testing/M2-P4/` (Feed Satelit).
 Setiap skenario adalah satu `run.py` dengan `--target compose|k8s`; target hanya mengubah cara pod dihentikan
 dan diperiksa. Kredensial dibaca dari `bnpb/.env` dan `pvmbg/.env` (Compose) atau `k8s/secrets.env` dan
 `k8s/config/*.env` (Kubernetes). Hasil ditulis ke `testing/results/M2-P3/` dan `testing/results/M2-P4/`.
@@ -183,6 +183,7 @@ Pada Kubernetes, PVMBG, field-intake, dan Prometheus dijangkau lewat port-forwar
 ```text
 kubectl -n sistem-informasi-kebencanaan-bnpb port-forward svc/pvmbg 8082 &
 kubectl -n sistem-informasi-kebencanaan-bnpb port-forward svc/field-intake 8088 &
+kubectl -n sistem-informasi-kebencanaan-bnpb port-forward svc/bmkg 8081 &
 ```
 
 URL dapat diganti dengan `API_BASE`, `AGGREGATOR_BASE`, `PVMBG_BASE`, `INTAKE_BASE`, `PROMETHEUS_BASE`, atau
@@ -190,6 +191,9 @@ URL dapat diganti dengan `API_BASE`, `AGGREGATOR_BASE`, `PVMBG_BASE`, `INTAKE_BA
 
 | Skenario | Perintah |
 | --- | --- |
+| T10 satu poller Aggregator (k8s) | `python testing/M2-P2/T10-single-poller/run.py --target k8s` |
+| T11 failover poller (k8s) | `python testing/M2-P2/T11-failover/run.py --target k8s` |
+| T12 term lease setelah clock skew/freeze (k8s) | `python testing/M2-P2/T12-lease-terms/run.py --target k8s --since <ISO>` |
 | T01 kebijakan skema PVMBG | `python testing/M2-P3/T01-schema-policy/run.py` |
 | T02 payload rusak | `python testing/M2-P3/T02-malformed-payloads/run.py` |
 | T03 adaptasi dan replay | `python testing/M2-P3/T03-replay/run.py park`, ubah alias dan restart Aggregator, lalu `replay` dan `verify` |

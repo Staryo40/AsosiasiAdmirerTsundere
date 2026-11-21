@@ -56,7 +56,7 @@ Simplified file layout:
 │   └── secrets.env.example # Secret keys (fill secrets.env locally; not tracked)
 ├── testing/                # acceptance suites (Python), per Problem
 │   ├── P01/ P02/ P03/ P04/ P05/
-│   ├── M2-P3/ M2-P4/       # Milestone 2: failed messages, field reports, Feed Satelit
+│   ├── M2-P2/ M2-P3/ M2-P4/ # Milestone 2: one poller, failed messages, field reports, Feed Satelit
 │   └── common/             # shared test helpers
 ├── docs/architecture.svg   # diagram used above
 ├── KUBERNETES-DEPLOYMENT.md # step-by-step k3s install and deploy
@@ -884,12 +884,12 @@ automated scenario passed.
 
 ## Milestone 2 Scenarios (P3 and P4)
 
-These scripts produce the evidence for Milestone 2 Problem 3 (failed messages,
-schema changes, field reports) and Problem 4 (Feed Satelit). Each scenario is
-one `run.py` under `testing/M2-P3/` or `testing/M2-P4/`. Each one prints a line
+These scripts produce the evidence for Milestone 2 Problem 2 (one Aggregator
+poller, failover, fencing), Problem 3 (failed messages, schema changes, field
+reports) and Problem 4 (Feed Satelit). Each scenario is one `run.py` under
+`testing/M2-P2/`, `testing/M2-P3/` or `testing/M2-P4/`. Each one prints a line
 per check, ends with `PASS` or `FAIL`, and exits with `0` or `1`. It writes a
-JSON evidence file to `testing/results/M2-P3/` or `testing/results/M2-P4/`,
-and prints its path. They need Python 3.11+, which parses the nanosecond
+JSON evidence file to `testing/results/<suite>/` and prints its path. They need Python 3.11+, which parses the nanosecond
 timestamps the services return, and no extra packages.
 
 ### Where they run
@@ -913,11 +913,49 @@ second terminal:
 ```text
 kubectl -n sistem-informasi-kebencanaan-bnpb port-forward svc/pvmbg 8082
 kubectl -n sistem-informasi-kebencanaan-bnpb port-forward svc/field-intake 8088
+kubectl -n sistem-informasi-kebencanaan-bnpb port-forward svc/bmkg 8081
 ```
 
 Set `M2_TARGET=k8s` and `NODE_IP` to either node's IP, for example
 `192.168.56.10`. Any address can be overridden with `API_BASE`,
-`AGGREGATOR_BASE`, `PVMBG_BASE`, `INTAKE_BASE`, or `PROMETHEUS_BASE`.
+`AGGREGATOR_BASE`, `PVMBG_BASE`, `BMKG_BASE`, `INTAKE_BASE`, or
+`PROMETHEUS_BASE`.
+
+### Problem 2: one Aggregator poller
+
+These run on Kubernetes only; Compose has a single Aggregator. They need
+`BNPB_AGGREGATOR_LEASE_NAME=aggregator-poller`, as in `k8s/config/aggregator.env`.
+
+**T10, single poller.** The script watches the BMKG and PVMBG access logs for
+2 minutes (`--minutes`) and maps each request's `client_ip` to an Aggregator
+pod. It passes when every poll came from the `aggregator-poller` Lease holder,
+the request count fits one poller's interval, exactly one replica reports
+`poll_owner: leader` on `/ready`, and no BMKG or PVMBG hazard is duplicated.
+
+```text
+python testing/M2-P2/T10-single-poller/run.py --target k8s
+```
+
+**T11, failover.** The script kills the Lease holder with no grace period. It
+passes when another replica's first successful poll comes within 60 seconds,
+in its own log and in the mock's access log, and every BMKG event from the
+window is stored exactly once (or parked with a reason).
+
+```text
+python testing/M2-P2/T11-failover/run.py --target k8s
+```
+
+**T12, lease terms after clock skew or a freeze.** Run a Tester Agent
+clock-skew scenario, or freeze the polling VM past 15 seconds and wake it, then
+analyse that window. It reports every lease term, the stale writes the store
+refused (`lease_lost`), and refused claims. It passes when each term had one
+holder and no hazard is duplicated. Pod clocks may be skewed during the run, so
+it does not order pods by time. The ordering guarantee is covered by the
+PostgreSQL test `TestPollFenceTakeoverWaitsForAnInFlightWrite`.
+
+```text
+python testing/M2-P2/T12-lease-terms/run.py --target k8s --since 2026-11-21T10:00:00+07:00
+```
 
 ### Problem 3: failed messages and field reports
 

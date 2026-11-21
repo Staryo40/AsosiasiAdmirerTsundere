@@ -1,4 +1,4 @@
-# Shared helpers for the Milestone 2 evidence scripts in testing/M2-P3 and testing/M2-P4.
+# Shared helpers for the Milestone 2 evidence scripts in testing/M2-P2, testing/M2-P3 and testing/M2-P4.
 from __future__ import annotations
 
 import argparse
@@ -40,6 +40,7 @@ class Target:
         self.aggregator = os.getenv("AGGREGATOR_BASE", f"http://{node}:30083" if k8s else "http://localhost:8083")
         # PVMBG, field-intake and Prometheus are reached through kubectl port-forward on k8s.
         self.pvmbg = os.getenv("PVMBG_BASE", "http://localhost:8082")
+        self.bmkg = os.getenv("BMKG_BASE", "http://localhost:8081")
         self.intake = os.getenv("INTAKE_BASE", "http://localhost:8088")
         self.prometheus = os.getenv("PROMETHEUS_BASE", f"http://{node}:30900" if k8s else "http://localhost:9090")
         self._env: dict[str, str] | None = None
@@ -113,7 +114,32 @@ class Target:
     def satellite_leader(self) -> str:
         if self.name != "k8s":
             return "satellite"
-        return self.kubectl("get", "lease", "satellite-feed", "-o", "jsonpath={.spec.holderIdentity}").strip()
+        return self.lease_holder("satellite-feed")
+
+    def lease_holder(self, lease: str) -> str:
+        return self.kubectl("get", "lease", lease, "-o", "jsonpath={.spec.holderIdentity}", check=False).strip()
+
+    def require_k8s(self) -> None:
+        if self.name != "k8s":
+            raise SystemExit("This scenario needs --target k8s: Compose runs a single Aggregator.")
+
+    def pod_ips(self, component: str) -> dict[str, str]:
+        return {pod["status"]["podIP"]: pod["metadata"]["name"] for pod in self.pods(component) if pod.get("status", {}).get("podIP")}
+
+    def ready(self, pod: str, port: int) -> dict[str, Any]:
+        # Through the API server proxy, so no port-forward per pod is needed.
+        result = self.run("kubectl", "get", "--raw", f"/api/v1/namespaces/{NAMESPACE}/pods/{pod}:{port}/proxy/ready", check=False)
+        try:
+            return json.loads(result.stdout)
+        except ValueError:
+            return {"error": (result.stderr or result.stdout).strip()[:200]}
+
+    def bmkg_events(self, since: datetime) -> list[dict[str, Any]]:
+        stamp = since.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        response = request("GET", f"{self.bmkg}/seismic-events?{urlencode({'since': stamp})}",
+                           headers={"X-BMKG-Key": self.value("BMKG_API_KEY" if self.name == "k8s" else "BNPB_BMKG_API_KEY")})
+        assert_status(response, 200, "BMKG seismic events")
+        return response.json()
 
     def satellite_verify(self, pod: str | None = None) -> dict[str, Any]:
         pod = pod or self.satellite_leader()
@@ -129,17 +155,60 @@ class Target:
         stamp = since.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         if self.name == "k8s":
             names = [pod] if pod else [item["metadata"]["name"] for item in self.pods(component)]
-            text = "".join(self.kubectl("logs", name, f"--since-time={stamp}", check=False) for name in names)
-        else:
-            text = self.run("docker", "compose", "logs", "--no-log-prefix", "--since", stamp, component).stdout
-        records = []
-        for line in text.splitlines():
-            start = line.find("{")
-            if start >= 0:
-                try:
-                    records.append(json.loads(line[start:]))
-                except ValueError:
-                    pass
+            return [record for name in names
+                    for record in parse_log_lines(self.kubectl("logs", name, "--timestamps", f"--since-time={stamp}", check=False), name)]
+        text = self.run("docker", "compose", "logs", "--no-log-prefix", "--timestamps", "--since", stamp, component).stdout
+        return parse_log_lines(text, component)
+
+
+# Each record gains _pod and _time, the runtime's timestamp for the line.
+def parse_log_lines(text: str, pod: str) -> list[dict[str, Any]]:
+    records = []
+    for line in text.splitlines():
+        start = line.find("{")
+        if start < 0:
+            continue
+        try:
+            record = json.loads(line[start:])
+        except ValueError:
+            continue
+        if isinstance(record.get("fields"), dict):
+            record = record["fields"] | record
+        prefix = line[:start].strip().split(" ")[0]
+        try:
+            record["_time"] = parse_time(prefix[:26] + prefix[-1] if len(prefix) > 27 else prefix)
+        except ValueError:
+            record["_time"] = None
+        record["_pod"] = pod
+        records.append(record)
+    return records
+
+
+# Keeps the logs of pods that are killed during a scenario.
+class LogFollower:
+    def __init__(self, target: Target, component: str, since: datetime):
+        self.target, self.component, self.since = target, component, since
+        self.processes: list[tuple[str, subprocess.Popen]] = []
+        stamp = since.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        for pod in target.pods(component):
+            name = pod["metadata"]["name"]
+            process = subprocess.Popen(["kubectl", "-n", NAMESPACE, "logs", "-f", name, "--timestamps", f"--since-time={stamp}"],
+                                       stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+            self.processes.append((name, process))
+
+    def stop(self) -> list[dict[str, Any]]:
+        seen, records = set(), []
+        for name, process in self.processes:
+            process.terminate()
+            text, _ = process.communicate(timeout=10)
+            for record in parse_log_lines(text, name):
+                records.append(record)
+                seen.add((name, json.dumps(record, sort_keys=True, default=str)))
+        for record in self.target.logs(self.component, self.since):
+            key = (record["_pod"], json.dumps(record, sort_keys=True, default=str))
+            if key not in seen:
+                seen.add(key)
+                records.append(record)
         return records
 
 
@@ -233,5 +302,5 @@ def finish(suite: str, test_id: str, target: Target, started: datetime, checks: 
     sys.exit(0 if passed else 1)
 
 
-__all__ = ["HttpResult", "Target", "assert_status", "bearer", "failed_messages", "finish", "hazards", "now", "parse_time",
+__all__ = ["HttpResult", "LogFollower", "Target", "assert_status", "bearer", "failed_messages", "finish", "hazards", "now", "parse_time",
            "parser", "payload_json", "percentile", "request", "wait_for", "write_evidence"]
