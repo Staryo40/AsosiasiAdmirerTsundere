@@ -47,7 +47,7 @@ Simplified file layout:
 ├── pvmbg/                  # Mock PVMBG (Kotlin/Ktor)
 │   └── src/                # main, test
 ├── bnpb/                   # BNPB backend (Go)
-│   ├── cmd/                # aggregator, api, auth, consumer-1/2/3, field-intake, satellite
+│   ├── cmd/                # aggregator, api, auth, consumer-1/2/3, ai-summarizer, field-intake, satellite
 │   ├── internal/           # per-service packages + shared platform/
 │   ├── broker/             # RabbitMQ provisioning
 │   └── contracts/v1/       # OpenAPI contract + schemas
@@ -58,7 +58,7 @@ Simplified file layout:
 ├── testing/                # acceptance suites (Python), per Problem
 │   ├── P01/ P02/ P03/ P04/ P05/
 │   ├── M2-P2/ M2-P3/ M2-P4/ # Milestone 2: one poller, failed messages, field reports, Feed Satelit
-│   ├── M2-bonus/           # Milestone 2 bonus: autoscaling
+│   ├── M2-bonus/           # Milestone 2 bonus: autoscaling, AI isolation
 │   └── common/             # shared test helpers
 ├── docs/m2_architecture.svg   # M2 diagram used above (docs/m1_architecture.svg: M1 report)
 ├── KUBERNETES-DEPLOYMENT.md # step-by-step k3s install and deploy
@@ -304,6 +304,30 @@ then answers `503` on `POST /v1/field-reports`.
 | `BNPB_FIELD_INTAKE_INTERNAL_KEY` | `required` | Key for `GET /internal/field-reports`, sent as `X-BNPB-Internal-Key`; at least 32 bytes. |
 | `BNPB_FIELD_INTAKE_HTTP_ADDR` | `:8088` | `field-intake` listen address. |
 | `BNPB_FIELD_INTAKE_DB_PATH` | `/data/field-intake.db` | `field-intake` SQLite file. |
+
+#### `bnpb/.env`: situation summary
+
+The optional `ai-summarizer` writes a short Indonesian summary of the last hour
+for the dashboard (`docker compose --profile ai up`). `configure_env.py`
+generates its password and key. `broker-init` provisions its queue only when
+both RabbitMQ values are set. The provider keys are yours to add; a provider
+without a key or model is skipped, and with none every summary comes from the
+template.
+
+| Variable | Default | Purpose / constraint |
+| --- | --- | --- |
+| `BNPB_AI_SUMMARIZER_RABBITMQ_USER` | `ai-summarizer` | RabbitMQ user; it reads only `hazard.events.ai-summarizer`. |
+| `BNPB_AI_SUMMARIZER_RABBITMQ_PASSWORD` | `required` | Password for that user. |
+| `BNPB_AI_SUMMARIZER_INTERNAL_KEY` | `required` | Key for the summarizer's `/internal` endpoints, sent by the API as `X-BNPB-Internal-Key`; at least 32 bytes. Without it the API answers `503` on `GET /v1/situation-summary`. |
+| `BNPB_AI_SUMMARIZER_BASE_URL` | `http://ai-summarizer:8090` | Where the API reaches the summarizer. |
+| `BNPB_AI_SUMMARIZER_HTTP_ADDR` | `:8090` | Summarizer listen address. |
+| `BNPB_AI_SUMMARIZER_PROVIDERS` | `anthropic,openrouter,gemini` | Order the providers are tried in. |
+| `BNPB_AI_SUMMARIZER_ANTHROPIC_KEY` / `_MODEL` | empty / `claude-haiku-5-5` | Claude API key and model. |
+| `BNPB_AI_SUMMARIZER_OPENROUTER_KEY` / `_MODEL` | empty | OpenRouter key and model ID. |
+| `BNPB_AI_SUMMARIZER_GEMINI_KEY` / `_MODEL` | empty | Gemini API key and model ID. |
+| `BNPB_AI_SUMMARIZER_INTERVAL` | `60s` | How often a summary may be written. |
+| `BNPB_AI_SUMMARIZER_WINDOW` | `60m` | How far back the summary looks. |
+| `BNPB_AI_SUMMARIZER_FAULT` | empty | Demo fault on the first provider: `slow`, `wrong`, or `down`. |
 
 #### `bnpb/.env`: Feed Satelit
 
@@ -578,8 +602,8 @@ Edit a value in `k8s/config/*.env`, run `kubectl apply -k k8s`, and Kustomize ro
 
 | Service | Address |
 | --- | --- |
-| Client-Facing API | `http://<node-ip>:30080` (`/auth/login`, `/auth/refresh`, `/v1/hazards`, `/v1/hazards/{hazard_id}`, `/v1/coastal/status`, `/v1/ops/failed-messages`, `/v1/ops/failed-messages/replay`, `/v1/field-reports`, `/health`) |
-| field-intake, satellite service | Cluster-internal only: `kubectl port-forward svc/field-intake 8088` and `svc/satellite 8089` |
+| Client-Facing API | `http://<node-ip>:30080` (`/auth/login`, `/auth/refresh`, `/v1/hazards`, `/v1/hazards/{hazard_id}`, `/v1/coastal/status`, `/v1/ops/failed-messages`, `/v1/ops/failed-messages/replay`, `/v1/field-reports`, `/v1/situation-summary`, `/health`) |
+| field-intake, satellite service, ai-summarizer | Cluster-internal only: `kubectl port-forward svc/field-intake 8088`, `svc/satellite 8089`, and `svc/ai-summarizer 8090` |
 | Analytics dashboard (UI) | `http://<node-ip>:30081` |
 | Aggregator (internal read API, Audit API) | `http://<node-ip>:30083` |
 | RabbitMQ management | `kubectl -n sistem-informasi-kebencanaan-bnpb port-forward svc/rabbitmq 15672`, then <http://localhost:15672> |
@@ -1148,6 +1172,58 @@ then only records, for `--minutes`, and skips the error-rate check.
 
 ```text
 python testing/M2-bonus/T13-autoscaling/run.py --target k8s --peak-vus 2000
+```
+
+### Bonus: AI situation summary
+
+`ai-summarizer` is a fourth consumer of `hazard.events` with its own quorum
+queue and SQLite file. It keeps the hazards received in the last 60 minutes.
+Every 60 seconds, if they changed, it builds a digest in code: counts by type,
+severity, and area, plus the 10 most severe events. A model then writes at
+most 120 words of Indonesian from that digest alone. The prompt carries only
+structured fields; area names are cut to 60 characters, and the data block is
+marked as data rather than instructions. A reply is accepted only if it is
+non-empty, within the length limit, not a refusal, and every number in it
+appears in the digest.
+
+Providers are tried in order: Claude (`claude-haiku-5-5`), OpenRouter, then
+Gemini, each with a 10-second limit and 30 seconds for the whole chain. A quota
+or authentication error (401, 402, 403, 429) skips that provider for 10
+minutes; a timeout, server error, or rejected reply skips it for 30 seconds.
+When none answers, the summary is a template built from the same counts and
+labelled as written without AI. An empty hour needs no model at all.
+
+Nothing on the alert path depends on it. `consumer-2` has its own queue, and
+the API waits at most 2 seconds before answering `503` on
+`GET /v1/situation-summary`. The dashboard fetches the summary on its own
+timer and shows its provider, its age, and an *AI* or *Tanpa AI* badge.
+Metrics: `bnpb_summary_requests_total{provider,outcome}` and
+`bnpb_summary_age_seconds`.
+
+Three internal endpoints, all behind `X-BNPB-Internal-Key`, drive the demo
+through `kubectl port-forward svc/ai-summarizer 8090`:
+
+| Endpoint | Effect |
+| --- | --- |
+| `GET /internal/situation-summary` | Latest summary, its provider, and the last attempts. |
+| `POST /internal/summarize` | Writes a summary now. |
+| `POST /internal/fault` with `{"mode":"slow"}`, `"wrong"`, `"down"`, or `""` | Makes the first provider time out, invent numbers, or fail. |
+
+Provider keys go in the `ai-summarizer-keys` Secret, as in
+[`KUBERNETES-DEPLOYMENT.md`](KUBERNETES-DEPLOYMENT.md#3-create-the-secrets), and the
+OpenRouter and Gemini model IDs in `k8s/config/ai-summarizer.env`.
+
+**T14, AI isolation.** The script needs the port-forward above, at least one
+provider key, and events in the last hour, so run it while BMKG is producing.
+It writes a summary with no fault, then with `wrong`, `down`, and `slow`, and
+then scales the summarizer to 0 and back. It passes when the faulty provider is
+never used, a summary always comes back, the API answers within 3 seconds
+(`503` while the summarizer is down), `/v1/hazards` keeps answering,
+consumer-2's alert p95 stays within 5 seconds, and consumer-2, the Aggregator,
+and the API do not restart.
+
+```text
+python testing/M2-bonus/T14-ai-isolation/run.py --target k8s
 ```
 
 ## Endpoints

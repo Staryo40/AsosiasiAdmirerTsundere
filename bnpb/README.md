@@ -162,6 +162,7 @@ Platform-wide conventions apply to every service below (see [Shared platform beh
 | `GET /v1/ops/failed-messages` | Bearer token, `ops` role | Failed messages with their payloads |
 | `POST /v1/ops/failed-messages/replay` | Bearer token, `ops` role | Process parked records again |
 | `POST /v1/field-reports` | Bearer token, `field` role | Submit a field report; `202` once durably queued |
+| `GET /v1/situation-summary` | Bearer token | Latest AI situation summary, or `503` |
 | `GET /health` / `GET /ready` | none | Liveness / dependency readiness |
 
 **`POST /auth/login`** — body `{"client_id":"...","client_secret":"..."}`, both required non-empty. Forwards to Auth's `/internal/auth/login`. Success `200`: `{"access_token","token_type":"Bearer","expires_in","refresh_token","refresh_expires_in"}`, with `Cache-Control: no-store`. Request body capped at 16 KiB; unknown or trailing JSON fields are rejected.
@@ -201,6 +202,8 @@ curl -s -X POST -H "Authorization: Bearer $OPS_TOKEN" -H 'Content-Type: applicat
 ```
 
 `report_id` is 1–128 of `[A-Za-z0-9._-]` and is the idempotency key, scoped to the sending client. `reported_at` is RFC 3339 and not in the future. `hazard_type` is `SEISMIC`, `VOLCANIC`, `WILDFIRE`, `COASTAL` or `OTHER`. `description` is 1–2000 characters, and `related_hazard_id` is optional. The API publishes the report as a persistent message to the `field.reports` quorum queue and answers `202 {"report_id","accepted_at"}` only after RabbitMQ confirms it. If the broker is unreachable or does not confirm within 2 seconds, the answer is `503 intake_unavailable` with `Retry-After`, and nothing is promised; retry with the same `report_id`. A retry of a report that was in fact queued is stored once (see [Field intake](#field-intake-internal-8088)).
+
+**`GET /v1/situation-summary`** — every role. Forwards the latest summary from `ai-summarizer` unchanged: `{"summary","provider","model","ai_generated","generated_at","age_seconds","event_count","window_minutes","fault","last_attempts"}`. `provider` is `anthropic`, `openrouter`, `gemini`, or `template`. The API waits at most 2 seconds. A missing key, no summary yet, an unreachable summarizer, or an invalid body all become `503 dependency_unavailable`, so the summary can never hold up an API worker.
 
 **Response shapes** — `view=full` passes the Aggregator's record through after re-validating it:
 ```json
@@ -353,6 +356,18 @@ Each consumer exposes only two routes, both unauthenticated (internal network on
 | consumer-3 (portal feed) | `{"feed_entries": <int>, "messages_seen": <int>}` |
 
 `GET /health` behaves the same as every other service. There is no write endpoint anywhere — consumers are driven entirely by the broker, never by direct HTTP calls.
+
+### AI summarizer (internal, `:8090`)
+
+`ai-summarizer` reads its own `hazard.events.ai-summarizer` quorum queue into SQLite (`BNPB_AI_SUMMARIZER_DB_PATH`), one row per hazard at its newest revision, and drops rows older than the window. An unreadable message is acknowledged and skipped, since a summary is best effort. Once a minute it writes a summary when the events changed, or when the last one came from the template; the root README's *Bonus: AI situation summary* section covers the digest, the provider chain, and the reply checks.
+
+| Route | Purpose |
+| --- | --- |
+| `GET /internal/situation-summary` | Latest summary and the last provider attempts |
+| `POST /internal/summarize` | Write a summary now |
+| `POST /internal/fault` | Body `{"mode":"slow"}`, `"wrong"`, `"down"`, or `""`: make the first provider misbehave |
+
+All three need `X-BNPB-Internal-Key` set to `BNPB_AI_SUMMARIZER_INTERNAL_KEY`. `/metrics` has `bnpb_summary_requests_total{provider,outcome}` and `bnpb_summary_age_seconds`.
 
 ### Field intake (internal, `:8088`)
 
