@@ -3,6 +3,7 @@ package aggregator
 import (
 	"fmt"
 	"net/http"
+	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -44,7 +45,11 @@ func NewTelemetry() *Telemetry {
 // Register adds the bounded metrics scrape route and retains mux patterns for route labels.
 func (telemetry *Telemetry) Register(mux *http.ServeMux) {
 	telemetry.mux = mux
-	mux.HandleFunc("GET /metrics", telemetry.metrics)
+	// The service's shared Prometheus scrape route already owns /metrics when present.
+	probe := &http.Request{Method: http.MethodGet, URL: &url.URL{Path: "/metrics"}}
+	if _, pattern := mux.Handler(probe); pattern == "" {
+		mux.HandleFunc("GET /metrics", telemetry.metrics)
+	}
 }
 
 // Wrap records request metrics, including requests rejected before mux dispatch.

@@ -18,6 +18,16 @@ func telemetryHandler(mux *http.ServeMux, maxInFlight int) http.Handler {
 	return telemetry.Wrap(httpserver.Handler(mux, quietLogger(), maxInFlight))
 }
 
+func TestTelemetryLeavesTheSharedMetricsRouteInPlace(t *testing.T) {
+	mux := http.NewServeMux()
+	httpserver.RegisterMetrics(mux, "bnpb-aggregator")
+	NewTelemetry().Register(mux)
+	scrape := telemetryResponse(t, mux, http.MethodGet, "/metrics", http.StatusOK).Body.String()
+	if strings.Contains(scrape, "bnpb_http_requests_total") {
+		t.Fatal("telemetry replaced the shared Prometheus scrape route")
+	}
+}
+
 func telemetryResponse(t *testing.T, handler http.Handler, method, path string, want int) *httptest.ResponseRecorder {
 	t.Helper()
 	response := httptest.NewRecorder()
