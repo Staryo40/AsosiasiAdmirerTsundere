@@ -298,6 +298,8 @@ services:
       BNPB_SATELLITE_TOKEN: ${BNPB_SATELLITE_TOKEN:-}
       BNPB_SATELLITE_BASE_URL: ${BNPB_SATELLITE_BASE_URL:-https://satellite.naufarrel.dev}
       BNPB_SATELLITE_DB_PATH: /data/satellite.db
+      # The image has no writable /tmp; large SQLite queries spill to the data volume.
+      SQLITE_TMPDIR: /data
       BNPB_SATELLITE_AGGREGATOR_URL: ${BNPB_SATELLITE_AGGREGATOR_URL:-http://aggregator:8083}
       BNPB_SATELLITE_INGEST_TOKEN: ${BNPB_SATELLITE_INGEST_TOKEN:-}
     volumes:
