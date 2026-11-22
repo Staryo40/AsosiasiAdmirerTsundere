@@ -239,6 +239,10 @@ def hazards(target: Target, token: str, source: str) -> list[dict[str, Any]]:
     for _ in range(1000):
         query = {"source": source, "limit": 500, "view": "full"} | ({"cursor": cursor} if cursor else {})
         response = request("GET", f"{target.api}/v1/hazards?{urlencode(query)}", headers=bearer(token), timeout=30)
+        if response.status == 401:
+            # A long listing outlives the 60 s access token; continue the same cursor with a fresh one.
+            token = target.token("OPS")
+            response = request("GET", f"{target.api}/v1/hazards?{urlencode(query)}", headers=bearer(token), timeout=30)
         assert_status(response, 200, f"{source} hazard listing")
         page = response.json()
         items.extend(page["items"])
