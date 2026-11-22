@@ -1,6 +1,7 @@
 # T05: every field report answered with 202 is stored by field-intake exactly once, even when components die.
 from __future__ import annotations
 
+import http.client
 import random
 import sys
 import threading
@@ -32,7 +33,8 @@ class FieldClient:
             try:
                 response = request("POST", f"{self.target.api}/v1/field-reports", headers={"Authorization": f"Bearer {token}"},
                                    body=body, timeout=10)
-            except AssertionError:
+            except (AssertionError, OSError, http.client.HTTPException):
+                # A dropped connection leaves the outcome unknown; resend with the same report_id.
                 time.sleep(1)
                 continue
             if response.status == 202:

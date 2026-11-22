@@ -32,10 +32,10 @@ def newest_by_report(items: list[dict]) -> dict[str, dict]:
 
 
 def park(target: Target, args) -> None:
-    token = target.token("OPS")
     target.pvmbg_admin("schema-version", {"version": 3})
     print(f"PVMBG now renames alert_level to level; collecting parked reports for {args.wait}s.")
     time.sleep(args.wait)
+    token = target.token("OPS")
     items = parked_records(target, token)
     newest = newest_by_report(items)
     if not newest:

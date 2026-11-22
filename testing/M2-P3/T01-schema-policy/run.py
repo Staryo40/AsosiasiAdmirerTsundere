@@ -23,16 +23,17 @@ def main() -> None:
     options.add_argument("--wait", type=int, default=45, help="seconds per schema version")
     args = options.parse_args()
     target, started = Target(args.target), now()
-    token = target.token("OPS")
+    # Access tokens last 60 s, shorter than one run.
+    ops = lambda: target.token("OPS")
     versions = []
     try:
         for version, expected in EXPECTED.items():
             target.pvmbg_admin("schema-version", {"version": version})
             switched = now()
             time.sleep(args.wait)
-            parked = [item for item in failed_messages(target, token, "PVMBG") if item["kind"] == "record"
+            parked = [item for item in failed_messages(target, ops(), "PVMBG") if item["kind"] == "record"
                       and item["status"] == "parked" and parse_time(item["last_seen_at"]) >= switched]
-            polled = last_pvmbg_poll(target, token)
+            polled = last_pvmbg_poll(target, ops())
             observed = "parked" if parked else "accepted" if polled and polled >= switched else "no_poll"
             versions.append({"version": version, "expected": expected, "observed": observed, "parked_records": len(parked),
                              "reasons": sorted({item["reason"] for item in parked}),

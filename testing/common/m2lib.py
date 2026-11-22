@@ -64,7 +64,15 @@ class Target:
         return bnpb_login(self.api, self.value(f"BNPB_{role}_CLIENT_ID"), self.value(f"BNPB_{role}_CLIENT_SECRET"))["access_token"]
 
     def pvmbg_admin(self, path: str, body: dict[str, Any]) -> None:
-        token = pvmbg_login(self.pvmbg, self.value("PVMBG_ADMIN_CLIENT_ID"), self.value("PVMBG_ADMIN_CLIENT_SECRET"))["access_token"]
+        credentials = {"client_id": self.value("PVMBG_ADMIN_CLIENT_ID"), "client_secret": self.value("PVMBG_ADMIN_CLIENT_SECRET")}
+        # PVMBG rate-limits logins; a scenario switches faults often enough to hit it.
+        for _ in range(8):
+            login = request("POST", f"{self.pvmbg}/auth/login", body=credentials)
+            if login.status != 429:
+                break
+            time.sleep(10)
+        assert_status(login, 200, "PVMBG admin login")
+        token = login.json()["access_token"]
         assert_status(request("POST", f"{self.pvmbg}/admin/{path}", headers=bearer(token), body=body), 204, f"PVMBG admin {path}")
 
     # Processes -------------------------------------------------------------------
