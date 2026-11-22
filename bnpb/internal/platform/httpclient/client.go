@@ -12,6 +12,7 @@ import (
 
 	"github.com/Staryo40/AsosiasiAdmirerTsundere/bnpb/internal/platform/correlation"
 	"github.com/Staryo40/AsosiasiAdmirerTsundere/bnpb/internal/platform/logging"
+	"github.com/Staryo40/AsosiasiAdmirerTsundere/bnpb/internal/platform/tracing"
 )
 
 const maxIdleConnections = 100
@@ -61,14 +62,16 @@ func (t instrumentedTransport) CloseIdleConnections() {
 }
 
 func (t instrumentedTransport) RoundTrip(request *http.Request) (*http.Response, error) {
-	outbound := requestWithCorrelation(request)
+	outbound, span := tracing.StartClient(requestWithCorrelation(request))
 	start := time.Now()
 	response, err := t.next.RoundTrip(outbound)
 	elapsed := time.Since(start)
 	if err != nil {
+		tracing.EndClient(span, 0, err)
 		t.logFailure(outbound, err, elapsed)
 		return nil, err
 	}
+	tracing.EndClient(span, response.StatusCode, nil)
 	t.logSuccess(outbound, response, elapsed)
 	return response, nil
 }

@@ -238,8 +238,19 @@ The *BNPB Streams* dashboard shows the SLI against the 99% line and the budget
 left.
 
 HTTP middleware sets `X-BNPB-Correlation-ID` and W3C `traceparent` on responses
-and includes both in structured access logs. Outbound calls from the
-Client-Facing API forward `traceparent` to the Aggregator.
+and includes both in structured access logs.
+
+**Traces.** Every Go service exports OpenTelemetry spans to Tempo over OTLP
+HTTP, set by `OTEL_EXPORTER_OTLP_ENDPOINT` in `k8s/config/bnpb-common.env`;
+remove that line to turn tracing off. Each incoming request gets a server span
+named after its route, and each outgoing call through the shared HTTP client
+gets a client span whose `traceparent` the next service continues, so one
+request shows as one trace across the API, Auth and the Aggregator, plus the
+calls to the upstream mocks, with each step's duration. `/health`, `/ready`, `/readyz` and
+`/metrics` are not traced. To find a request's trace, take the trace ID (the
+second field of the `traceparent` response header, or `trace_id` in the logs)
+and open it in Grafana under **Explore → Tempo**. Broker hops (RabbitMQ) are
+not traced; follow those by correlation ID in the logs.
 
 **Sensor Pantai:** with Secret `pantai-token` in place (see `k8s/pantai-token.secret.example.yaml`), `GET /v1/coastal/status` on the Client-Facing API returns breaker and poll
 state plus the last known coastal hazard when the upstream is slow or open.

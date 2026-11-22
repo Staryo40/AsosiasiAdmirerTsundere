@@ -433,6 +433,7 @@ kubectl -n sistem-informasi-kebencanaan-bnpb exec satellite-0 -- /bnpb-satellite
 
 ### Shared platform behavior
 
+- **Tracing** — with `OTEL_EXPORTER_OTLP_ENDPOINT` set, every service exports OpenTelemetry spans over OTLP HTTP: a server span per request (named after the route) and a client span per outbound call, chained through `traceparent`. Without it, tracing is off and only the header is forwarded. Probe and metrics routes are not traced, and broker hops are not either.
 - **Correlation ID** — `X-Correlation-ID` request header, echoed on the response; generated if missing or invalid (1–64 chars, `A-Za-z0-9._-`), and attached to every log line for that request across every service.
 - **Concurrency limiting (429)** — shared routes may use the generic `{"error":"too many requests"}` platform rejection. Audit routes preserve their exact `{"error":{"code":"…","message":"…"}}` envelope, with no correlation field in the body.
 - **Panic recovery (500)** — any unhandled panic anywhere becomes a clean `500 {"error":"internal server error"}`, never a crash or a leaked stack trace to the client.
