@@ -43,20 +43,24 @@ def main() -> None:
         return (leader, report) if caught_up else None
     after_leader, after = wait_for("the new leader to pass the kill offset and drain its outbox", recovered, args.timeout, 10)
 
-    token = target.token("OPS")
-    ours = {fire["id"]: ",".join(fire["detection_keys"]) for fire in after["fires"]}
+    def published(report: dict) -> dict[str, str]:
+        return {fire["id"]: ",".join(fire["detection_keys"]) for fire in report["fires"]}
+
     stored, duplicates, missing, extra, differing = {}, [], [], [], []
     for _ in range(6):
-        stored, duplicates = aggregator_fires(target, token)
-        missing = sorted(set(ours) - set(stored))
-        extra = sorted(set(stored) - set(ours))
-        differing = sorted(fire for fire in set(ours) & set(stored) if ours[fire] != stored[fire])
+        # Listing every fire takes a while on a live feed; a fire only counts as wrong if the
+        # Aggregator disagrees with the satellite both before and after the listing.
+        first = published(target.satellite_verify(after_leader))
+        stored, duplicates = aggregator_fires(target, target.token("OPS"))
+        after = target.satellite_verify(after_leader)
+        second = published(after)
+        missing = sorted(fire for fire in set(first) & set(second) if fire not in stored)
+        extra = sorted(set(stored) - set(first) - set(second))
+        differing = sorted(fire for fire in stored if fire in first or fire in second
+                           if stored[fire] not in (first.get(fire), second.get(fire)))
         if not (missing or extra or differing):
             break
-        # The live stream keeps moving, so compare against a fresh report after a short pause.
         time.sleep(10)
-        after = target.satellite_verify(after_leader)
-        ours = {fire["id"]: ",".join(fire["detection_keys"]) for fire in after["fires"]}
 
     checks = {
         "published_equals_uninterrupted_replay": after["published_equals_rebuild"],
@@ -71,7 +75,7 @@ def main() -> None:
                    "published_active": before["published_active"]},
         "recovered": {"pod": after_leader, "next_offset": after["next_offset"], "published_active": after["published_active"],
                       "rebuilt_active": after["rebuilt_active"], "batch_fires": after["batch_fires"], "stats": after["stats"],
-                      "only_published": after["only_published"][:20], "only_rebuilt": after["only_rebuilt"][:20]},
+                      "only_published": (after["only_published"] or [])[:20], "only_rebuilt": (after["only_rebuilt"] or [])[:20]},
         "aggregator": {"active_satelit_hazards": len(stored), "missing": missing[:20], "extra": extra[:20],
                        "differing": differing[:20], "duplicates": duplicates[:20]},
     })
