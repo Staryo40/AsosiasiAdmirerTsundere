@@ -229,8 +229,13 @@ kubectl apply -k k8s/monitoring
 | Analytics dashboard (React) | `http://<node-ip>:30081` |
 
 BNPB Go services expose `GET /metrics`. Pods with the `prometheus.io/scrape`
-annotation are discovered automatically. Recording rules and an SLO burn alert
-ship in `k8s/monitoring/prometheus-rules.yaml` (mounted into Prometheus).
+annotation are discovered automatically. `k8s/monitoring/prometheus-rules.yaml`
+(mounted into Prometheus) holds the HTTP error-rate rules and the Field Team
+alert path SLO: 99% of consumer-2 alerts recorded within 5 s of ingest, with a
+1% error budget counted over 24 h. It records the slow-alert share over 5 min to
+1 day and fires fast-burn (14.4x), slow-burn (6x) and budget-exhausted alerts.
+The *BNPB Streams* dashboard shows the SLI against the 99% line and the budget
+left.
 
 HTTP middleware sets `X-BNPB-Correlation-ID` and W3C `traceparent` on responses
 and includes both in structured access logs. Outbound calls from the
