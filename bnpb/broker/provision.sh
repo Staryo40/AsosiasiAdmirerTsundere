@@ -198,6 +198,10 @@ provision_consumer() {
 provision_consumer "$BNPB_CONSUMER_1_RABBITMQ_USER" "$BNPB_CONSUMER_1_RABBITMQ_PASSWORD"
 provision_consumer "$BNPB_CONSUMER_2_RABBITMQ_USER" "$BNPB_CONSUMER_2_RABBITMQ_PASSWORD"
 provision_consumer "$BNPB_CONSUMER_3_RABBITMQ_USER" "$BNPB_CONSUMER_3_RABBITMQ_PASSWORD"
+# Optional situation-summary consumer; skipped until its identity is set.
+if [ -n "${BNPB_AI_SUMMARIZER_RABBITMQ_USER:-}" ] && [ -n "${BNPB_AI_SUMMARIZER_RABBITMQ_PASSWORD:-}" ]; then
+	provision_consumer "$BNPB_AI_SUMMARIZER_RABBITMQ_USER" "$BNPB_AI_SUMMARIZER_RABBITMQ_PASSWORD"
+fi
 
 # Field reports: declared here so the API's mandatory publish never races field-intake's
 # own declaration; arguments must match field-intake's. Skipped until both identities exist.

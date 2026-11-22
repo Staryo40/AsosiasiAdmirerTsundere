@@ -55,6 +55,10 @@ spec:
             - name: BNPB_API_RABBITMQ_PASSWORD
               valueFrom:
                 secretKeyRef: {name: bnpb-secrets, key: BNPB_API_RABBITMQ_PASSWORD}
+            # Optional: without it GET /v1/situation-summary answers 503 and the API still starts.
+            - name: BNPB_AI_SUMMARIZER_INTERNAL_KEY
+              valueFrom:
+                secretKeyRef: {name: bnpb-secrets, key: BNPB_AI_SUMMARIZER_INTERNAL_KEY, optional: true}
           resources:
             # CPU request lets the HPA in k8s/autoscaling measure utilisation; no CPU limit avoids throttling.
             requests: {memory: 128Mi, cpu: 200m}

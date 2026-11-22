@@ -43,6 +43,8 @@ def credential_values() -> dict:
             "BNPB_FIELD_INTAKE_RABBITMQ_PASSWORD": token_hex(32),
             "BNPB_FIELD_INTAKE_INTERNAL_KEY": token_hex(32),
             "BNPB_SATELLITE_INGEST_TOKEN": token_hex(32),
+            "BNPB_AI_SUMMARIZER_RABBITMQ_PASSWORD": token_hex(32),
+            "BNPB_AI_SUMMARIZER_INTERNAL_KEY": token_hex(32),
         },
     }
 

@@ -118,6 +118,18 @@ kubectl -n sistem-informasi-kebencanaan-bnpb create secret generic pantai-token 
 kubectl -n sistem-informasi-kebencanaan-bnpb create secret generic satellite-token --from-literal=token=<feed-satelit-token>
 ```
 
+The AI provider keys for `ai-summarizer` are optional and live in a third Secret. Leave out any
+provider you have no key for; with no keys at all, every situation summary comes from the template:
+
+```text
+kubectl -n sistem-informasi-kebencanaan-bnpb create secret generic ai-summarizer-keys \
+  --from-literal=anthropic=<key> --from-literal=openrouter=<key> --from-literal=gemini=<key>
+```
+
+Set the OpenRouter and Gemini model IDs in `k8s/config/ai-summarizer.env`; a provider without a model
+is skipped. After adding or changing keys, restart the pod:
+`kubectl -n sistem-informasi-kebencanaan-bnpb rollout restart statefulset ai-summarizer`.
+
 ## 4. Images
 
 k3s nodes cannot see Docker images on the local machine, so images are built locally, pushed to a
@@ -136,6 +148,7 @@ component. The repository name is set in the `images` section of `k8s/kustomizat
 | `broker-init` | `bnpb/broker/init.Dockerfile` | `bnpb` |
 | `satellite` | `bnpb/cmd/satellite/Dockerfile` | `bnpb` |
 | `field-intake` | `bnpb/cmd/field-intake/Dockerfile` | `bnpb` |
+| `ai-summarizer` | `bnpb/cmd/ai-summarizer/Dockerfile` | `bnpb` |
 
 Build and push, where `<repo>` is `<dockerhub-user>/<repository-name>`:
 
@@ -151,6 +164,7 @@ docker build -t <repo>:consumer-3 -f bnpb/cmd/consumer-3/Dockerfile bnpb
 docker build -t <repo>:broker-init -f bnpb/broker/init.Dockerfile bnpb
 docker build -t <repo>:satellite -f bnpb/cmd/satellite/Dockerfile bnpb
 docker build -t <repo>:field-intake -f bnpb/cmd/field-intake/Dockerfile bnpb
+docker build -t <repo>:ai-summarizer -f bnpb/cmd/ai-summarizer/Dockerfile bnpb
 docker push --all-tags <repo>
 ```
 
