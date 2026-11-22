@@ -35,6 +35,8 @@ linters:
             - '!**/internal/consumer-2/**'
             - '!**/cmd/consumer-3/**'
             - '!**/internal/consumer-3/**'
+            - '!**/cmd/ai-summarizer/**'
+            - '!**/internal/ai-summarizer/**'
             - '!**/cmd/field-intake/**'
             - '!**/internal/field-intake/**'
             - '!**/cmd/satellite/**'
@@ -120,6 +122,17 @@ linters:
           allow:
             - github.com/Staryo40/AsosiasiAdmirerTsundere/bnpb/internal/consumer-3$
             - github.com/Staryo40/AsosiasiAdmirerTsundere/bnpb/internal/consumer-3/
+            - github.com/Staryo40/AsosiasiAdmirerTsundere/bnpb/internal/platform$
+            - github.com/Staryo40/AsosiasiAdmirerTsundere/bnpb/internal/platform/
+          deny: *bnpb-boundary
+
+        ai-summarizer:
+          list-mode: lax
+          files:
+            - '**/cmd/ai-summarizer/**'
+            - '**/internal/ai-summarizer/**'
+          allow:
+            - github.com/Staryo40/AsosiasiAdmirerTsundere/bnpb/internal/ai-summarizer$
             - github.com/Staryo40/AsosiasiAdmirerTsundere/bnpb/internal/platform$
             - github.com/Staryo40/AsosiasiAdmirerTsundere/bnpb/internal/platform/
           deny: *bnpb-boundary
