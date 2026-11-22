@@ -10,10 +10,12 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/Staryo40/AsosiasiAdmirerTsundere/bnpb/internal/platform/config"
 	"github.com/Staryo40/AsosiasiAdmirerTsundere/bnpb/internal/platform/httpserver"
 	"github.com/Staryo40/AsosiasiAdmirerTsundere/bnpb/internal/platform/logging"
+	"github.com/Staryo40/AsosiasiAdmirerTsundere/bnpb/internal/platform/tracing"
 )
 
 // RouteRegistrar adds the application-owned routes and dependencies for a service.
@@ -57,6 +59,8 @@ func runService(service string, cfg config.Config, initialize Initializer, middl
 	logger := logging.New(service, cfg.LogLevel, os.Stdout)
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	stopTracing := startTracing(ctx, service, logger)
+	defer stopTracing()
 	if err := runApplication(ctx, applicationOptions{service: service, cfg: cfg, logger: logger, middleware: middleware}, initialize); err != nil {
 		// Initializers may wrap driver errors containing credentials or DSNs.
 		logging.Event(context.Background(), logger, logging.Record{Level: slog.LevelError, Event: "service_failed", Message: "service initialization, serving or cleanup failed"})
@@ -130,4 +134,19 @@ func shutdownApplication(ctx context.Context, shutdown Shutdown, cfg config.Conf
 		return serveErr
 	}
 	return errors.Join(serveErr, shutdown(shutdownCtx))
+}
+
+// Tracing is optional: a broken exporter is logged and the service runs without spans.
+func startTracing(ctx context.Context, service string, logger *slog.Logger) func() {
+	shutdown, err := tracing.Start(ctx, service)
+	if err != nil {
+		logging.Event(ctx, logger, logging.Record{Level: slog.LevelWarn, Event: "tracing_disabled", Message: "trace exporter could not start"})
+		return func() {}
+	}
+	return func() {
+		// Flush the last spans, bounded so a missing Tempo cannot hold up exit.
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		_ = shutdown(ctx)
+	}
 }

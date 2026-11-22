@@ -5,7 +5,7 @@ export function LineChart({ series }) {
   const pad = { top: 16, right: 16, bottom: 36, left: 40 };
   const innerW = width - pad.left - pad.right;
   const innerH = height - pad.top - pad.bottom;
-  const maxY = Math.max(1, ...series.seismic, ...series.volcanic);
+  const maxY = Math.max(1, ...series.lines.flatMap((line) => line.values));
   const stepX = innerW / Math.max(1, series.labels.length - 1);
 
   const path = (values) =>
@@ -20,29 +20,24 @@ export function LineChart({ series }) {
   const gridLines = [0, 0.25, 0.5, 0.75, 1].map((f) => {
     const y = pad.top + innerH * (1 - f);
     return (
-      <line
-        key={f}
-        x1={pad.left}
-        y1={y}
-        x2={width - pad.right}
-        y2={y}
-        stroke="#e2e8f0"
-        strokeWidth="1"
-      />
+      <line key={f} x1={pad.left} y1={y} x2={width - pad.right} y2={y} stroke="#e2e8f0" strokeWidth="1" />
     );
   });
 
   return (
-    <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Grafik garis kejadian per jenis">
+    <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Grafik garis kejadian per kategori">
       {gridLines}
-      <path d={path(series.seismic)} fill="none" stroke="#0133CC" strokeWidth="2" />
-      <path d={path(series.volcanic)} fill="none" stroke="#ED7B03" strokeWidth="2" />
-      <text x={pad.left} y={height - 8} fill="#56657B" fontSize="11">
-        Seismik
+      <text x={pad.left - 6} y={pad.top + 4} fill="#56657B" fontSize="10" textAnchor="end">
+        {maxY}
       </text>
-      <text x={pad.left + 64} y={height - 8} fill="#56657B" fontSize="11">
-        Vulkanik
-      </text>
+      {series.lines.map((line) => (
+        <path key={line.key} d={path(line.values)} fill="none" stroke={line.color} strokeWidth="2" />
+      ))}
+      {series.lines.map((line, i) => (
+        <text key={line.key} x={pad.left + i * 96} y={height - 8} fill={line.color} fontSize="11" fontWeight="700">
+          {line.label}
+        </text>
+      ))}
     </svg>
   );
 }
@@ -55,16 +50,18 @@ export function SeriesTable({ series, open }) {
         <thead>
           <tr>
             <th>Waktu</th>
-            <th>Seismik</th>
-            <th>Vulkanik</th>
+            {series.lines.map((line) => (
+              <th key={line.key}>{line.label}</th>
+            ))}
           </tr>
         </thead>
         <tbody>
           {series.labels.map((label, i) => (
             <tr key={`${label}-${i}`}>
               <td>{label}</td>
-              <td>{series.seismic[i]}</td>
-              <td>{series.volcanic[i]}</td>
+              {series.lines.map((line) => (
+                <td key={line.key}>{line.values[i]}</td>
+              ))}
             </tr>
           ))}
         </tbody>

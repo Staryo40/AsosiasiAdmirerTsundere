@@ -137,6 +137,10 @@ spec:
             - name: BNPB_FIELD_INTAKE_RABBITMQ_PASSWORD
               valueFrom:
                 secretKeyRef: {name: bnpb-secrets, key: BNPB_FIELD_INTAKE_RABBITMQ_PASSWORD}
+            # Optional so an older secrets.env without the summarizer still provisions the rest.
+            - name: BNPB_AI_SUMMARIZER_RABBITMQ_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: bnpb-secrets, key: BNPB_AI_SUMMARIZER_RABBITMQ_PASSWORD, optional: true}
           resources:
             requests: {memory: 128Mi}
             limits: {memory: 256Mi}

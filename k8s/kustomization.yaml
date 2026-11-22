@@ -46,6 +46,8 @@ configMapGenerator:
     envs: [config/satellite.env]
   - name: field-intake-config
     envs: [config/field-intake.env]
+  - name: ai-summarizer-config
+    envs: [config/ai-summarizer.env]
 
 # k8s/secrets.env is git-ignored; generate it from secrets.env.example.
 secretGenerator:
@@ -87,6 +89,9 @@ images:
   - name: aat/bnpb-field-intake
     newName: docker.io/salmaanhaniif11/aat-bnpb
     newTag: field-intake
+  - name: aat/bnpb-ai-summarizer
+    newName: docker.io/salmaanhaniif11/aat-bnpb
+    newTag: ai-summarizer
   - name: aat/analytics-dashboard
     newName: docker.io/salmaanhaniif11/aat-bnpb
     newTag: analytics-dashboard

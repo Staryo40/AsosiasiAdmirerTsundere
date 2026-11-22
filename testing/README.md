@@ -194,6 +194,11 @@ URL dapat diganti dengan `API_BASE`, `AGGREGATOR_BASE`, `PVMBG_BASE`, `INTAKE_BA
 | T10 satu poller Aggregator (k8s) | `python testing/M2-P2/T10-single-poller/run.py --target k8s` |
 | T11 failover poller (k8s) | `python testing/M2-P2/T11-failover/run.py --target k8s` |
 | T12 term lease setelah clock skew/freeze (k8s) | `python testing/M2-P2/T12-lease-terms/run.py --target k8s --since <ISO>` |
+| T15 Sensor Pantai mati dan pulih (k8s) | `python testing/M2-P5/T15-sensor-outage/run.py --target k8s` |
+| T16 event kritis sampai ke Tim Lapangan (k8s, port-forward `svc/sensor-pantai 18080:8080`) | `python testing/M2-P5/T16-critical-alerts/run.py --target k8s` |
+| T17 Media ditolak lebih dulu saat kelebihan beban (k8s, butuh k6) | `python testing/M2-P5/T17-media-shedding/run.py --target k8s` |
+| T13 autoscaling, bonus (k8s, setelah `kubectl apply -f k8s/autoscaling/`) | `python testing/M2-bonus/T13-autoscaling/run.py --target k8s` |
+| T14 isolasi ringkasan AI, bonus (k8s, port-forward `svc/ai-summarizer 8090`) | `python testing/M2-bonus/T14-ai-isolation/run.py --target k8s` |
 | T01 kebijakan skema PVMBG | `python testing/M2-P3/T01-schema-policy/run.py` |
 | T02 payload rusak | `python testing/M2-P3/T02-malformed-payloads/run.py` |
 | T03 adaptasi dan replay | `python testing/M2-P3/T03-replay/run.py park`, ubah alias dan restart Aggregator, lalu `replay` dan `verify` |

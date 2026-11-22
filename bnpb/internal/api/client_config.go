@@ -10,6 +10,7 @@ import (
 const (
 	defaultAuthBaseURL       = "http://auth:8084"
 	defaultAggregatorBaseURL = "http://aggregator:8083"
+	defaultSummarizerBaseURL = "http://ai-summarizer:8090"
 )
 
 // clientConfig contains dependency locations and dedicated credentials. Keys
@@ -21,6 +22,9 @@ type clientConfig struct {
 	aggregatorKey     string
 	// Optional: without a broker identity POST /v1/field-reports answers 503.
 	brokerUser, brokerPassword, brokerAddress string
+	// Optional: without a key GET /v1/situation-summary answers 503.
+	summarizerBaseURL *url.URL
+	summarizerKey     string
 }
 
 func loadClientConfig() (clientConfig, error) {
@@ -52,6 +56,14 @@ func loadClientConfigFrom(lookup func(string) (string, bool)) (clientConfig, err
 	config.brokerPassword, _ = lookup("BNPB_API_RABBITMQ_PASSWORD")
 	if (config.brokerUser == "") != (config.brokerPassword == "") {
 		return clientConfig{}, fmt.Errorf("BNPB_API_RABBITMQ_USER and BNPB_API_RABBITMQ_PASSWORD: configure both or neither")
+	}
+	if config.summarizerBaseURL, err = baseURLSetting(lookup, "BNPB_AI_SUMMARIZER_BASE_URL", defaultSummarizerBaseURL); err != nil {
+		return clientConfig{}, err
+	}
+	if key, exists := lookup("BNPB_AI_SUMMARIZER_INTERNAL_KEY"); exists && key != "" {
+		if config.summarizerKey, err = secretSetting(lookup, "BNPB_AI_SUMMARIZER_INTERNAL_KEY"); err != nil {
+			return clientConfig{}, err
+		}
 	}
 	config.brokerAddress = "rabbitmq:5672"
 	if address, exists := lookup("BNPB_RABBITMQ_ADDR"); exists && address != "" {

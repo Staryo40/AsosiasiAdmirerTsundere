@@ -162,6 +162,8 @@ Platform-wide conventions apply to every service below (see [Shared platform beh
 | `GET /v1/ops/failed-messages` | Bearer token, `ops` role | Failed messages with their payloads |
 | `POST /v1/ops/failed-messages/replay` | Bearer token, `ops` role | Process parked records again |
 | `POST /v1/field-reports` | Bearer token, `field` role | Submit a field report; `202` once durably queued |
+| `GET /v1/situation-summary` | Bearer token | Latest AI situation summary, or `503` |
+| `GET /v1/analytics` | Bearer token | Aggregate counts for the dashboard, marked `partial` when a storage unit is unreachable |
 | `GET /health` / `GET /ready` | none | Liveness / dependency readiness |
 
 **`POST /auth/login`** — body `{"client_id":"...","client_secret":"..."}`, both required non-empty. Forwards to Auth's `/internal/auth/login`. Success `200`: `{"access_token","token_type":"Bearer","expires_in","refresh_token","refresh_expires_in"}`, with `Cache-Control: no-store`. Request body capped at 16 KiB; unknown or trailing JSON fields are rejected.
@@ -201,6 +203,10 @@ curl -s -X POST -H "Authorization: Bearer $OPS_TOKEN" -H 'Content-Type: applicat
 ```
 
 `report_id` is 1–128 of `[A-Za-z0-9._-]` and is the idempotency key, scoped to the sending client. `reported_at` is RFC 3339 and not in the future. `hazard_type` is `SEISMIC`, `VOLCANIC`, `WILDFIRE`, `COASTAL` or `OTHER`. `description` is 1–2000 characters, and `related_hazard_id` is optional. The API publishes the report as a persistent message to the `field.reports` quorum queue and answers `202 {"report_id","accepted_at"}` only after RabbitMQ confirms it. If the broker is unreachable or does not confirm within 2 seconds, the answer is `503 intake_unavailable` with `Retry-After`, and nothing is promised; retry with the same `report_id`. A retry of a report that was in fact queued is stored once (see [Field intake](#field-intake-internal-8088)).
+
+**`GET /v1/situation-summary`** — every role. Forwards the latest summary from `ai-summarizer` unchanged: `{"summary","provider","model","ai_generated","generated_at","age_seconds","event_count","window_minutes","fault","last_attempts"}`. `provider` is `anthropic`, `openrouter`, `gemini`, or `template`. The API waits at most 2 seconds. A missing key, no summary yet, an unreachable summarizer, or an invalid body all become `503 dependency_unavailable`, so the summary can never hold up an API worker.
+
+**`GET /v1/analytics`** — every role, since the answer holds only counts. Accepts exactly `from`, `to` and optional `bucket` (`hour`, `day`, `week`); anything else is `400 invalid_query` before the Aggregator is called. Forwards to the Aggregator's `GET /internal/analytics` with the internal key, which stays on the server. A `200`, a `400` (for example a range over 366 days) or a `429` (one analytics query per Aggregator instance at a time) is passed through; anything else becomes `503 dependency_unavailable`. The body has `total`, `series` (`{start,category,count}` for `EARTHQUAKE`, `TSUNAMI`, `VOLCANIC`, `WILDFIRE`, `COASTAL`), `severity`, `areas`, `partial`, and `unavailable_units`. When `partial` is `true`, every number covers only the reachable units, and the dashboard marks every card.
 
 **Response shapes** — `view=full` passes the Aggregator's record through after re-validating it:
 ```json
@@ -354,6 +360,18 @@ Each consumer exposes only two routes, both unauthenticated (internal network on
 
 `GET /health` behaves the same as every other service. There is no write endpoint anywhere — consumers are driven entirely by the broker, never by direct HTTP calls.
 
+### AI summarizer (internal, `:8090`)
+
+`ai-summarizer` reads its own `hazard.events.ai-summarizer` quorum queue into SQLite (`BNPB_AI_SUMMARIZER_DB_PATH`), one row per hazard at its newest revision, and drops rows older than the window. An unreadable message is acknowledged and skipped, since a summary is best effort. Once a minute it writes a summary when the events changed, or when the last one came from the template; the root README's *Bonus: AI situation summary* section covers the digest, the provider chain, and the reply checks.
+
+| Route | Purpose |
+| --- | --- |
+| `GET /internal/situation-summary` | Latest summary and the last provider attempts |
+| `POST /internal/summarize` | Write a summary now |
+| `POST /internal/fault` | Body `{"mode":"slow"}`, `"wrong"`, `"down"`, or `""`: make the first provider misbehave |
+
+All three need `X-BNPB-Internal-Key` set to `BNPB_AI_SUMMARIZER_INTERNAL_KEY`. `/metrics` has `bnpb_summary_requests_total{provider,outcome}` and `bnpb_summary_age_seconds`.
+
 ### Field intake (internal, `:8088`)
 
 `field-intake` consumes the `field.reports` quorum queue and stores each report in its own SQLite (`BNPB_FIELD_INTAKE_DB_PATH`). It acknowledges a delivery only after the SQLite commit, so a crash before the ack makes the broker redeliver it. The primary key `(client_id, report_id)` turns that redelivery, or a client retry, into a counted duplicate instead of a second report.
@@ -415,6 +433,7 @@ kubectl -n sistem-informasi-kebencanaan-bnpb exec satellite-0 -- /bnpb-satellite
 
 ### Shared platform behavior
 
+- **Tracing** — with `OTEL_EXPORTER_OTLP_ENDPOINT` set, every service exports OpenTelemetry spans over OTLP HTTP: a server span per request (named after the route) and a client span per outbound call, chained through `traceparent`. Without it, tracing is off and only the header is forwarded. Probe and metrics routes are not traced, and broker hops are not either.
 - **Correlation ID** — `X-Correlation-ID` request header, echoed on the response; generated if missing or invalid (1–64 chars, `A-Za-z0-9._-`), and attached to every log line for that request across every service.
 - **Concurrency limiting (429)** — shared routes may use the generic `{"error":"too many requests"}` platform rejection. Audit routes preserve their exact `{"error":{"code":"…","message":"…"}}` envelope, with no correlation field in the body.
 - **Panic recovery (500)** — any unhandled panic anywhere becomes a clean `500 {"error":"internal server error"}`, never a crash or a leaked stack trace to the client.

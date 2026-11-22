@@ -222,3 +222,91 @@ spec:
     - name: http
       port: 8087
       targetPort: http
+---
+# Situation summary for the dashboard. One replica: each pod keeps its own SQLite window.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: ai-summarizer
+spec:
+  serviceName: ai-summarizer
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: ai-summarizer
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: ai-summarizer
+        role: consumer
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8090"
+        prometheus.io/path: "/metrics"
+    spec:
+      containers:
+        - name: ai-summarizer
+          image: aat/bnpb-ai-summarizer
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8090
+          envFrom:
+            - configMapRef:
+                name: bnpb-common
+            - configMapRef:
+                name: ai-summarizer-config
+          env:
+            - name: BNPB_AI_SUMMARIZER_RABBITMQ_USER
+              valueFrom:
+                configMapKeyRef: {name: bnpb-identities, key: BNPB_AI_SUMMARIZER_RABBITMQ_USER}
+            - name: BNPB_AI_SUMMARIZER_RABBITMQ_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: bnpb-secrets, key: BNPB_AI_SUMMARIZER_RABBITMQ_PASSWORD}
+            - name: BNPB_AI_SUMMARIZER_INTERNAL_KEY
+              valueFrom:
+                secretKeyRef: {name: bnpb-secrets, key: BNPB_AI_SUMMARIZER_INTERNAL_KEY}
+            # Each key is optional; a provider without one is skipped.
+            - name: BNPB_AI_SUMMARIZER_ANTHROPIC_KEY
+              valueFrom:
+                secretKeyRef: {name: ai-summarizer-keys, key: anthropic, optional: true}
+            - name: BNPB_AI_SUMMARIZER_OPENROUTER_KEY
+              valueFrom:
+                secretKeyRef: {name: ai-summarizer-keys, key: openrouter, optional: true}
+            - name: BNPB_AI_SUMMARIZER_GEMINI_KEY
+              valueFrom:
+                secretKeyRef: {name: ai-summarizer-keys, key: gemini, optional: true}
+          resources:
+            requests: {memory: 128Mi}
+            limits: {memory: 256Mi}
+          readinessProbe:
+            httpGet: {path: /health, port: http}
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: {path: /health, port: http}
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          volumeMounts:
+            - name: data
+              mountPath: /data
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: [ReadWriteOnce]
+        storageClassName: local-path
+        resources:
+          requests:
+            storage: 1Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ai-summarizer
+spec:
+  selector:
+    app.kubernetes.io/name: ai-summarizer
+  ports:
+    - name: http
+      port: 8090
+      targetPort: http

@@ -34,7 +34,7 @@ Milestone 2 runs the same system on a two-node Kubernetes (k3s) cluster; see [Ru
 
 ## Program Structure
 
-![System architecture and data flow](docs/architecture.svg)
+![System architecture and data flow](docs/m2_architecture.svg)
 
 Every box above is an independent Docker container with its own Dockerfile and lifecycle. Dashed, colored regions are separate Docker networks — a service can only reach what it shares a network with. This is what keeps BMKG and PVMBG polling fully isolated from each other (a slow PVMBG can never block BMKG traffic), and what makes the Canonical Store reachable only by the Aggregator.
 
@@ -47,18 +47,20 @@ Simplified file layout:
 ├── pvmbg/                  # Mock PVMBG (Kotlin/Ktor)
 │   └── src/                # main, test
 ├── bnpb/                   # BNPB backend (Go)
-│   ├── cmd/                # aggregator, api, auth, consumer-1/2/3, field-intake, satellite
+│   ├── cmd/                # aggregator, api, auth, consumer-1/2/3, ai-summarizer, field-intake, satellite
 │   ├── internal/           # per-service packages + shared platform/
 │   ├── broker/             # RabbitMQ provisioning
 │   └── contracts/v1/       # OpenAPI contract + schemas
 ├── k8s/                    # Kubernetes manifests (Kustomize) for Milestone 2
 │   ├── config/             # ConfigMap sources (*.env)
+│   ├── autoscaling/        # optional HPAs for the api and aggregator (bonus)
 │   └── secrets.env.example # Secret keys (fill secrets.env locally; not tracked)
 ├── testing/                # acceptance suites (Python), per Problem
 │   ├── P01/ P02/ P03/ P04/ P05/
-│   ├── M2-P2/ M2-P3/ M2-P4/ # Milestone 2: one poller, failed messages, field reports, Feed Satelit
+│   ├── M2-P2/ … M2-P5/     # Milestone 2: one poller, failed messages, field reports, Feed Satelit, Sensor Pantai
+│   ├── M2-bonus/           # Milestone 2 bonus: autoscaling, AI isolation
 │   └── common/             # shared test helpers
-├── docs/architecture.svg   # diagram used above
+├── docs/m2_architecture.svg   # M2 diagram used above (docs/m1_architecture.svg: M1 report)
 ├── KUBERNETES-DEPLOYMENT.md # step-by-step k3s install and deploy
 ├── paradigma-design.md     # visual paradigm for the analytics dashboard (A2-06)
 ├── configure_env.py        # cross-platform local configuration setup
@@ -302,6 +304,30 @@ then answers `503` on `POST /v1/field-reports`.
 | `BNPB_FIELD_INTAKE_INTERNAL_KEY` | `required` | Key for `GET /internal/field-reports`, sent as `X-BNPB-Internal-Key`; at least 32 bytes. |
 | `BNPB_FIELD_INTAKE_HTTP_ADDR` | `:8088` | `field-intake` listen address. |
 | `BNPB_FIELD_INTAKE_DB_PATH` | `/data/field-intake.db` | `field-intake` SQLite file. |
+
+#### `bnpb/.env`: situation summary
+
+The optional `ai-summarizer` writes a short Indonesian summary of the last hour
+for the dashboard (`docker compose --profile ai up`). `configure_env.py`
+generates its password and key. `broker-init` provisions its queue only when
+both RabbitMQ values are set. The provider keys are yours to add; a provider
+without a key or model is skipped, and with none every summary comes from the
+template.
+
+| Variable | Default | Purpose / constraint |
+| --- | --- | --- |
+| `BNPB_AI_SUMMARIZER_RABBITMQ_USER` | `ai-summarizer` | RabbitMQ user; it reads only `hazard.events.ai-summarizer`. |
+| `BNPB_AI_SUMMARIZER_RABBITMQ_PASSWORD` | `required` | Password for that user. |
+| `BNPB_AI_SUMMARIZER_INTERNAL_KEY` | `required` | Key for the summarizer's `/internal` endpoints, sent by the API as `X-BNPB-Internal-Key`; at least 32 bytes. Without it the API answers `503` on `GET /v1/situation-summary`. |
+| `BNPB_AI_SUMMARIZER_BASE_URL` | `http://ai-summarizer:8090` | Where the API reaches the summarizer. |
+| `BNPB_AI_SUMMARIZER_HTTP_ADDR` | `:8090` | Summarizer listen address. |
+| `BNPB_AI_SUMMARIZER_PROVIDERS` | `anthropic,openrouter,gemini` | Order the providers are tried in. |
+| `BNPB_AI_SUMMARIZER_ANTHROPIC_KEY` / `_MODEL` | empty / `claude-haiku-5-5` | Claude API key and model. |
+| `BNPB_AI_SUMMARIZER_OPENROUTER_KEY` / `_MODEL` | empty | OpenRouter key and model ID. |
+| `BNPB_AI_SUMMARIZER_GEMINI_KEY` / `_MODEL` | empty | Gemini API key and model ID. |
+| `BNPB_AI_SUMMARIZER_INTERVAL` | `60s` | How often a summary may be written. |
+| `BNPB_AI_SUMMARIZER_WINDOW` | `60m` | How far back the summary looks. |
+| `BNPB_AI_SUMMARIZER_FAULT` | empty | Demo fault on the first provider: `slow`, `wrong`, or `down`. |
 
 #### `bnpb/.env`: Feed Satelit
 
@@ -576,8 +602,8 @@ Edit a value in `k8s/config/*.env`, run `kubectl apply -k k8s`, and Kustomize ro
 
 | Service | Address |
 | --- | --- |
-| Client-Facing API | `http://<node-ip>:30080` (`/auth/login`, `/auth/refresh`, `/v1/hazards`, `/v1/hazards/{hazard_id}`, `/v1/coastal/status`, `/v1/ops/failed-messages`, `/v1/ops/failed-messages/replay`, `/v1/field-reports`, `/health`) |
-| field-intake, satellite service | Cluster-internal only: `kubectl port-forward svc/field-intake 8088` and `svc/satellite 8089` |
+| Client-Facing API | `http://<node-ip>:30080` (`/auth/login`, `/auth/refresh`, `/v1/hazards`, `/v1/hazards/{hazard_id}`, `/v1/coastal/status`, `/v1/ops/failed-messages`, `/v1/ops/failed-messages/replay`, `/v1/field-reports`, `/v1/situation-summary`, `/v1/analytics`, `/health`) |
+| field-intake, satellite service, ai-summarizer | Cluster-internal only: `kubectl port-forward svc/field-intake 8088`, `svc/satellite 8089`, and `svc/ai-summarizer 8090` |
 | Analytics dashboard (UI) | `http://<node-ip>:30081` |
 | Aggregator (internal read API, Audit API) | `http://<node-ip>:30083` |
 | RabbitMQ management | `kubectl -n sistem-informasi-kebencanaan-bnpb port-forward svc/rabbitmq 15672`, then <http://localhost:15672> |
@@ -596,7 +622,10 @@ All commands use the `sistem-informasi-kebencanaan-bnpb` namespace; set it once 
 | List practice scenarios | `kubectl exec -n tester-agent daemonset/tester-agent -- /app list` |
 | Run a practice scenario | `kubectl exec -n tester-agent daemonset/tester-agent -- /app run practice <scenario-name>` |
 | Read what the Tester Agent did | `kubectl logs -n tester-agent daemonset/tester-agent -f` |
-| Scale the Aggregator (for example 3 → 5 → 2) | `kubectl scale deployment aggregator --replicas=5` |
+| Scale the Aggregator (for example 3 → 5 → 2), fixed mode only | `kubectl scale deployment aggregator --replicas=5` |
+| Switch to autoscaling mode (bonus) | `kubectl apply -f k8s/autoscaling/` |
+| Switch back to fixed replicas | `kubectl delete hpa api aggregator`, then `kubectl apply -k k8s` |
+| Watch the autoscalers | `kubectl get hpa -w` |
 | Rolling update of one component | `kubectl rollout restart deployment/<name>`, then `kubectl rollout status deployment/<name>` |
 | Add consumer-3 live, without touching the producer | `kubectl scale statefulset consumer-3 --replicas=1` |
 | Kill one pod | `kubectl delete pod <pod-name>` |
@@ -1109,6 +1138,137 @@ offset, no `offset_gap` is reported, the offset moves forward again, and
 
 ```text
 python testing/M2-P4/T09-reconnect/run.py
+```
+
+### Problem 5: Sensor Pantai
+
+These run on Kubernetes only. T16 also needs the sensor itself:
+`kubectl -n sistem-informasi-kebencanaan-bnpb port-forward svc/sensor-pantai 18080:8080`
+(override with `PANTAI_BASE`); it reads the sensor token from Secret `pantai-token`.
+
+**T15, sensor outage.** One minute of normal running, then Sensor Pantai is
+scaled to 0 for 3 minutes (`--outage`) and back to 1. Every 2 seconds the
+script times `GET /v1/coastal/status` and a BMKG read through the API, and it
+counts the Aggregator's coastal polls per phase from its logs, separating real
+attempts from those the breaker skipped. It passes when the breaker opens,
+attempts per minute during the outage do not exceed the baseline, coastal
+status answers within 1 s at p95 (`200` or a controlled `503`), BMKG keeps the
+M1 limit of p95 under 300 ms, coastal polling succeeds again after the sensor
+returns without anything in BNPB being touched, and every rejected sensor
+record carries a reason.
+
+```text
+python testing/M2-P5/T15-sensor-outage/run.py --target k8s
+```
+
+**T16, critical alerts.** Lists every observation the sensor marked
+`critical` and follows each one by `observation_id`: rejected with a reason,
+stored as an AWAS hazard and alerted by consumer-2, or lost. The sensor's clock
+runs at `PANTAI_SPEED`, so matching is by ID rather than time. It passes when
+the sensor produced critical events, none was lost or stored without an alert,
+every set-aside one has a reason, and the critical alert p95 from Prometheus is
+within 5 seconds. It also reports the alert path's remaining 24 h error budget.
+
+```text
+python testing/M2-P5/T16-critical-alerts/run.py --target k8s --window 1h
+```
+
+**T17, Media shedding.** Runs `loadtest/k6-media-shed.js` (`--vus`, default
+500), where each virtual user sends one Media and one Field Team read. It passes
+when some Media requests were refused with `429`, Media got nothing but `200` or
+`429`, and at least 99% of Field Team requests succeeded. Needs `k6` on the PATH.
+
+```text
+python testing/M2-P5/T17-media-shedding/run.py --target k8s --vus 500
+```
+
+Criteria 6 and 7 (the game day and explaining it from the dashboards) are run
+by hand; the *BNPB Streams* SLO panels and these scripts are the tools for it.
+
+### Bonus: autoscaling
+
+`kubectl apply -k k8s` deploys fixed replicas: 2 API and 3 Aggregator pods. P2's
+manual 3 → 5 → 2 scaling and T10–T12 run in this mode, since an autoscaler would
+undo a manual change within seconds. `kubectl apply -f k8s/autoscaling/` adds
+two HorizontalPodAutoscalers on top of it:
+
+| Deployment | Min | Max | Scales on |
+| --- | --- | --- | --- |
+| `api` | 2 | 5 | 60 % of its 200m CPU request |
+| `aggregator` | 3 | 5 | 60 % of its 200m CPU request |
+
+A scale-up takes effect at once, up to double the pods every 15 seconds.
+Scale-down waits for 60 seconds of low load, then removes one pod every
+30 seconds. The CPU numbers come from metrics-server, which k3s runs by default.
+Running `kubectl apply -k k8s` again while scaled up resets the counts to 2 and
+3 until the autoscalers raise them again. To leave the mode, delete the HPAs
+first, as in [Triggering the scenarios](#triggering-the-scenarios).
+The *Ready replicas* panel on the Grafana *BNPB HTTP Services* dashboard shows
+the pod counts over time.
+
+**T13, autoscaling.** If `k6` is on the PATH, the script runs
+`loadtest/k6-api-ramp.js` itself. The load ramps up for 60 s, holds for 120 s,
+ramps down, then stays idle for 180 s. The script records each HPA's pods,
+desired count and CPU every 5 seconds. It passes when one of them scales
+above its minimum during the load, both return to their minimum afterwards,
+the Aggregator never has fewer than 3 Ready pods, and k6's error rate stays
+under 1 %. Without `k6`, run the ramp by hand on another machine. The script
+then only records, for `--minutes`, and skips the error-rate check.
+
+```text
+python testing/M2-bonus/T13-autoscaling/run.py --target k8s --peak-vus 2000
+```
+
+### Bonus: AI situation summary
+
+`ai-summarizer` is a fourth consumer of `hazard.events` with its own quorum
+queue and SQLite file. It keeps the hazards received in the last 60 minutes.
+Every 60 seconds, if they changed, it builds a digest in code: counts by type,
+severity, and area, plus the 10 most severe events. A model then writes at
+most 120 words of Indonesian from that digest alone. The prompt carries only
+structured fields; area names are cut to 60 characters, and the data block is
+marked as data rather than instructions. A reply is accepted only if it is
+non-empty, within the length limit, not a refusal, and every number in it
+appears in the digest.
+
+Providers are tried in order: Claude (`claude-haiku-5-5`), OpenRouter, then
+Gemini, each with a 10-second limit and 30 seconds for the whole chain. A quota
+or authentication error (401, 402, 403, 429) skips that provider for 10
+minutes; a timeout, server error, or rejected reply skips it for 30 seconds.
+When none answers, the summary is a template built from the same counts and
+labelled as written without AI. An empty hour needs no model at all.
+
+Nothing on the alert path depends on it. `consumer-2` has its own queue, and
+the API waits at most 2 seconds before answering `503` on
+`GET /v1/situation-summary`. The dashboard fetches the summary on its own
+timer and shows its provider, its age, and an *AI* or *Tanpa AI* badge.
+Metrics: `bnpb_summary_requests_total{provider,outcome}` and
+`bnpb_summary_age_seconds`.
+
+Three internal endpoints, all behind `X-BNPB-Internal-Key`, drive the demo
+through `kubectl port-forward svc/ai-summarizer 8090`:
+
+| Endpoint | Effect |
+| --- | --- |
+| `GET /internal/situation-summary` | Latest summary, its provider, and the last attempts. |
+| `POST /internal/summarize` | Writes a summary now. |
+| `POST /internal/fault` with `{"mode":"slow"}`, `"wrong"`, `"down"`, or `""` | Makes the first provider time out, invent numbers, or fail. |
+
+Provider keys go in the `ai-summarizer-keys` Secret, as in
+[`KUBERNETES-DEPLOYMENT.md`](KUBERNETES-DEPLOYMENT.md#3-create-the-secrets), and the
+OpenRouter and Gemini model IDs in `k8s/config/ai-summarizer.env`.
+
+**T14, AI isolation.** The script needs the port-forward above, at least one
+provider key, and events in the last hour, so run it while BMKG is producing.
+It writes a summary with no fault, then with `wrong`, `down`, and `slow`, and
+then scales the summarizer to 0 and back. It passes when the faulty provider is
+never used, a summary always comes back, the API answers within 3 seconds
+(`503` while the summarizer is down), `/v1/hazards` keeps answering,
+consumer-2's alert p95 stays within 5 seconds, and consumer-2, the Aggregator,
+and the API do not restart.
+
+```text
+python testing/M2-bonus/T14-ai-isolation/run.py --target k8s
 ```
 
 ## Endpoints

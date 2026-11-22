@@ -3,9 +3,18 @@ import { RANGE_LABEL, RANGE_OPTIONS } from '../lib/constants.js';
 import { Banner } from './Banner.jsx';
 import { LineChart, SeriesTable } from './LineChart.jsx';
 import { BarChart } from './BarChart.jsx';
+import { SummaryCard } from './SummaryCard.jsx';
+import { CATEGORIES } from '../lib/aggregate.js';
+
+// Shown on every card while any storage unit is missing, even when a count is zero.
+function PartialMarker({ data }) {
+  if (!data?.partial) return null;
+  return <p className="partial-marker">Data belum lengkap: {data.unavailableUnits.join(', ')} tidak terjangkau</p>;
+}
 
 export function DashboardMain({
   clientId,
+  accessToken,
   activeRange,
   onRangeChange,
   onRefresh,
@@ -18,11 +27,8 @@ export function DashboardMain({
   const statsMeta = data
     ? `${RANGE_LABEL[activeRange]} • diperbarui ${
         data.asOf ? new Date(data.asOf).toLocaleString('id-ID') : '—'
-      }${data.truncated ? ' • data dipotong (batas halaman)' : ''}`
+      }`
     : '—';
-
-  const seismic = data?.items.filter((i) => i.hazard_type === 'SEISMIC').length ?? 0;
-  const volcanic = data?.items.filter((i) => i.hazard_type === 'VOLCANIC').length ?? 0;
 
   return (
     <main className="page">
@@ -51,14 +57,16 @@ export function DashboardMain({
 
       <Banner banner={banner} />
 
+      <SummaryCard accessToken={accessToken} />
+
       <section className="card stats-card" aria-labelledby="stats-title">
         <h2 id="stats-title">Jumlah kejadian</h2>
         <p className="card-meta">{statsMeta}</p>
+        <PartialMarker data={data} />
         <div className="stat-grid">
           {[
-            ['Total', data?.items.length ?? 0],
-            ['Seismik', seismic],
-            ['Vulkanik', volcanic],
+            ['Total', data?.total ?? 0],
+            ...CATEGORIES.map((category) => [category.label, data?.byCategory[category.key] ?? 0]),
           ].map(([label, value]) => (
             <div className="stat-box" key={label}>
               <span>{label}</span>
@@ -71,6 +79,7 @@ export function DashboardMain({
       <section className="card chart-card">
         <h2>Kejadian per jenis bahaya</h2>
         <p className="card-meta">Garis menunjukkan jumlah per interval waktu dalam rentang yang dipilih.</p>
+        <PartialMarker data={data} />
         <div className="chart-wrap">
           {loading ? <div className="skeleton" /> : <LineChart series={data?.series} />}
         </div>
@@ -83,6 +92,7 @@ export function DashboardMain({
       <div className="two-col">
         <section className="card chart-card">
           <h2>Per severity</h2>
+          <PartialMarker data={data} />
           <div className="chart-wrap bar-chart">
             {loading ? (
               <div className="skeleton" />
@@ -93,6 +103,7 @@ export function DashboardMain({
         </section>
         <section className="card chart-card">
           <h2>Per wilayah</h2>
+          <PartialMarker data={data} />
           <div className="chart-wrap bar-chart">
             {loading ? (
               <div className="skeleton" />
@@ -104,8 +115,8 @@ export function DashboardMain({
       </div>
 
       <p className="footnote">
-        Sumber: Client-Facing API. Grafik dihitung di peramban dari view=full
-        {clientId ? ` (klien: ${clientId})` : ''}. Ganti ke API agregasi internal bila A1-08 siap.
+        Sumber: GET /v1/analytics, dihitung Aggregator dari seluruh unit penyimpanan
+        {clientId ? ` (klien: ${clientId})` : ''}. Gempa dengan peringatan tsunami dihitung sebagai Tsunami.
       </p>
     </main>
   );

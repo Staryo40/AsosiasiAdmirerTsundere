@@ -16,10 +16,61 @@ data:
             expr: |
               histogram_quantile(0.95,
                 sum by (le, service) (rate(http_request_duration_seconds_bucket[5m])))
-          - alert: BNPBHighErrorBudgetBurn
+          - alert: BNPBHighHTTPErrorRate
             expr: bnpb:http_error_ratio:5m > 0.01
             for: 2m
             labels:
               severity: warning
             annotations:
-              summary: HTTP error budget burn above 1% (field alert path SLO)
+              summary: More than 1% of HTTP requests answered 5xx
+      # Field Team alert path SLO: 99% of consumer-2 alerts are recorded within 5 s of the
+      # Aggregator ingesting the hazard. The error budget is the remaining 1%, counted over 24 h.
+      # Both timestamps come from different nodes, so a clock-skew test distorts this SLI.
+      - name: bnpb-alert-path-slo
+        rules:
+          - record: bnpb:alert_slow_ratio:rate5m
+            expr: |
+              (sum(rate(bnpb_notification_latency_seconds_count[5m]))
+                - sum(rate(bnpb_notification_latency_seconds_bucket{le="5"}[5m])))
+              / clamp_min(sum(rate(bnpb_notification_latency_seconds_count[5m])), 1e-9)
+          - record: bnpb:alert_slow_ratio:rate30m
+            expr: |
+              (sum(rate(bnpb_notification_latency_seconds_count[30m]))
+                - sum(rate(bnpb_notification_latency_seconds_bucket{le="5"}[30m])))
+              / clamp_min(sum(rate(bnpb_notification_latency_seconds_count[30m])), 1e-9)
+          - record: bnpb:alert_slow_ratio:rate1h
+            expr: |
+              (sum(rate(bnpb_notification_latency_seconds_count[1h]))
+                - sum(rate(bnpb_notification_latency_seconds_bucket{le="5"}[1h])))
+              / clamp_min(sum(rate(bnpb_notification_latency_seconds_count[1h])), 1e-9)
+          - record: bnpb:alert_slow_ratio:rate6h
+            expr: |
+              (sum(rate(bnpb_notification_latency_seconds_count[6h]))
+                - sum(rate(bnpb_notification_latency_seconds_bucket{le="5"}[6h])))
+              / clamp_min(sum(rate(bnpb_notification_latency_seconds_count[6h])), 1e-9)
+          - record: bnpb:alert_slow_ratio:rate1d
+            expr: |
+              (sum(rate(bnpb_notification_latency_seconds_count[1d]))
+                - sum(rate(bnpb_notification_latency_seconds_bucket{le="5"}[1d])))
+              / clamp_min(sum(rate(bnpb_notification_latency_seconds_count[1d])), 1e-9)
+          - record: bnpb:alert_error_budget_remaining:1d
+            expr: 1 - bnpb:alert_slow_ratio:rate1d / 0.01
+          # Multi-window burn rates: 14.4x spends 2% of a 30-day budget in an hour, 6x spends 5% in 6 hours.
+          - alert: BNPBAlertPathFastBurn
+            expr: bnpb:alert_slow_ratio:rate1h > (14.4 * 0.01) and bnpb:alert_slow_ratio:rate5m > (14.4 * 0.01)
+            labels:
+              severity: page
+            annotations:
+              summary: Field Team alerts are missing the 5 s target fast enough to exhaust the budget within hours
+          - alert: BNPBAlertPathSlowBurn
+            expr: bnpb:alert_slow_ratio:rate6h > (6 * 0.01) and bnpb:alert_slow_ratio:rate30m > (6 * 0.01)
+            labels:
+              severity: ticket
+            annotations:
+              summary: Field Team alerts are steadily missing the 5 s target
+          - alert: BNPBAlertPathBudgetExhausted
+            expr: bnpb:alert_error_budget_remaining:1d < 0
+            labels:
+              severity: page
+            annotations:
+              summary: The 24 h error budget of the Field Team alert path is used up

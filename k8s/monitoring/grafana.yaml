@@ -119,6 +119,25 @@ data:
               "legendFormat": "{{service}} p99"
             }
           ]
+        },
+        {
+          "id": 4,
+          "title": "Ready replicas (api, aggregator)",
+          "type": "timeseries",
+          "gridPos": {"h": 8, "w": 24, "x": 0, "y": 17},
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "fieldConfig": {
+            "defaults": {
+              "decimals": 0,
+              "custom": {"lineInterpolation": "stepAfter"}
+            }
+          },
+          "targets": [
+            {
+              "expr": "count by (app) (up{job=\"bnpb-pods\",app=~\"api|aggregator\"} == 1)",
+              "legendFormat": "{{app}}"
+            }
+          ]
         }
       ]
     }
@@ -476,6 +495,58 @@ data:
             }
           },
           "description": "Exactly one Aggregator replica should poll BMKG, PVMBG and Sensor Pantai. A failover shows as one line dropping and another rising."
+        },
+        {
+          "id": 12,
+          "title": "Alert path SLO: alerts within 5 s (target 99%)",
+          "type": "timeseries",
+          "gridPos": {"h": 8, "w": 16, "x": 0, "y": 48},
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "targets": [
+            {"expr": "1 - bnpb:alert_slow_ratio:rate5m", "legendFormat": "last 5 min"},
+            {"expr": "1 - bnpb:alert_slow_ratio:rate1h", "legendFormat": "last 1 h"}
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percentunit",
+              "min": 0,
+              "max": 1,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {"color": "red", "value": null},
+                  {"color": "green", "value": 0.99}
+                ]
+              },
+              "custom": {"thresholdsStyle": {"mode": "line"}}
+            }
+          },
+          "description": "Share of consumer-2 alerts recorded within 5 s of ingest. Below the line, the alert path is spending its error budget."
+        },
+        {
+          "id": 13,
+          "title": "Alert path error budget left (24 h)",
+          "type": "stat",
+          "gridPos": {"h": 8, "w": 8, "x": 16, "y": 48},
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "targets": [
+            {"expr": "bnpb:alert_error_budget_remaining:1d", "legendFormat": "budget left"}
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percentunit",
+              "decimals": 1,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {"color": "red", "value": null},
+                  {"color": "orange", "value": 0.25},
+                  {"color": "green", "value": 0.5}
+                ]
+              }
+            }
+          },
+          "description": "1 - (share of alerts slower than 5 s over 24 h) / 1%. Negative means the budget is used up."
         }
       ]
     }

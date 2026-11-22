@@ -39,11 +39,19 @@ func correlate(next http.Handler) http.Handler {
 			correlationID = correlation.NewID()
 		}
 		w.Header().Set(correlation.Header, correlationID)
-		ctx := correlation.WithTrace(correlation.WithID(r.Context(), correlationID), r.Header)
-		ctx, traceparent := tracing.Ensure(r.WithContext(ctx))
+		ctx, span := tracing.StartServer(r.WithContext(correlation.WithID(r.Context(), correlationID)))
+		traceparent := tracing.Parent(ctx)
+		if span.IsRecording() {
+			// Logs and forwarded calls carry this request's own span, so the next service becomes its child.
+			ctx = correlation.WithTrace(ctx, http.Header{"Traceparent": {traceparent}})
+		} else {
+			ctx = correlation.WithTrace(ctx, r.Header)
+		}
 		w.Header().Set(tracing.Header, traceparent)
 		correlated := r.WithContext(ctx)
-		next.ServeHTTP(w, correlated)
+		recorder := &responseRecorder{ResponseWriter: w}
+		defer func() { tracing.EndServer(span, r.Method, correlated.Pattern, recorder.Status()) }()
+		next.ServeHTTP(recorder, correlated)
 		r.Pattern = correlated.Pattern
 	})
 }

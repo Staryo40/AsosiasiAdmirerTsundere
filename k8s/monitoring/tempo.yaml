@@ -12,6 +12,11 @@ data:
         jaeger:
           protocols:
             thrift_http:
+        # BNPB services export over OTLP HTTP (OTEL_EXPORTER_OTLP_ENDPOINT in bnpb-common).
+        otlp:
+          protocols:
+            http:
+              endpoint: 0.0.0.0:4318
     storage:
       trace:
         backend: local
@@ -45,6 +50,8 @@ spec:
               containerPort: 3200
             - name: jaeger
               containerPort: 14268
+            - name: otlp-http
+              containerPort: 4318
           volumeMounts:
             - name: config
               mountPath: /etc/tempo
@@ -75,3 +82,6 @@ spec:
     - name: jaeger
       port: 14268
       targetPort: jaeger
+    - name: otlp-http
+      port: 4318
+      targetPort: otlp-http

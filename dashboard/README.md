@@ -27,4 +27,4 @@ Push tag `analytics-dashboard` ke registry yang dipakai di `k8s/kustomization.ya
 
 Termasuk di `kubectl apply -k k8s`. NodePort: **`http://<node-ip>:30081`**.
 
-Login: `client_id` / `client_secret` Field Team atau Internal Ops (`view=full`). Token hanya di memori React (state), hilang saat refresh tab.
+Login: `client_id` / `client_secret` klien mana pun (Media, Field Team, atau Internal Ops). Angka dan grafik berasal dari `GET /v1/analytics` yang dihitung Aggregator; bila sebagian unit penyimpanan tidak terjangkau, setiap kartu diberi penanda "Data belum lengkap". Token hanya di memori React (state), hilang saat refresh tab.

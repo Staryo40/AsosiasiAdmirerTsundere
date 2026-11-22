@@ -118,6 +118,18 @@ kubectl -n sistem-informasi-kebencanaan-bnpb create secret generic pantai-token 
 kubectl -n sistem-informasi-kebencanaan-bnpb create secret generic satellite-token --from-literal=token=<feed-satelit-token>
 ```
 
+The AI provider keys for `ai-summarizer` are optional and live in a third Secret. Leave out any
+provider you have no key for; with no keys at all, every situation summary comes from the template:
+
+```text
+kubectl -n sistem-informasi-kebencanaan-bnpb create secret generic ai-summarizer-keys \
+  --from-literal=anthropic=<key> --from-literal=openrouter=<key> --from-literal=gemini=<key>
+```
+
+Set the OpenRouter and Gemini model IDs in `k8s/config/ai-summarizer.env`; a provider without a model
+is skipped. After adding or changing keys, restart the pod:
+`kubectl -n sistem-informasi-kebencanaan-bnpb rollout restart statefulset ai-summarizer`.
+
 ## 4. Images
 
 k3s nodes cannot see Docker images on the local machine, so images are built locally, pushed to a
@@ -136,6 +148,7 @@ component. The repository name is set in the `images` section of `k8s/kustomizat
 | `broker-init` | `bnpb/broker/init.Dockerfile` | `bnpb` |
 | `satellite` | `bnpb/cmd/satellite/Dockerfile` | `bnpb` |
 | `field-intake` | `bnpb/cmd/field-intake/Dockerfile` | `bnpb` |
+| `ai-summarizer` | `bnpb/cmd/ai-summarizer/Dockerfile` | `bnpb` |
 
 Build and push, where `<repo>` is `<dockerhub-user>/<repository-name>`:
 
@@ -151,6 +164,7 @@ docker build -t <repo>:consumer-3 -f bnpb/cmd/consumer-3/Dockerfile bnpb
 docker build -t <repo>:broker-init -f bnpb/broker/init.Dockerfile bnpb
 docker build -t <repo>:satellite -f bnpb/cmd/satellite/Dockerfile bnpb
 docker build -t <repo>:field-intake -f bnpb/cmd/field-intake/Dockerfile bnpb
+docker build -t <repo>:ai-summarizer -f bnpb/cmd/ai-summarizer/Dockerfile bnpb
 docker push --all-tags <repo>
 ```
 
@@ -215,12 +229,28 @@ kubectl apply -k k8s/monitoring
 | Analytics dashboard (React) | `http://<node-ip>:30081` |
 
 BNPB Go services expose `GET /metrics`. Pods with the `prometheus.io/scrape`
-annotation are discovered automatically. Recording rules and an SLO burn alert
-ship in `k8s/monitoring/prometheus-rules.yaml` (mounted into Prometheus).
+annotation are discovered automatically. `k8s/monitoring/prometheus-rules.yaml`
+(mounted into Prometheus) holds the HTTP error-rate rules and the Field Team
+alert path SLO: 99% of consumer-2 alerts recorded within 5 s of ingest, with a
+1% error budget counted over 24 h. It records the slow-alert share over 5 min to
+1 day and fires fast-burn (14.4x), slow-burn (6x) and budget-exhausted alerts.
+The *BNPB Streams* dashboard shows the SLI against the 99% line and the budget
+left.
 
 HTTP middleware sets `X-BNPB-Correlation-ID` and W3C `traceparent` on responses
-and includes both in structured access logs. Outbound calls from the
-Client-Facing API forward `traceparent` to the Aggregator.
+and includes both in structured access logs.
+
+**Traces.** Every Go service exports OpenTelemetry spans to Tempo over OTLP
+HTTP, set by `OTEL_EXPORTER_OTLP_ENDPOINT` in `k8s/config/bnpb-common.env`;
+remove that line to turn tracing off. Each incoming request gets a server span
+named after its route, and each outgoing call through the shared HTTP client
+gets a client span whose `traceparent` the next service continues, so one
+request shows as one trace across the API, Auth and the Aggregator, plus the
+calls to the upstream mocks, with each step's duration. `/health`, `/ready`, `/readyz` and
+`/metrics` are not traced. To find a request's trace, take the trace ID (the
+second field of the `traceparent` response header, or `trace_id` in the logs)
+and open it in Grafana under **Explore → Tempo**. Broker hops (RabbitMQ) are
+not traced; follow those by correlation ID in the logs.
 
 **Sensor Pantai:** with Secret `pantai-token` in place (see `k8s/pantai-token.secret.example.yaml`), `GET /v1/coastal/status` on the Client-Facing API returns breaker and poll
 state plus the last known coastal hazard when the upstream is slow or open.
