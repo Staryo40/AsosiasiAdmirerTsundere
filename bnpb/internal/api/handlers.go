@@ -47,6 +47,7 @@ func (service *publicService) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/hazards/{hazard_id}", service.requireAccess(service.withAdmission(service.handleDetail)))
 	service.registerCoastalRoute(mux)
 	service.registerSituationSummaryRoute(mux)
+	service.registerAnalyticsRoute(mux)
 	service.registerOpsRoutes(mux)
 	service.registerFieldReportRoute(mux)
 }

@@ -602,7 +602,7 @@ Edit a value in `k8s/config/*.env`, run `kubectl apply -k k8s`, and Kustomize ro
 
 | Service | Address |
 | --- | --- |
-| Client-Facing API | `http://<node-ip>:30080` (`/auth/login`, `/auth/refresh`, `/v1/hazards`, `/v1/hazards/{hazard_id}`, `/v1/coastal/status`, `/v1/ops/failed-messages`, `/v1/ops/failed-messages/replay`, `/v1/field-reports`, `/v1/situation-summary`, `/health`) |
+| Client-Facing API | `http://<node-ip>:30080` (`/auth/login`, `/auth/refresh`, `/v1/hazards`, `/v1/hazards/{hazard_id}`, `/v1/coastal/status`, `/v1/ops/failed-messages`, `/v1/ops/failed-messages/replay`, `/v1/field-reports`, `/v1/situation-summary`, `/v1/analytics`, `/health`) |
 | field-intake, satellite service, ai-summarizer | Cluster-internal only: `kubectl port-forward svc/field-intake 8088`, `svc/satellite 8089`, and `svc/ai-summarizer 8090` |
 | Analytics dashboard (UI) | `http://<node-ip>:30081` |
 | Aggregator (internal read API, Audit API) | `http://<node-ip>:30083` |

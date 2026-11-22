@@ -3,7 +3,7 @@ export function BarChart({ entries, color }) {
     return <p className="empty-state">Belum ada kejadian pada rentang ini</p>;
   }
   const top = entries.slice(0, 8);
-  const max = top[0][1];
+  const max = Math.max(1, ...top.map(([, count]) => count));
   const rowH = 28;
   const height = 40 + top.length * rowH;
   const width = 360;

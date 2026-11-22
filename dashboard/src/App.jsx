@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { RANGE_MS } from './lib/constants.js';
-import { loadAllHazards, login as apiLogin } from './lib/api.js';
-import { bucketSeries, countBy } from './lib/aggregate.js';
+import { loadAnalytics, login as apiLogin } from './lib/api.js';
+import { areaEntries, buildSeries, categoryTotals, severityEntries } from './lib/aggregate.js';
 import { LoginPanel } from './components/LoginPanel.jsx';
 import { DashboardMain } from './components/DashboardMain.jsx';
 
@@ -33,21 +33,22 @@ export default function App() {
     setLoading(true);
     setBanner(null);
     try {
-      const result = await loadAllHazards(session.accessToken, activeRange, RANGE_MS[activeRange]);
-      const series = bucketSeries(result.items, activeRange, RANGE_MS[activeRange]);
+      const analytics = await loadAnalytics(session.accessToken, activeRange, RANGE_MS[activeRange]);
       setData({
-        items: result.items,
-        asOf: result.asOf,
-        truncated: result.truncated,
-        series,
-        bySeverity: countBy(result.items, 'severity'),
-        byArea: countBy(result.items, 'area_name'),
+        asOf: analytics.as_of,
+        total: analytics.total,
+        partial: analytics.partial,
+        unavailableUnits: analytics.unavailable_units,
+        series: buildSeries(analytics),
+        byCategory: categoryTotals(analytics),
+        bySeverity: severityEntries(analytics.severity),
+        byArea: areaEntries(analytics.areas),
       });
-      if (result.truncated) {
+      if (analytics.partial) {
         setBanner({
           kind: 'warn',
           title: 'Data belum lengkap',
-          text: 'Hanya sebagian halaman yang dimuat. Setelah API agregasi Aggregator (A1-08) tersedia, rentang panjang akan lebih akurat.',
+          text: `Unit penyimpanan tidak terjangkau: ${analytics.unavailable_units.join(', ')}. Semua angka di bawah hanya mencakup unit yang tersedia.`,
         });
       }
     } catch (err) {
@@ -113,7 +114,7 @@ export default function App() {
       <footer className="site-footer">
         <div>
           <h3>Dokumentasi</h3>
-          <p>Data bersumber dari Client-Facing API (GET /v1/hazards). UI React + Vite.</p>
+          <p>Data bersumber dari Client-Facing API (GET /v1/analytics dan GET /v1/situation-summary). UI React + Vite.</p>
         </div>
         <div>
           <p>IF4031 — Arsitektur Aplikasi Terdistribusi</p>

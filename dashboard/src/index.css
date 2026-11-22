@@ -419,3 +419,14 @@ table.data-table th {
 .summary-skeleton {
   height: 72px;
 }
+
+.partial-marker {
+  margin: 0 0 12px;
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--warn);
+  background: var(--warn-tint);
+  border: 0.8px solid var(--warn);
+  border-radius: var(--radius-tab);
+}

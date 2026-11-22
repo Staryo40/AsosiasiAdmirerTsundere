@@ -163,6 +163,7 @@ Platform-wide conventions apply to every service below (see [Shared platform beh
 | `POST /v1/ops/failed-messages/replay` | Bearer token, `ops` role | Process parked records again |
 | `POST /v1/field-reports` | Bearer token, `field` role | Submit a field report; `202` once durably queued |
 | `GET /v1/situation-summary` | Bearer token | Latest AI situation summary, or `503` |
+| `GET /v1/analytics` | Bearer token | Aggregate counts for the dashboard, marked `partial` when a storage unit is unreachable |
 | `GET /health` / `GET /ready` | none | Liveness / dependency readiness |
 
 **`POST /auth/login`** — body `{"client_id":"...","client_secret":"..."}`, both required non-empty. Forwards to Auth's `/internal/auth/login`. Success `200`: `{"access_token","token_type":"Bearer","expires_in","refresh_token","refresh_expires_in"}`, with `Cache-Control: no-store`. Request body capped at 16 KiB; unknown or trailing JSON fields are rejected.
@@ -204,6 +205,8 @@ curl -s -X POST -H "Authorization: Bearer $OPS_TOKEN" -H 'Content-Type: applicat
 `report_id` is 1–128 of `[A-Za-z0-9._-]` and is the idempotency key, scoped to the sending client. `reported_at` is RFC 3339 and not in the future. `hazard_type` is `SEISMIC`, `VOLCANIC`, `WILDFIRE`, `COASTAL` or `OTHER`. `description` is 1–2000 characters, and `related_hazard_id` is optional. The API publishes the report as a persistent message to the `field.reports` quorum queue and answers `202 {"report_id","accepted_at"}` only after RabbitMQ confirms it. If the broker is unreachable or does not confirm within 2 seconds, the answer is `503 intake_unavailable` with `Retry-After`, and nothing is promised; retry with the same `report_id`. A retry of a report that was in fact queued is stored once (see [Field intake](#field-intake-internal-8088)).
 
 **`GET /v1/situation-summary`** — every role. Forwards the latest summary from `ai-summarizer` unchanged: `{"summary","provider","model","ai_generated","generated_at","age_seconds","event_count","window_minutes","fault","last_attempts"}`. `provider` is `anthropic`, `openrouter`, `gemini`, or `template`. The API waits at most 2 seconds. A missing key, no summary yet, an unreachable summarizer, or an invalid body all become `503 dependency_unavailable`, so the summary can never hold up an API worker.
+
+**`GET /v1/analytics`** — every role, since the answer holds only counts. Accepts exactly `from`, `to` and optional `bucket` (`hour`, `day`, `week`); anything else is `400 invalid_query` before the Aggregator is called. Forwards to the Aggregator's `GET /internal/analytics` with the internal key, which stays on the server. A `200`, a `400` (for example a range over 366 days) or a `429` (one analytics query per Aggregator instance at a time) is passed through; anything else becomes `503 dependency_unavailable`. The body has `total`, `series` (`{start,category,count}` for `EARTHQUAKE`, `TSUNAMI`, `VOLCANIC`, `WILDFIRE`, `COASTAL`), `severity`, `areas`, `partial`, and `unavailable_units`. When `partial` is `true`, every number covers only the reachable units, and the dashboard marks every card.
 
 **Response shapes** — `view=full` passes the Aggregator's record through after re-validating it:
 ```json
