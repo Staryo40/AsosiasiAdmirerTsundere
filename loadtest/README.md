@@ -5,7 +5,7 @@ Run k6 on the host or any machine that can reach the API NodePort (default `192.
 ```powershell
 k6 run loadtest/k6-api-sustained.js
 k6 run loadtest/k6-api-10k.js
-k6 run loadtest/k6-media-shed.js
+k6 run loadtest/k6-media-shed.js   # per-role metrics field_ok, media_shed; driven by testing/M2-P5/T17-media-shedding
 k6 run loadtest/k6-api-ramp.js     # autoscaling bonus: PEAK_VUS, RAMP_UP, HOLD, RAMP_DOWN, IDLE
 ```
 

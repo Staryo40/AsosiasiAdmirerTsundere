@@ -1,5 +1,12 @@
 import http from "k6/http";
 import { check } from "k6";
+import { Rate, Trend } from "k6/metrics";
+
+// Per-role results, read by testing/M2-P5/T17-media-shedding.
+const fieldOk = new Rate("field_ok");
+const fieldLatency = new Trend("field_latency", true);
+const mediaShed = new Rate("media_shed");
+const mediaUnexpected = new Rate("media_unexpected");
 
 const base = __ENV.API_BASE || "http://192.168.56.10:30080";
 
@@ -32,4 +39,8 @@ export default function (data) {
   });
   check(mediaRes, { "media may shed 429": (r) => r.status === 200 || r.status === 429 });
   check(fieldRes, { "field stays 200": (r) => r.status === 200 });
+  fieldOk.add(fieldRes.status === 200);
+  fieldLatency.add(fieldRes.timings.duration);
+  mediaShed.add(mediaRes.status === 429);
+  mediaUnexpected.add(mediaRes.status !== 200 && mediaRes.status !== 429);
 }

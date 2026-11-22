@@ -57,7 +57,7 @@ Simplified file layout:
 │   └── secrets.env.example # Secret keys (fill secrets.env locally; not tracked)
 ├── testing/                # acceptance suites (Python), per Problem
 │   ├── P01/ P02/ P03/ P04/ P05/
-│   ├── M2-P2/ M2-P3/ M2-P4/ # Milestone 2: one poller, failed messages, field reports, Feed Satelit
+│   ├── M2-P2/ … M2-P5/     # Milestone 2: one poller, failed messages, field reports, Feed Satelit, Sensor Pantai
 │   ├── M2-bonus/           # Milestone 2 bonus: autoscaling, AI isolation
 │   └── common/             # shared test helpers
 ├── docs/m2_architecture.svg   # M2 diagram used above (docs/m1_architecture.svg: M1 report)
@@ -1139,6 +1139,51 @@ offset, no `offset_gap` is reported, the offset moves forward again, and
 ```text
 python testing/M2-P4/T09-reconnect/run.py
 ```
+
+### Problem 5: Sensor Pantai
+
+These run on Kubernetes only. T16 also needs the sensor itself:
+`kubectl -n sistem-informasi-kebencanaan-bnpb port-forward svc/sensor-pantai 18080:8080`
+(override with `PANTAI_BASE`); it reads the sensor token from Secret `pantai-token`.
+
+**T15, sensor outage.** One minute of normal running, then Sensor Pantai is
+scaled to 0 for 3 minutes (`--outage`) and back to 1. Every 2 seconds the
+script times `GET /v1/coastal/status` and a BMKG read through the API, and it
+counts the Aggregator's coastal polls per phase from its logs, separating real
+attempts from those the breaker skipped. It passes when the breaker opens,
+attempts per minute during the outage do not exceed the baseline, coastal
+status answers within 1 s at p95 (`200` or a controlled `503`), BMKG keeps the
+M1 limit of p95 under 300 ms, coastal polling succeeds again after the sensor
+returns without anything in BNPB being touched, and every rejected sensor
+record carries a reason.
+
+```text
+python testing/M2-P5/T15-sensor-outage/run.py --target k8s
+```
+
+**T16, critical alerts.** Lists every observation the sensor marked
+`critical` and follows each one by `observation_id`: rejected with a reason,
+stored as an AWAS hazard and alerted by consumer-2, or lost. The sensor's clock
+runs at `PANTAI_SPEED`, so matching is by ID rather than time. It passes when
+the sensor produced critical events, none was lost or stored without an alert,
+every set-aside one has a reason, and the critical alert p95 from Prometheus is
+within 5 seconds. It also reports the alert path's remaining 24 h error budget.
+
+```text
+python testing/M2-P5/T16-critical-alerts/run.py --target k8s --window 1h
+```
+
+**T17, Media shedding.** Runs `loadtest/k6-media-shed.js` (`--vus`, default
+500), where each virtual user sends one Media and one Field Team read. It passes
+when some Media requests were refused with `429`, Media got nothing but `200` or
+`429`, and at least 99% of Field Team requests succeeded. Needs `k6` on the PATH.
+
+```text
+python testing/M2-P5/T17-media-shedding/run.py --target k8s --vus 500
+```
+
+Criteria 6 and 7 (the game day and explaining it from the dashboards) are run
+by hand; the *BNPB Streams* SLO panels and these scripts are the tools for it.
 
 ### Bonus: autoscaling
 
