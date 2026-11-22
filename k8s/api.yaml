@@ -56,7 +56,8 @@ spec:
               valueFrom:
                 secretKeyRef: {name: bnpb-secrets, key: BNPB_API_RABBITMQ_PASSWORD}
           resources:
-            requests: {memory: 128Mi}
+            # CPU request lets the HPA in k8s/autoscaling measure utilisation; no CPU limit avoids throttling.
+            requests: {memory: 128Mi, cpu: 200m}
             limits: {memory: 256Mi}
           # /ready also checks Aggregator and Auth; gating on it would pull every
           # API replica out of service whenever a dependency blips, so the API

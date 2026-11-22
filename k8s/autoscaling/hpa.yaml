@@ -1,0 +1,59 @@
+# Autoscaling mode, on top of the normal deploy:
+#   kubectl apply -k k8s && kubectl apply -f k8s/autoscaling/
+# Back to fixed replicas:
+#   kubectl -n sistem-informasi-kebencanaan-bnpb delete hpa api aggregator && kubectl apply -k k8s
+# The base keeps replicas equal to minReplicas, so switching modes never drops a pod.
+# Re-running kubectl apply -k k8s mid-load resets the count to the base value until the HPA raises it again.
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: api
+  namespace: sistem-informasi-kebencanaan-bnpb
+  labels:
+    app.kubernetes.io/part-of: bnpb
+spec:
+  scaleTargetRef: {apiVersion: apps/v1, kind: Deployment, name: api}
+  minReplicas: 2
+  maxReplicas: 5
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target: {type: Utilization, averageUtilization: 60}
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 0
+      policies:
+        - {type: Percent, value: 100, periodSeconds: 15}
+    # 60 s instead of the default 300 s so the scale-down is visible in a demo.
+    scaleDown:
+      stabilizationWindowSeconds: 60
+      policies:
+        - {type: Pods, value: 1, periodSeconds: 30}
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: aggregator
+  namespace: sistem-informasi-kebencanaan-bnpb
+  labels:
+    app.kubernetes.io/part-of: bnpb
+spec:
+  scaleTargetRef: {apiVersion: apps/v1, kind: Deployment, name: aggregator}
+  # The Aggregator must keep at least 3 instances.
+  minReplicas: 3
+  maxReplicas: 5
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target: {type: Utilization, averageUtilization: 60}
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 0
+      policies:
+        - {type: Percent, value: 100, periodSeconds: 15}
+    scaleDown:
+      stabilizationWindowSeconds: 60
+      policies:
+        - {type: Pods, value: 1, periodSeconds: 30}

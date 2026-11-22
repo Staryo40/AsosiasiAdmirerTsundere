@@ -194,6 +194,7 @@ URL dapat diganti dengan `API_BASE`, `AGGREGATOR_BASE`, `PVMBG_BASE`, `INTAKE_BA
 | T10 satu poller Aggregator (k8s) | `python testing/M2-P2/T10-single-poller/run.py --target k8s` |
 | T11 failover poller (k8s) | `python testing/M2-P2/T11-failover/run.py --target k8s` |
 | T12 term lease setelah clock skew/freeze (k8s) | `python testing/M2-P2/T12-lease-terms/run.py --target k8s --since <ISO>` |
+| T13 autoscaling, bonus (k8s, setelah `kubectl apply -f k8s/autoscaling/`) | `python testing/M2-bonus/T13-autoscaling/run.py --target k8s` |
 | T01 kebijakan skema PVMBG | `python testing/M2-P3/T01-schema-policy/run.py` |
 | T02 payload rusak | `python testing/M2-P3/T02-malformed-payloads/run.py` |
 | T03 adaptasi dan replay | `python testing/M2-P3/T03-replay/run.py park`, ubah alias dan restart Aggregator, lalu `replay` dan `verify` |

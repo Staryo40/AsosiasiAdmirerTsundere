@@ -119,6 +119,25 @@ data:
               "legendFormat": "{{service}} p99"
             }
           ]
+        },
+        {
+          "id": 4,
+          "title": "Ready replicas (api, aggregator)",
+          "type": "timeseries",
+          "gridPos": {"h": 8, "w": 24, "x": 0, "y": 17},
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "fieldConfig": {
+            "defaults": {
+              "decimals": 0,
+              "custom": {"lineInterpolation": "stepAfter"}
+            }
+          },
+          "targets": [
+            {
+              "expr": "count by (app) (up{job=\"bnpb-pods\",app=~\"api|aggregator\"} == 1)",
+              "legendFormat": "{{app}}"
+            }
+          ]
         }
       ]
     }

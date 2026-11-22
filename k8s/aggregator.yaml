@@ -122,7 +122,8 @@ spec:
               valueFrom:
                 secretKeyRef: {name: bnpb-secrets, key: BNPB_AUDIT_TOKEN}
           resources:
-            requests: {memory: 256Mi}
+            # CPU request lets the HPA in k8s/autoscaling measure utilisation; no CPU limit avoids throttling.
+            requests: {memory: 256Mi, cpu: 200m}
             limits: {memory: 512Mi}
           # /ready fails when the Canonical Store is unreachable, so the Service
           # stops routing to that replica (P2.1).

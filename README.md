@@ -34,7 +34,7 @@ Milestone 2 runs the same system on a two-node Kubernetes (k3s) cluster; see [Ru
 
 ## Program Structure
 
-![System architecture and data flow](docs/architecture.svg)
+![System architecture and data flow](docs/m2_architecture.svg)
 
 Every box above is an independent Docker container with its own Dockerfile and lifecycle. Dashed, colored regions are separate Docker networks — a service can only reach what it shares a network with. This is what keeps BMKG and PVMBG polling fully isolated from each other (a slow PVMBG can never block BMKG traffic), and what makes the Canonical Store reachable only by the Aggregator.
 
@@ -53,12 +53,14 @@ Simplified file layout:
 │   └── contracts/v1/       # OpenAPI contract + schemas
 ├── k8s/                    # Kubernetes manifests (Kustomize) for Milestone 2
 │   ├── config/             # ConfigMap sources (*.env)
+│   ├── autoscaling/        # optional HPAs for the api and aggregator (bonus)
 │   └── secrets.env.example # Secret keys (fill secrets.env locally; not tracked)
 ├── testing/                # acceptance suites (Python), per Problem
 │   ├── P01/ P02/ P03/ P04/ P05/
 │   ├── M2-P2/ M2-P3/ M2-P4/ # Milestone 2: one poller, failed messages, field reports, Feed Satelit
+│   ├── M2-bonus/           # Milestone 2 bonus: autoscaling
 │   └── common/             # shared test helpers
-├── docs/architecture.svg   # M2 diagram used above (docs/m1_architecture.svg: M1 report)
+├── docs/m2_architecture.svg   # M2 diagram used above (docs/m1_architecture.svg: M1 report)
 ├── KUBERNETES-DEPLOYMENT.md # step-by-step k3s install and deploy
 ├── paradigma-design.md     # visual paradigm for the analytics dashboard (A2-06)
 ├── configure_env.py        # cross-platform local configuration setup
@@ -596,7 +598,10 @@ All commands use the `sistem-informasi-kebencanaan-bnpb` namespace; set it once 
 | List practice scenarios | `kubectl exec -n tester-agent daemonset/tester-agent -- /app list` |
 | Run a practice scenario | `kubectl exec -n tester-agent daemonset/tester-agent -- /app run practice <scenario-name>` |
 | Read what the Tester Agent did | `kubectl logs -n tester-agent daemonset/tester-agent -f` |
-| Scale the Aggregator (for example 3 → 5 → 2) | `kubectl scale deployment aggregator --replicas=5` |
+| Scale the Aggregator (for example 3 → 5 → 2), fixed mode only | `kubectl scale deployment aggregator --replicas=5` |
+| Switch to autoscaling mode (bonus) | `kubectl apply -f k8s/autoscaling/` |
+| Switch back to fixed replicas | `kubectl delete hpa api aggregator`, then `kubectl apply -k k8s` |
+| Watch the autoscalers | `kubectl get hpa -w` |
 | Rolling update of one component | `kubectl rollout restart deployment/<name>`, then `kubectl rollout status deployment/<name>` |
 | Add consumer-3 live, without touching the producer | `kubectl scale statefulset consumer-3 --replicas=1` |
 | Kill one pod | `kubectl delete pod <pod-name>` |
@@ -1109,6 +1114,40 @@ offset, no `offset_gap` is reported, the offset moves forward again, and
 
 ```text
 python testing/M2-P4/T09-reconnect/run.py
+```
+
+### Bonus: autoscaling
+
+`kubectl apply -k k8s` deploys fixed replicas: 2 API and 3 Aggregator pods. P2's
+manual 3 → 5 → 2 scaling and T10–T12 run in this mode, since an autoscaler would
+undo a manual change within seconds. `kubectl apply -f k8s/autoscaling/` adds
+two HorizontalPodAutoscalers on top of it:
+
+| Deployment | Min | Max | Scales on |
+| --- | --- | --- | --- |
+| `api` | 2 | 5 | 60 % of its 200m CPU request |
+| `aggregator` | 3 | 5 | 60 % of its 200m CPU request |
+
+A scale-up takes effect at once, up to double the pods every 15 seconds.
+Scale-down waits for 60 seconds of low load, then removes one pod every
+30 seconds. The CPU numbers come from metrics-server, which k3s runs by default.
+Running `kubectl apply -k k8s` again while scaled up resets the counts to 2 and
+3 until the autoscalers raise them again. To leave the mode, delete the HPAs
+first, as in [Triggering the scenarios](#triggering-the-scenarios).
+The *Ready replicas* panel on the Grafana *BNPB HTTP Services* dashboard shows
+the pod counts over time.
+
+**T13, autoscaling.** If `k6` is on the PATH, the script runs
+`loadtest/k6-api-ramp.js` itself. The load ramps up for 60 s, holds for 120 s,
+ramps down, then stays idle for 180 s. The script records each HPA's pods,
+desired count and CPU every 5 seconds. It passes when one of them scales
+above its minimum during the load, both return to their minimum afterwards,
+the Aggregator never has fewer than 3 Ready pods, and k6's error rate stays
+under 1 %. Without `k6`, run the ramp by hand on another machine. The script
+then only records, for `--minutes`, and skips the error-rate check.
+
+```text
+python testing/M2-bonus/T13-autoscaling/run.py --target k8s --peak-vus 2000
 ```
 
 ## Endpoints
