@@ -58,7 +58,7 @@ Simplified file layout:
 │   ├── P01/ P02/ P03/ P04/ P05/
 │   ├── M2-P2/ M2-P3/ M2-P4/ # Milestone 2: one poller, failed messages, field reports, Feed Satelit
 │   └── common/             # shared test helpers
-├── docs/architecture.svg   # diagram used above
+├── docs/architecture.svg   # M2 diagram used above (docs/m1_architecture.svg: M1 report)
 ├── KUBERNETES-DEPLOYMENT.md # step-by-step k3s install and deploy
 ├── paradigma-design.md     # visual paradigm for the analytics dashboard (A2-06)
 ├── configure_env.py        # cross-platform local configuration setup
