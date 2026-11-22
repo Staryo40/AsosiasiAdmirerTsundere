@@ -387,3 +387,35 @@ table.data-table th {
   font-size: 14px;
   padding: 40px 12px;
 }
+.summary-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.summary-badge {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--primary);
+  background: var(--primary-tint);
+  border: 0.8px solid var(--primary);
+  border-radius: 9999px;
+  padding: 2px 10px;
+}
+
+.summary-badge.is-template {
+  color: var(--warn);
+  background: var(--warn-tint);
+  border-color: var(--warn);
+}
+
+.summary-text {
+  margin: 8px 0 12px;
+  line-height: 1.6;
+  white-space: pre-line;
+}
+
+.summary-skeleton {
+  height: 72px;
+}

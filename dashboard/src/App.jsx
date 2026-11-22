@@ -99,6 +99,7 @@ export default function App() {
       {session ? (
         <DashboardMain
           clientId={session.clientId}
+          accessToken={session.accessToken}
           activeRange={activeRange}
           onRangeChange={setActiveRange}
           onRefresh={refresh}

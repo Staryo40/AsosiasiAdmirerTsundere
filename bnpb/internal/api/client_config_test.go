@@ -48,3 +48,19 @@ func TestClientConfigRejectsUnsafeValues(t *testing.T) {
 		})
 	}
 }
+
+func TestClientConfigSummarizerKeyIsOptionalButChecked(t *testing.T) {
+	config, err := loadClientConfigFrom(clientLookup(clientEnvironment()))
+	if err != nil || config.summarizerKey != "" || config.summarizerBaseURL.String() != defaultSummarizerBaseURL {
+		t.Fatalf("without a key: config %+v, err %v", config.summarizerBaseURL, err)
+	}
+	values := clientEnvironment()
+	values["BNPB_AI_SUMMARIZER_INTERNAL_KEY"] = "short"
+	if _, err := loadClientConfigFrom(clientLookup(values)); err == nil {
+		t.Fatal("accepted a short summarizer key")
+	}
+	values["BNPB_AI_SUMMARIZER_INTERNAL_KEY"] = strings.Repeat("s", 32)
+	if config, err = loadClientConfigFrom(clientLookup(values)); err != nil || config.summarizerKey == "" {
+		t.Fatalf("with a key: err %v", err)
+	}
+}

@@ -59,3 +59,15 @@ export async function loadAllHazards(accessToken, rangeKey, rangeMs) {
 
   return { items, asOf, truncated: pages >= maxPages && !!cursor, rangeKey };
 }
+// The summary is optional: any failure returns null and the panel says it is unavailable.
+export async function loadSituationSummary(accessToken) {
+  try {
+    const response = await fetch('/v1/situation-summary', {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    if (!response.ok) return null;
+    return await response.json();
+  } catch {
+    return null;
+  }
+}

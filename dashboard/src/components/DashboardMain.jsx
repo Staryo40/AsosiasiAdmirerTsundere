@@ -3,9 +3,11 @@ import { RANGE_LABEL, RANGE_OPTIONS } from '../lib/constants.js';
 import { Banner } from './Banner.jsx';
 import { LineChart, SeriesTable } from './LineChart.jsx';
 import { BarChart } from './BarChart.jsx';
+import { SummaryCard } from './SummaryCard.jsx';
 
 export function DashboardMain({
   clientId,
+  accessToken,
   activeRange,
   onRangeChange,
   onRefresh,
@@ -50,6 +52,8 @@ export function DashboardMain({
       </div>
 
       <Banner banner={banner} />
+
+      <SummaryCard accessToken={accessToken} />
 
       <section className="card stats-card" aria-labelledby="stats-title">
         <h2 id="stats-title">Jumlah kejadian</h2>
